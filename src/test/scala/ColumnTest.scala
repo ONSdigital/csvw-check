@@ -40,7 +40,7 @@ class ColumnTest extends FunSuite {
     assert(column.textDirection === "inherit")
     assert(column.annotations === Map[String, JsonNode]())
     assert(!column.virtual)
-    assert(column.columnOrdinal == 1)
+    assert(column.columnOrdinal == 100)
     assert(!column.ordered)
     assert(!column.required)
     assert(!column.suppressOutput)
