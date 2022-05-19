@@ -302,7 +302,7 @@ case class LdmlNumberFormatParser(
       if (isFractionalPart) "fractional" else "integer"
 
     val greedyDigitAndGroupingMatcher: Parser[String] =
-      s"$digitAndGroupingMatcherRegex{$minimumDigits,}".r | failure(
+      s"$digitAndGroupingMatcherRegex{" + minimumDigits.toString + ",}".r | failure(
         s"Expected a minimum of $minimumDigits $numberPartDescription digits."
       )
 
@@ -439,8 +439,8 @@ case class LdmlNumberFormatParser(
       primaryGroupSize: Int,
       isInFractionalPart: Boolean
   ): Parser[String] = {
-    val primaryGroupMatch = s"[0-9]{$primaryGroupSize}".r
-    val partialGroupMatch = s"[0-9]{1,$primaryGroupSize}".r
+    val primaryGroupMatch = (s"[0-9]{" + primaryGroupSize.toString + "}").r
+    val partialGroupMatch = (s"[0-9]{1," + primaryGroupSize.toString + "}").r
 
     val groupsParser = if (isInFractionalPart) {
       // Fractional part
@@ -475,7 +475,7 @@ case class LdmlNumberFormatParser(
     }
 
     // Support numbers which don't have enough digits to show a single group.
-    groupsParser | s"[0-9]{0,$primaryGroupSize}".r
+    groupsParser | (s"[0-9]{0," + primaryGroupSize.toString + "}").r
   }
 
   case class LdmlNumericParserForFormat(private val parser: Parser[BigDecimal])
