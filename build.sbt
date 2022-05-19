@@ -1,4 +1,4 @@
-name := "csvw-check"
+name := "csvwcheck"
 
 organization := "ONS"
 version := "0.1"
@@ -12,7 +12,7 @@ enablePlugins(DockerPlugin)
 dockerBaseImage := "openjdk:11"
 dockerEntrypoint := Seq("bash")
 dockerEnvVars := Map("PATH" -> "$PATH:/opt/docker/bin")
-packageName in Docker := "csvw-check"
+packageName in Docker := "csvwcheck"
 
 libraryDependencies += "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2"
 
