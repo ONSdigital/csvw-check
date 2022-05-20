@@ -1,7 +1,6 @@
 package csvwcheck.numberformatparser
 
 import csvwcheck.errors.NumberFormatError
-import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import org.scalatest.FunSuite
 
 class LdmlNumberFormatParserTest extends FunSuite {

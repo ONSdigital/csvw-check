@@ -2,75 +2,39 @@ package csvwcheck.numberformatparser
 
 import com.typesafe.scalalogging.Logger
 import csvwcheck.errors.NumberFormatError
-
-import scala.collection.mutable
-import scala.util.parsing.combinator.RegexParsers
+import csvwcheck.models.ArrayCursor
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.NumberParser
-import csvwcheck.models.ArrayCursor
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.util.parsing.combinator.RegexParsers
 
 case class LdmlNumberFormatParser(
     groupChar: Char = ',',
     decimalChar: Char = '.'
 ) extends RegexParsers {
 
+  type NumberPartParser = Parser[Option[ParsedNumberPart]]
   /**
     * Don't automatically consume/skip any whitespace characters.
     */
   override val whiteSpace = "".r
-
   val logger = Logger(this.getClass.getName)
 
   def numericDigitChars =
     Set('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '#', '@', ',')
+
   def plusSignChars = Set('+', '\uFF0B', '\u2795')
+
   def minusSignChars = Set('-')
+
   def signChars = plusSignChars.union(minusSignChars)
 
   // https://www.unicode.org/reports/tr35/tr35.html#Loose_Matching
   def quoteCharsRegEx = "[\u0027\u2018\u02BB\u02BC\u2019\u05F3]".r
+
   def signCharsRegEx = s"[${signChars.mkString}]".r
-
-  type NumberPartParser = Parser[Option[ParsedNumberPart]]
-
-  /**
-    * "Each subpattern has a prefix, a numeric part, and a suffix."
-    *  https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Number_Format_Patterns
-    *
-    * @param prefixParsers
-    * @param numericPartParser
-    * @param suffixParsers
-    */
-  case class LdmlNumericSubPattern(
-      prefixParsers: Array[NumberPartParser],
-      numericPartParsers: Array[NumberPartParser],
-      suffixParsers: Array[NumberPartParser]
-  ) {
-
-    /**
-      * Accumulate all of the existing parser up together into a parser which returns a list of results.
-      * @return
-      */
-    def toParser(): Parser[Array[ParsedNumberPart]] = {
-      val Array(firstParser, remainingParsers @ _*) =
-        Array.concat(prefixParsers, numericPartParsers, suffixParsers)
-
-      type ParserAccumulator = Parser[ArrayBuffer[ParsedNumberPart]]
-
-      remainingParsers.foldLeft[ParserAccumulator](
-        firstParser ^^ (_.map(ArrayBuffer(_)).getOrElse(ArrayBuffer.empty))
-      )((accumulatedParsers, nextNumberPartParser) =>
-        accumulatedParsers ~ nextNumberPartParser ^^ {
-          case accumulatedNumberParts ~ Some(nextNumberPart) =>
-            accumulatedNumberParts.append(nextNumberPart)
-            accumulatedNumberParts
-          case accumulatedNumberParts ~ None => accumulatedNumberParts
-        }
-      ) ^^ (accumulatedNumberParts => accumulatedNumberParts.toArray)
-    }
-  }
 
   def parseQuote(
       format: ArrayCursor[Char]
@@ -132,75 +96,6 @@ case class LdmlNumberFormatParser(
     }
 
     parserParts
-  }
-
-  private def extractExponentPartParser(
-      format: ArrayCursor[Char]
-  ): Parser[Some[ExponentPart]] = {
-    val signPartParser: Parser[SignPart] =
-      s"[${plusSignChars.mkString}]".r ^^^ SignPart(true) |
-        s"[${minusSignChars.mkString}]".r ^^^ SignPart(false)
-
-    val exponentWithSignParser: Parser[SignPart] = {
-      if (signChars.contains(format.peekNext())) {
-        format.next()
-        // Format requires a sign to be present.
-        "E" ~ (signPartParser | failure(
-          "Expected explicit sign character [+-] missing"
-        )) ^^ { case _ ~ s => s }
-      } else {
-        "E" ~ opt(signPartParser) ^^ {
-          // Sign is optional and positive by default
-          case _ ~ s => s.getOrElse(SignPart(true))
-        }
-      }
-    }
-
-    val exponentDigits = parseDigits(format, false) ^^ (_.get)
-
-    exponentWithSignParser ~ exponentDigits ^^ {
-      case sign ~ digits =>
-        Some(
-          ExponentPart(
-            sign.isPositive,
-            digits
-          )
-        )
-    }
-  }
-
-  private def surroundingCharsMatchExponentPattern(
-      positionInFormat: ArrayCursor[Char]
-  ): Boolean = {
-    /*
-      "The exponent character can only be interpreted as such if it occurs after at least one digit, and if it is
-       followed by at least one digit, with only an optional sign in between. A regular expression may be helpful here."
-      https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Parsing_Numbers
-     */
-    if (!(positionInFormat.hasPrevious() && positionInFormat.hasNext()))
-      return false
-
-    val previousIsDigit =
-      numericDigitChars.contains(positionInFormat.peekPrevious())
-
-    if (!previousIsDigit)
-      return false
-
-    val nextIsDigit =
-      numericDigitChars.contains(positionInFormat.peekNext())
-
-    if (nextIsDigit)
-      return true
-    /*
-      "To prefix positive exponents with a localized plus sign, specify '+' between the exponent and the digits:
-       "0.###E+0" will produce formats "1E+1", "1E+0", "1E-1", and so on."
-      https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Number_Format_Patterns
-     */
-    val nextIsSignChar = signChars.contains(positionInFormat.peekNext())
-    val followingIsDigit = positionInFormat.hasValue(2) &&
-      numericDigitChars.contains(positionInFormat.peek(2))
-
-    nextIsSignChar && followingIsDigit
   }
 
   def parseDigits(
@@ -290,70 +185,6 @@ case class LdmlNumberFormatParser(
     )
   }
 
-  private def getParserForDigitsInGroupings(
-      isFractionalPart: Boolean,
-      minimumDigits: Int,
-      maximumDigits: Int,
-      firstGroupSize: Option[Int],
-      secondGroupSize: Option[Int],
-      digitAndGroupingMatcherRegex: String
-  ): Parser[String] = {
-    val numberPartDescription =
-      if (isFractionalPart) "fractional" else "integer"
-
-    val greedyDigitAndGroupingMatcher: Parser[String] =
-      (s"$digitAndGroupingMatcherRegex{" + minimumDigits.toString + ",}").r | failure(
-        s"Expected a minimum of $minimumDigits $numberPartDescription digits."
-      )
-
-    def ensureCorrectNumDigits(
-        input: String
-    ): String = {
-      (isFractionalPart, input.length) match {
-        case (_, l) if l < minimumDigits =>
-          throw NumberFormatError(
-            s"Expected a minimum of $minimumDigits $numberPartDescription digits."
-          )
-
-        /*
-        "The number of # placeholder characters before the decimal do not matter, since no limit is placed on the maximum number of digits"
-        https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Number_Patterns
-         */
-        case (true, l) if l > maximumDigits =>
-          throw NumberFormatError(
-            s"Expected a maximum of $maximumDigits $numberPartDescription digits."
-          )
-        case _ => input
-      }
-
-    }
-
-    Parser { p =>
-      greedyDigitAndGroupingMatcher(p) match {
-        case Success(digitAndGroupChars, currentPosition) =>
-          try {
-            parseAll(
-              enforceGroupsRemoveGroupCharsParser(
-                firstGroupSize,
-                secondGroupSize,
-                isFractionalPart
-              ) ^^ ensureCorrectNumDigits,
-              digitAndGroupChars
-            ) match {
-              case Success(digitsWithoutGroupingChar, _) =>
-                Success(digitsWithoutGroupingChar, currentPosition)
-              case Failure(err, _) => Failure(err, currentPosition)
-            }
-          } catch {
-            case e: Throwable =>
-              logger.debug(e)
-              Failure(e.getMessage, currentPosition)
-          }
-        case failure @ Failure(_, _) => failure
-      }
-    }
-  }
-
   /**
     * Enforces that the primary/secondary group characters must be correctly used within a number.
     *
@@ -393,129 +224,8 @@ case class LdmlNumberFormatParser(
     groupingParser.getOrElse("[0-9]*".r)
   }
 
-  private def getGroupsParserForPrimarySecondaryGrouping(
-      primaryGroupSize: Int,
-      secondaryGroupSize: Int,
-      isInFractionalPart: Boolean
-  ): Parser[String] = {
-    val groupsParser = if (isInFractionalPart) {
-      // Fractional part
-      // Given a primary group size of 3 and a secondary grouping size of 2, this matches things like:
-      // 0.000,(00,)*(0)?
-      // 0.###,(##,)*(#)?
-      ("[0-9]{" + primaryGroupSize.toString + "}").r ~
-        rep(groupChar ~> (s"[0-9]{" + secondaryGroupSize.toString + "}").r) ~
-        opt(groupChar ~> (s"[0-9]{1," + secondaryGroupSize.toString + "}").r) ^^ {
-        case primaryGroup ~ secondaryGroups ~ last =>
-          (
-            List(primaryGroup)
-              ++ secondaryGroups
-              :+ last.getOrElse("")
-          ).mkString("")
-      }
-    } else {
-      // Integer part
-      // Given a primary group size of 3 and a secondary grouping size of 2, this matches things like:
-      // (0,)?(00,)*,000.0
-      // (#,)?(##,)*,###.0
-      opt((s"[0-9]{1," + secondaryGroupSize.toString + "}").r <~ groupChar) ~
-        rep((s"[0-9]{" + secondaryGroupSize.toString + "}").r <~ groupChar) ~
-        (s"[0-9]{" + primaryGroupSize.toString + "}").r ^^ {
-        case first ~ secondaryGroups ~ primaryGroup =>
-          (
-            List(first.getOrElse(""))
-              ++ secondaryGroups
-              :+ primaryGroup
-          ).mkString("")
-      }
-
-    }
-
-    // Support numbers which don't have enough digits to show a single group.
-    groupsParser | (s"[0-9]{0," + primaryGroupSize.toString + "}").r
-  }
-
-  private def getGroupsParserForPrimaryGrouping(
-      primaryGroupSize: Int,
-      isInFractionalPart: Boolean
-  ): Parser[String] = {
-    val primaryGroupMatch = (s"[0-9]{" + primaryGroupSize.toString + "}").r
-    val partialGroupMatch = (s"[0-9]{1," + primaryGroupSize.toString + "}").r
-
-    val groupsParser = if (isInFractionalPart) {
-      // Fractional part
-      // Given a primary group size of 3, this matches things like:
-      // 0.000,(000,)*(00)?
-      // #.###,(###,)*(##)?
-      primaryGroupMatch ~
-        rep(groupChar ~> primaryGroupMatch) ~
-        opt(groupChar ~> partialGroupMatch) ^^ {
-        case first ~ groups ~ last =>
-          (
-            List(first)
-              ++ groups
-              :+ last.getOrElse("")
-          ).mkString("")
-      }
-    } else {
-      // Integer part.
-      // Given a primary group size of 3, this matches things like:
-      // (00,)?(000,)*(000).0
-      // (##,)?(###,)*(###).#
-      opt(partialGroupMatch <~ groupChar) ~
-        rep(primaryGroupMatch <~ groupChar) ~
-        primaryGroupMatch ^^ {
-        case first ~ groups ~ last =>
-          (
-            List(first.getOrElse(""))
-              ++ groups
-              :+ last
-          ).mkString("")
-      }
-    }
-
-    // Support numbers which don't have enough digits to show a single group.
-    groupsParser | (s"[0-9]{0," + primaryGroupSize.toString + "}").r
-  }
-
-  case class LdmlNumericParserForFormat(private val parser: Parser[BigDecimal])
-      extends NumberParser {
-    def parse(number: String): Either[String, BigDecimal] = {
-      parseAll(parser, number) match {
-        case Success(result, _)      => Right(result)
-        case failure @ Failure(_, _) => Left(failure.toString())
-        case error @ Error(_, _)     => Left(error.toString())
-      }
-    }
-  }
-
   def getParserForFormat(format: String): LdmlNumericParserForFormat =
     LdmlNumericParserForFormat(getParser(format))
-
-  private def getParser(
-      formatIn: String
-  ): Parser[BigDecimal] = {
-    val format = ArrayCursor[Char](formatIn.toCharArray)
-    var subPatterns = Array.empty[LdmlNumericSubPattern]
-    while (format.hasNext()) {
-      subPatterns :+= extractSubPatternParsers(format)
-    }
-
-    val (
-      positivePattern: LdmlNumericSubPattern,
-      negativePattern: Option[LdmlNumericSubPattern]
-    ) = subPatterns match {
-      case Array()         => throw NumberFormatError("No pattern provided.")
-      case Array(pos)      => (pos, None)
-      case Array(pos, neg) => (pos, Some(neg))
-      case _ =>
-        throw NumberFormatError(
-          s"Found ${subPatterns.length} sub-patterns. Expected at most two (positive;negative)."
-        )
-    }
-
-    getParserForSubPatterns(positivePattern, negativePattern)
-  }
 
   def extractSubPatternParsers(
       format: ArrayCursor[Char]
@@ -599,6 +309,251 @@ case class LdmlNumberFormatParser(
     )
   }
 
+  private def extractExponentPartParser(
+      format: ArrayCursor[Char]
+  ): Parser[Some[ExponentPart]] = {
+    val signPartParser: Parser[SignPart] =
+      s"[${plusSignChars.mkString}]".r ^^^ SignPart(true) |
+        s"[${minusSignChars.mkString}]".r ^^^ SignPart(false)
+
+    val exponentWithSignParser: Parser[SignPart] = {
+      if (signChars.contains(format.peekNext())) {
+        format.next()
+        // Format requires a sign to be present.
+        "E" ~ (signPartParser | failure(
+          "Expected explicit sign character [+-] missing"
+        )) ^^ { case _ ~ s => s }
+      } else {
+        "E" ~ opt(signPartParser) ^^ {
+          // Sign is optional and positive by default
+          case _ ~ s => s.getOrElse(SignPart(true))
+        }
+      }
+    }
+
+    val exponentDigits = parseDigits(format, false) ^^ (_.get)
+
+    exponentWithSignParser ~ exponentDigits ^^ {
+      case sign ~ digits =>
+        Some(
+          ExponentPart(
+            sign.isPositive,
+            digits
+          )
+        )
+    }
+  }
+
+  private def surroundingCharsMatchExponentPattern(
+      positionInFormat: ArrayCursor[Char]
+  ): Boolean = {
+    /*
+      "The exponent character can only be interpreted as such if it occurs after at least one digit, and if it is
+       followed by at least one digit, with only an optional sign in between. A regular expression may be helpful here."
+      https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Parsing_Numbers
+     */
+    if (!(positionInFormat.hasPrevious() && positionInFormat.hasNext()))
+      return false
+
+    val previousIsDigit =
+      numericDigitChars.contains(positionInFormat.peekPrevious())
+
+    if (!previousIsDigit)
+      return false
+
+    val nextIsDigit =
+      numericDigitChars.contains(positionInFormat.peekNext())
+
+    if (nextIsDigit)
+      return true
+    /*
+      "To prefix positive exponents with a localized plus sign, specify '+' between the exponent and the digits:
+       "0.###E+0" will produce formats "1E+1", "1E+0", "1E-1", and so on."
+      https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Number_Format_Patterns
+     */
+    val nextIsSignChar = signChars.contains(positionInFormat.peekNext())
+    val followingIsDigit = positionInFormat.hasValue(2) &&
+      numericDigitChars.contains(positionInFormat.peek(2))
+
+    nextIsSignChar && followingIsDigit
+  }
+
+  private def getParserForDigitsInGroupings(
+      isFractionalPart: Boolean,
+      minimumDigits: Int,
+      maximumDigits: Int,
+      firstGroupSize: Option[Int],
+      secondGroupSize: Option[Int],
+      digitAndGroupingMatcherRegex: String
+  ): Parser[String] = {
+    val numberPartDescription =
+      if (isFractionalPart) "fractional" else "integer"
+
+    val greedyDigitAndGroupingMatcher: Parser[String] =
+      (s"$digitAndGroupingMatcherRegex{" + minimumDigits.toString + ",}").r | failure(
+        s"Expected a minimum of $minimumDigits $numberPartDescription digits."
+      )
+
+    def ensureCorrectNumDigits(
+        input: String
+    ): String = {
+      (isFractionalPart, input.length) match {
+        case (_, l) if l < minimumDigits =>
+          throw NumberFormatError(
+            s"Expected a minimum of $minimumDigits $numberPartDescription digits."
+          )
+
+        /*
+        "The number of # placeholder characters before the decimal do not matter, since no limit is placed on the maximum number of digits"
+        https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Number_Patterns
+         */
+        case (true, l) if l > maximumDigits =>
+          throw NumberFormatError(
+            s"Expected a maximum of $maximumDigits $numberPartDescription digits."
+          )
+        case _ => input
+      }
+
+    }
+
+    Parser { p =>
+      greedyDigitAndGroupingMatcher(p) match {
+        case Success(digitAndGroupChars, currentPosition) =>
+          try {
+            parseAll(
+              enforceGroupsRemoveGroupCharsParser(
+                firstGroupSize,
+                secondGroupSize,
+                isFractionalPart
+              ) ^^ ensureCorrectNumDigits,
+              digitAndGroupChars
+            ) match {
+              case Success(digitsWithoutGroupingChar, _) =>
+                Success(digitsWithoutGroupingChar, currentPosition)
+              case Failure(err, _) => Failure(err, currentPosition)
+            }
+          } catch {
+            case e: Throwable =>
+              logger.debug(e)
+              Failure(e.getMessage, currentPosition)
+          }
+        case failure @ Failure(_, _) => failure
+      }
+    }
+  }
+
+  private def getGroupsParserForPrimarySecondaryGrouping(
+      primaryGroupSize: Int,
+      secondaryGroupSize: Int,
+      isInFractionalPart: Boolean
+  ): Parser[String] = {
+    val groupsParser = if (isInFractionalPart) {
+      // Fractional part
+      // Given a primary group size of 3 and a secondary grouping size of 2, this matches things like:
+      // 0.000,(00,)*(0)?
+      // 0.###,(##,)*(#)?
+      ("[0-9]{" + primaryGroupSize.toString + "}").r ~
+        rep(groupChar ~> (s"[0-9]{" + secondaryGroupSize.toString + "}").r) ~
+        opt(
+          groupChar ~> (s"[0-9]{1," + secondaryGroupSize.toString + "}").r
+        ) ^^ {
+        case primaryGroup ~ secondaryGroups ~ last =>
+          (
+            List(primaryGroup)
+              ++ secondaryGroups
+              :+ last.getOrElse("")
+          ).mkString("")
+      }
+    } else {
+      // Integer part
+      // Given a primary group size of 3 and a secondary grouping size of 2, this matches things like:
+      // (0,)?(00,)*,000.0
+      // (#,)?(##,)*,###.0
+      opt((s"[0-9]{1," + secondaryGroupSize.toString + "}").r <~ groupChar) ~
+        rep((s"[0-9]{" + secondaryGroupSize.toString + "}").r <~ groupChar) ~
+        (s"[0-9]{" + primaryGroupSize.toString + "}").r ^^ {
+        case first ~ secondaryGroups ~ primaryGroup =>
+          (
+            List(first.getOrElse(""))
+              ++ secondaryGroups
+              :+ primaryGroup
+          ).mkString("")
+      }
+
+    }
+
+    // Support numbers which don't have enough digits to show a single group.
+    groupsParser | (s"[0-9]{0," + primaryGroupSize.toString + "}").r
+  }
+
+  private def getGroupsParserForPrimaryGrouping(
+      primaryGroupSize: Int,
+      isInFractionalPart: Boolean
+  ): Parser[String] = {
+    val primaryGroupMatch = (s"[0-9]{" + primaryGroupSize.toString + "}").r
+    val partialGroupMatch = (s"[0-9]{1," + primaryGroupSize.toString + "}").r
+
+    val groupsParser = if (isInFractionalPart) {
+      // Fractional part
+      // Given a primary group size of 3, this matches things like:
+      // 0.000,(000,)*(00)?
+      // #.###,(###,)*(##)?
+      primaryGroupMatch ~
+        rep(groupChar ~> primaryGroupMatch) ~
+        opt(groupChar ~> partialGroupMatch) ^^ {
+        case first ~ groups ~ last =>
+          (
+            List(first)
+              ++ groups
+              :+ last.getOrElse("")
+          ).mkString("")
+      }
+    } else {
+      // Integer part.
+      // Given a primary group size of 3, this matches things like:
+      // (00,)?(000,)*(000).0
+      // (##,)?(###,)*(###).#
+      opt(partialGroupMatch <~ groupChar) ~
+        rep(primaryGroupMatch <~ groupChar) ~
+        primaryGroupMatch ^^ {
+        case first ~ groups ~ last =>
+          (
+            List(first.getOrElse(""))
+              ++ groups
+              :+ last
+          ).mkString("")
+      }
+    }
+
+    // Support numbers which don't have enough digits to show a single group.
+    groupsParser | (s"[0-9]{0," + primaryGroupSize.toString + "}").r
+  }
+
+  private def getParser(
+      formatIn: String
+  ): Parser[BigDecimal] = {
+    val format = ArrayCursor[Char](formatIn.toCharArray)
+    var subPatterns = Array.empty[LdmlNumericSubPattern]
+    while (format.hasNext()) {
+      subPatterns :+= extractSubPatternParsers(format)
+    }
+
+    val (
+      positivePattern: LdmlNumericSubPattern,
+      negativePattern: Option[LdmlNumericSubPattern]
+    ) = subPatterns match {
+      case Array()         => throw NumberFormatError("No pattern provided.")
+      case Array(pos)      => (pos, None)
+      case Array(pos, neg) => (pos, Some(neg))
+      case _ =>
+        throw NumberFormatError(
+          s"Found ${subPatterns.length} sub-patterns. Expected at most two (positive;negative)."
+        )
+    }
+
+    getParserForSubPatterns(positivePattern, negativePattern)
+  }
+
   private def getParserForSubPatterns(
       positivePattern: LdmlNumericSubPattern,
       negativePattern: Option[LdmlNumericSubPattern]
@@ -651,5 +606,53 @@ case class LdmlNumberFormatParser(
       }
     }
     parsedNumber
+  }
+
+  /**
+    * "Each subpattern has a prefix, a numeric part, and a suffix."
+    *  https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Number_Format_Patterns
+    *
+    * @param prefixParsers
+    * @param numericPartParser
+    * @param suffixParsers
+    */
+  case class LdmlNumericSubPattern(
+      prefixParsers: Array[NumberPartParser],
+      numericPartParsers: Array[NumberPartParser],
+      suffixParsers: Array[NumberPartParser]
+  ) {
+
+    /**
+      * Accumulate all of the existing parser up together into a parser which returns a list of results.
+      * @return
+      */
+    def toParser(): Parser[Array[ParsedNumberPart]] = {
+      val Array(firstParser, remainingParsers @ _*) =
+        Array.concat(prefixParsers, numericPartParsers, suffixParsers)
+
+      type ParserAccumulator = Parser[ArrayBuffer[ParsedNumberPart]]
+
+      remainingParsers.foldLeft[ParserAccumulator](
+        firstParser ^^ (_.map(ArrayBuffer(_)).getOrElse(ArrayBuffer.empty))
+      )((accumulatedParsers, nextNumberPartParser) =>
+        accumulatedParsers ~ nextNumberPartParser ^^ {
+          case accumulatedNumberParts ~ Some(nextNumberPart) =>
+            accumulatedNumberParts.append(nextNumberPart)
+            accumulatedNumberParts
+          case accumulatedNumberParts ~ None => accumulatedNumberParts
+        }
+      ) ^^ (accumulatedNumberParts => accumulatedNumberParts.toArray)
+    }
+  }
+
+  case class LdmlNumericParserForFormat(private val parser: Parser[BigDecimal])
+      extends NumberParser {
+    def parse(number: String): Either[String, BigDecimal] = {
+      parseAll(parser, number) match {
+        case Success(result, _)      => Right(result)
+        case failure @ Failure(_, _) => Left(failure.toString())
+        case error @ Error(_, _)     => Left(error.toString())
+      }
+    }
   }
 }

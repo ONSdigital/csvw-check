@@ -8,8 +8,8 @@ import csvwcheck.errors.{ErrorWithCsvContext, ErrorWithoutContext, MetadataError
 import csvwcheck.helpers.MapHelpers
 import csvwcheck.models.Column.{rdfSyntaxNs, unsignedLongMaxValue, validDoubleDatatypeRegex, xmlSchema}
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
-import csvwcheck.traits.NumberParser
 import csvwcheck.traits.LoggerExtensions.LogDebugException
+import csvwcheck.traits.NumberParser
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import csvwcheck.{PropertyChecker, models}
 import org.joda.time.{DateTime, DateTimeZone}
@@ -49,6 +49,88 @@ object Column {
     """-?P([0-9]+Y([0-9]+M)?|([0-9]+M))""".r
 
   val unsignedLongMaxValue: BigInt = BigInt("18446744073709551615")
+
+  def fromJson(
+      columnOrdinal: Int,
+      columnDesc: ObjectNode,
+      baseUrl: String,
+      lang: String,
+      inheritedProperties: Map[String, JsonNode]
+  ): (Column, Array[ErrorWithoutContext]) = {
+
+    val inheritedPropertiesCopy =
+      MapHelpers.deepCloneJsonPropertiesMap(inheritedProperties)
+
+    val (annotations, columnProperties, warnings) =
+      partitionAndValidateColumnPropertiesByType(
+        columnDesc,
+        columnOrdinal,
+        baseUrl,
+        lang,
+        inheritedPropertiesCopy
+      )
+    val datatype = getDatatypeOrDefault(inheritedPropertiesCopy)
+    val minLength: Option[Int] =
+      if (datatype.path("minLength").isMissingNode) None
+      else Some(datatype.get("minLength").asText().toInt)
+    val maxLength: Option[Int] =
+      if (datatype.path("maxLength").isMissingNode) None
+      else Some(datatype.get("maxLength").asText().toInt)
+    val length: Option[Int] =
+      if (datatype.path("length").isMissingNode) None
+      else Some(datatype.get("length").asText().toInt)
+
+    val minInclusive: Option[String] =
+      if (datatype.path("minInclusive").isMissingNode) None
+      else Some(datatype.get("minInclusive").asText)
+    val maxInclusive: Option[String] =
+      if (datatype.path("maxInclusive").isMissingNode) None
+      else Some(datatype.get("maxInclusive").asText)
+    val minExclusive: Option[String] =
+      if (datatype.path("minExclusive").isMissingNode) None
+      else Some(datatype.get("minExclusive").asText)
+    val maxExclusive: Option[String] =
+      if (datatype.path("maxExclusive").isMissingNode) None
+      else Some(datatype.get("maxExclusive").asText)
+
+    val newLang = getLangOrDefault(inheritedPropertiesCopy)
+
+    val name = getName(columnProperties, lang)
+    val formatNode = datatype.path("format")
+
+    val titles = columnProperties.get("titles")
+
+    val column = new Column(
+      columnOrdinal = columnOrdinal,
+      name = name,
+      id = getId(columnProperties),
+      minLength = minLength,
+      maxLength = maxLength,
+      length = length,
+      minInclusive = minInclusive,
+      maxInclusive = maxInclusive,
+      minExclusive = minExclusive,
+      maxExclusive = maxExclusive,
+      baseDataType = getBaseDataType(datatype),
+      lang = newLang,
+      nullParam = getNullParam(inheritedPropertiesCopy),
+      default = getDefault(inheritedPropertiesCopy),
+      required = getRequired(inheritedPropertiesCopy),
+      aboutUrl = getAboutUrl(inheritedPropertiesCopy),
+      propertyUrl = getPropertyUrl(inheritedPropertiesCopy),
+      valueUrl = getValueUrl(inheritedPropertiesCopy),
+      separator = getSeparator(inheritedPropertiesCopy),
+      ordered = getOrdered(inheritedPropertiesCopy),
+      titleValues = getTitleValues(titles),
+      suppressOutput = getSuppressOutput(columnProperties),
+      virtual = getVirtual(columnProperties),
+      format = getMaybeFormatForColumn(formatNode),
+      textDirection = getTextDirection(inheritedPropertiesCopy),
+      annotations = annotations
+    )
+
+    (column, warnings)
+  }
 
   def getOrdered(inheritedProperties: Map[String, JsonNode]): Boolean = {
     val inheritedPropertiesNode = inheritedProperties.get("ordered")
@@ -260,88 +342,6 @@ object Column {
     (annotations, columnProperties, warnings.toArray)
   }
 
-  def fromJson(
-      columnOrdinal: Int,
-      columnDesc: ObjectNode,
-      baseUrl: String,
-      lang: String,
-      inheritedProperties: Map[String, JsonNode]
-  ): (Column, Array[ErrorWithoutContext]) = {
-
-    val inheritedPropertiesCopy =
-      MapHelpers.deepCloneJsonPropertiesMap(inheritedProperties)
-
-    val (annotations, columnProperties, warnings) =
-      partitionAndValidateColumnPropertiesByType(
-        columnDesc,
-        columnOrdinal,
-        baseUrl,
-        lang,
-        inheritedPropertiesCopy
-      )
-    val datatype = getDatatypeOrDefault(inheritedPropertiesCopy)
-    val minLength: Option[Int] =
-      if (datatype.path("minLength").isMissingNode) None
-      else Some(datatype.get("minLength").asText().toInt)
-    val maxLength: Option[Int] =
-      if (datatype.path("maxLength").isMissingNode) None
-      else Some(datatype.get("maxLength").asText().toInt)
-    val length: Option[Int] =
-      if (datatype.path("length").isMissingNode) None
-      else Some(datatype.get("length").asText().toInt)
-
-    val minInclusive: Option[String] =
-      if (datatype.path("minInclusive").isMissingNode) None
-      else Some(datatype.get("minInclusive").asText)
-    val maxInclusive: Option[String] =
-      if (datatype.path("maxInclusive").isMissingNode) None
-      else Some(datatype.get("maxInclusive").asText)
-    val minExclusive: Option[String] =
-      if (datatype.path("minExclusive").isMissingNode) None
-      else Some(datatype.get("minExclusive").asText)
-    val maxExclusive: Option[String] =
-      if (datatype.path("maxExclusive").isMissingNode) None
-      else Some(datatype.get("maxExclusive").asText)
-
-    val newLang = getLangOrDefault(inheritedPropertiesCopy)
-
-    val name = getName(columnProperties, lang)
-    val formatNode = datatype.path("format")
-
-    val titles = columnProperties.get("titles")
-
-    val column = new Column(
-      columnOrdinal = columnOrdinal,
-      name = name,
-      id = getId(columnProperties),
-      minLength = minLength,
-      maxLength = maxLength,
-      length = length,
-      minInclusive = minInclusive,
-      maxInclusive = maxInclusive,
-      minExclusive = minExclusive,
-      maxExclusive = maxExclusive,
-      baseDataType = getBaseDataType(datatype),
-      lang = newLang,
-      nullParam = getNullParam(inheritedPropertiesCopy),
-      default = getDefault(inheritedPropertiesCopy),
-      required = getRequired(inheritedPropertiesCopy),
-      aboutUrl = getAboutUrl(inheritedPropertiesCopy),
-      propertyUrl = getPropertyUrl(inheritedPropertiesCopy),
-      valueUrl = getValueUrl(inheritedPropertiesCopy),
-      separator = getSeparator(inheritedPropertiesCopy),
-      ordered = getOrdered(inheritedPropertiesCopy),
-      titleValues = getTitleValues(titles),
-      suppressOutput = getSuppressOutput(columnProperties),
-      virtual = getVirtual(columnProperties),
-      format = getMaybeFormatForColumn(formatNode),
-      textDirection = getTextDirection(inheritedPropertiesCopy),
-      annotations = annotations
-    )
-
-    (column, warnings)
-  }
-
   private def getMaybeFormatForColumn(formatNode: JsonNode): Option[Format] = {
     if (formatNode.isMissingNode || formatNode.isNull) {
       None
@@ -429,7 +429,6 @@ case class Column private (
     format: Option[Format],
     annotations: Map[String, JsonNode]
 ) {
-  private val logger = Logger(this.getClass.getName)
   lazy val minInclusiveNumeric: Option[BigDecimal] =
     minInclusive.map(BigDecimal(_))
   lazy val maxInclusiveNumeric: Option[BigDecimal] =
@@ -438,24 +437,20 @@ case class Column private (
     minExclusive.map(BigDecimal(_))
   lazy val maxExclusiveNumeric: Option[BigDecimal] =
     maxExclusive.map(BigDecimal(_))
-
   lazy val minInclusiveInt: Option[BigInt] = minInclusiveNumeric.map(_.toBigInt)
   lazy val maxInclusiveInt: Option[BigInt] = maxInclusiveNumeric.map(_.toBigInt)
   lazy val minExclusiveInt: Option[BigInt] = minExclusiveNumeric.map(_.toBigInt)
   lazy val maxExclusiveInt: Option[BigInt] = maxExclusiveNumeric.map(_.toBigInt)
-
-  DateTimeZone.setDefault(DateTimeZone.UTC)
-
   lazy val minInclusiveDateTime: Option[ZonedDateTime] =
     minInclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
 
+  DateTimeZone.setDefault(DateTimeZone.UTC)
   lazy val maxInclusiveDateTime: Option[ZonedDateTime] =
     maxInclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
   lazy val minExclusiveDateTime: Option[ZonedDateTime] =
     minExclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
   lazy val maxExclusiveDateTime: Option[ZonedDateTime] =
     maxExclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
-
   lazy val numberParserForFormat: Either[String, NumberParser] =
     try {
       Right(
@@ -469,22 +464,6 @@ case class Column private (
         logger.debug(e)
         Left(e.getMessage)
     }
-
-  private def mapJodaDateTimeToZonedDateTime(jDt: DateTime) = {
-    val zoneId: ZoneId = jDt.getZone.toTimeZone.toZoneId
-    val localDateTime: LocalDateTime =
-      LocalDateTime.of(
-        jDt.getYear,
-        Month.of(jDt.getMonthOfYear),
-        jDt.getDayOfMonth,
-        jDt.getHourOfDay,
-        jDt.getMinuteOfHour,
-        jDt.getSecondOfMinute,
-        (jDt.getMillisOfSecond * 1000).toInt
-      )
-    ZonedDateTime.of(localDateTime, zoneId)
-  }
-
   val datatypeParser: Map[String, String => Either[
     ErrorWithoutContext,
     Any
@@ -535,7 +514,6 @@ case class Column private (
       s"${xmlSchema}dayTimeDuration" -> processDayTimeDuration _,
       s"${xmlSchema}yearMonthDuration" -> processYearMonthDuration _
     )
-
   val datatypeFormatValidation = Map(
     s"${rdfSyntaxNs}XMLLiteral" -> regexpValidation _,
     s"${rdfSyntaxNs}HTML" -> regexpValidation _,
@@ -581,12 +559,14 @@ case class Column private (
     s"${xmlSchema}NMTOKEN" -> regexpValidation _,
     s"${xmlSchema}time" -> noAdditionalValidation _
   )
+  private val logger = Logger(this.getClass.getName)
 
   def regexpValidation(value: String): Boolean = {
     val regExPattern = format.flatMap(f => f.pattern).get
     val regEx = regExPattern.r
     regEx.pattern.matcher(value).matches()
   }
+
   def noAdditionalValidation(value: String) = true
 
   def trimValue(
@@ -633,41 +613,6 @@ case class Column private (
     }
   }
 
-  /**
-    * In CSV-W, grouping characters can be used to group numbers in a decimal but this grouping
-    * char won't be recognised by the regular expression we use to validate decimal at a later stage.
-    * This function removes grouping character if any and replaces any custom decimal character with the default
-    * decimal character.
-    */
-  def standardisedValue(value: String): String = {
-    val lastChar = value.takeRight(1)
-    var newValue =
-      if (lastChar == "%" || lastChar == "‰")
-        value.substring(0, value.length - 1)
-      else value
-    newValue = groupChar match {
-      case Some(groupChar) =>
-        s"(?<=[0-9])$groupChar(?=[0-9])".r.replaceAllIn(newValue, "")
-      case None => newValue
-    }
-
-    newValue = decimalChar match {
-      case Some(decimalChar) =>
-        s"(?<=[0-9])$decimalChar(?=[0-9])".r.replaceAllIn(newValue, ".")
-      case None => newValue
-    }
-
-    newValue
-  }
-
-  def groupChar: Option[Char] = {
-    format.flatMap(_.groupChar)
-  }
-
-  def decimalChar: Option[Char] = {
-    format.flatMap(_.decimalChar)
-  }
-
   def processDecimalDatatype(
       value: String
   ): Either[ErrorWithoutContext, BigDecimal] = {
@@ -702,12 +647,6 @@ case class Column private (
     }
   }
 
-  /**
-    * Scala Double does not recognise INF as infinity
-    */
-  def replaceInfWithInfinity(value: String): String =
-    value.replace("INF", "Infinity")
-
   def processDoubleDatatype(
       value: String
   ): Either[ErrorWithoutContext, Double] = {
@@ -741,6 +680,12 @@ case class Column private (
     }
   }
 
+  /**
+    * Scala Double does not recognise INF as infinity
+    */
+  def replaceInfWithInfinity(value: String): String =
+    value.replace("INF", "Infinity")
+
   def processFloatDatatype(
       value: String
   ): Either[ErrorWithoutContext, Float] = {
@@ -761,56 +706,6 @@ case class Column private (
         case Left(w)            => Left(ErrorWithoutContext("invalid_float", w))
         case Right(parsedValue) => Right(parsedValue.floatValue)
       }
-    }
-  }
-
-  private def patternIsEmpty(): Boolean =
-    format
-      .flatMap(_.pattern)
-      .isEmpty
-
-  def processIntegerDatatype(
-      value: String
-  ): Either[ErrorWithoutContext, BigInteger] = {
-    if (patternIsEmpty()) {
-      val newValue = standardisedValue(value)
-      if (
-        Column.validIntegerRegex.pattern
-          .matcher(newValue)
-          .matches()
-      ) {
-        try {
-          Right(new BigInteger(newValue))
-        } catch {
-          case e: Throwable =>
-            logger.debug(e)
-            Left(ErrorWithoutContext("invalid_integer", e.getMessage))
-        }
-      } else {
-        Left(
-          ErrorWithoutContext(
-            "invalid_integer",
-            "Does not match expected integer format"
-          )
-        )
-      }
-    } else {
-      parseNumberAgainstFormat(value) match {
-        case Right(parsedValue) => convertToBigIntegerValue(parsedValue)
-        case Left(warning) =>
-          Left(ErrorWithoutContext("invalid_integer", warning))
-      }
-    }
-  }
-
-  private def convertToBigIntegerValue(
-      parsedValue: BigDecimal
-  ): Either[ErrorWithoutContext, BigInteger] = {
-    try {
-      Right(parsedValue.toBigInt.bigInteger)
-    } catch {
-      case e =>
-        Left(ErrorWithoutContext("invalid_integer", e.getMessage))
     }
   }
 
@@ -945,6 +840,54 @@ case class Column private (
     }
   }
 
+  /**
+    * In CSV-W, grouping characters can be used to group numbers in a decimal but this grouping
+    * char won't be recognised by the regular expression we use to validate decimal at a later stage.
+    * This function removes grouping character if any and replaces any custom decimal character with the default
+    * decimal character.
+    */
+  def standardisedValue(value: String): String = {
+    val lastChar = value.takeRight(1)
+    var newValue =
+      if (lastChar == "%" || lastChar == "‰")
+        value.substring(0, value.length - 1)
+      else value
+    newValue = groupChar match {
+      case Some(groupChar) =>
+        s"(?<=[0-9])$groupChar(?=[0-9])".r.replaceAllIn(newValue, "")
+      case None => newValue
+    }
+
+    newValue = decimalChar match {
+      case Some(decimalChar) =>
+        s"(?<=[0-9])$decimalChar(?=[0-9])".r.replaceAllIn(newValue, ".")
+      case None => newValue
+    }
+
+    newValue
+  }
+
+  def groupChar: Option[Char] = {
+    format.flatMap(_.groupChar)
+  }
+
+  def decimalChar: Option[Char] = {
+    format.flatMap(_.decimalChar)
+  }
+
+  private def patternIsEmpty(): Boolean =
+    format
+      .flatMap(_.pattern)
+      .isEmpty
+
+  def parseNumberAgainstFormat(
+      value: String
+  ): Either[String, BigDecimal] =
+    numberParserForFormat match {
+      case Right(numericParser) => numericParser.parse(value)
+      case Left(err)            => Left(err)
+    }
+
   def processByteDatatype(
       value: String
   ): Either[ErrorWithoutContext, Byte] = {
@@ -982,26 +925,6 @@ case class Column private (
               )
             )
           else Right(parsedValue.byteValue())
-      }
-    }
-  }
-
-  def processNonNegativeInteger(
-      value: String
-  ): Either[ErrorWithoutContext, BigInteger] = {
-    val result = processIntegerDatatype(value)
-    result match {
-      case Left(w) =>
-        Left(ErrorWithoutContext("invalid_nonNegativeInteger", w.content))
-      case Right(parsedValue) => {
-        if (parsedValue < 0) {
-          Left(
-            ErrorWithoutContext(
-              "invalid_nonNegativeInteger",
-              "Value less than 0"
-            )
-          )
-        } else Right(parsedValue)
       }
     }
   }
@@ -1086,6 +1009,71 @@ case class Column private (
     }
   }
 
+  def processNonNegativeInteger(
+      value: String
+  ): Either[ErrorWithoutContext, BigInteger] = {
+    val result = processIntegerDatatype(value)
+    result match {
+      case Left(w) =>
+        Left(ErrorWithoutContext("invalid_nonNegativeInteger", w.content))
+      case Right(parsedValue) => {
+        if (parsedValue < 0) {
+          Left(
+            ErrorWithoutContext(
+              "invalid_nonNegativeInteger",
+              "Value less than 0"
+            )
+          )
+        } else Right(parsedValue)
+      }
+    }
+  }
+
+  def processIntegerDatatype(
+      value: String
+  ): Either[ErrorWithoutContext, BigInteger] = {
+    if (patternIsEmpty()) {
+      val newValue = standardisedValue(value)
+      if (
+        Column.validIntegerRegex.pattern
+          .matcher(newValue)
+          .matches()
+      ) {
+        try {
+          Right(new BigInteger(newValue))
+        } catch {
+          case e: Throwable =>
+            logger.debug(e)
+            Left(ErrorWithoutContext("invalid_integer", e.getMessage))
+        }
+      } else {
+        Left(
+          ErrorWithoutContext(
+            "invalid_integer",
+            "Does not match expected integer format"
+          )
+        )
+      }
+    } else {
+      parseNumberAgainstFormat(value) match {
+        case Right(parsedValue) => convertToBigIntegerValue(parsedValue)
+        case Left(warning) =>
+          Left(ErrorWithoutContext("invalid_integer", warning))
+      }
+    }
+  }
+
+  private def convertToBigIntegerValue(
+      parsedValue: BigDecimal
+  ): Either[ErrorWithoutContext, BigInteger] = {
+    try {
+      Right(parsedValue.toBigInt.bigInteger)
+    } catch {
+      case e =>
+        Left(ErrorWithoutContext("invalid_integer", e.getMessage))
+    }
+  }
+
   def processUnsignedByte(
       value: String
   ): Either[ErrorWithoutContext, Short] = {
@@ -1140,14 +1128,6 @@ case class Column private (
       }
     }
   }
-
-  def parseNumberAgainstFormat(
-      value: String
-  ): Either[String, BigDecimal] =
-    numberParserForFormat match {
-      case Right(numericParser) => numericParser.parse(value)
-      case Left(err)            => Left(err)
-    }
 
   def containsUnquotedChar(value: String, char: Char): Boolean = {
     var insideQuotes = false
@@ -1205,6 +1185,18 @@ case class Column private (
       "invalid_datetime",
       value
     )
+  }
+
+  def dateTimeParser(
+      datatype: String,
+      warning: String,
+      value: String
+  ): Either[ErrorWithoutContext, ZonedDateTime] = {
+    val dateFormatObject = DateFormat(format.flatMap(f => f.pattern), datatype)
+    dateFormatObject.parse(value) match {
+      case Right(value) => Right(value)
+      case Left(error)  => Left(ErrorWithoutContext(warning, error))
+    }
   }
 
   def processDateTimeStamp(
@@ -1276,18 +1268,6 @@ case class Column private (
     )
   }
 
-  def dateTimeParser(
-      datatype: String,
-      warning: String,
-      value: String
-  ): Either[ErrorWithoutContext, ZonedDateTime] = {
-    val dateFormatObject = DateFormat(format.flatMap(f => f.pattern), datatype)
-    dateFormatObject.parse(value) match {
-      case Right(value) => Right(value)
-      case Left(error)  => Left(ErrorWithoutContext(warning, error))
-    }
-  }
-
   def processDuration(
       value: String
   ): Either[ErrorWithoutContext, String] = {
@@ -1325,6 +1305,57 @@ case class Column private (
         )
       )
     } else Right(value)
+  }
+
+  def validate(
+      value: String
+  ): (Array[ErrorWithoutContext], List[Any]) = {
+    val errors = ArrayBuffer.empty[ErrorWithoutContext]
+    if (nullParam.contains(value)) {
+      // Since the cell value is among the null values specified for this CSV-W, it can be considered as the default null value which is ""
+      val errorWithoutContext = getErrorIfRequiredValueAndValueEmpty("")
+      if (errorWithoutContext.isDefined) {
+        errors.addOne(errorWithoutContext.get)
+      }
+      (errors.toArray, List.empty)
+    } else {
+      val valuesArrayToReturn = ArrayBuffer.empty[Any]
+      val values = separator match {
+        case Some(separator) => value.split(separator)
+        case None            => Array[String](value)
+      }
+      val parserForDataType = datatypeParser(baseDataType)
+      for (v <- values) {
+        parserForDataType(v) match {
+          case Left(errorMessageContent) => {
+            errors.addOne(
+              ErrorWithoutContext(
+                errorMessageContent.`type`,
+                s"'$v' - ${errorMessageContent.content} (${format.flatMap(_.pattern).getOrElse("no format provided")})"
+              )
+            )
+            valuesArrayToReturn.addOne(s"invalid - $v")
+          }
+          case Right(s) => {
+            errors.addAll(validateLength(s.toString))
+            errors.addAll(validateValue(s))
+            getErrorIfRequiredValueAndValueEmpty(s.toString) match {
+              case Some(e) => errors.addOne(e)
+              case None    => {}
+            }
+            validateFormat(s.toString) match {
+              case Some(e) => errors.addOne(e)
+              case None    => {}
+            }
+
+            if (errors.isEmpty) {
+              valuesArrayToReturn.addOne(s)
+            }
+          }
+        }
+      }
+      (errors.toArray, valuesArrayToReturn.toList)
+    }
   }
 
   def getErrorIfRequiredValueAndValueEmpty(
@@ -1497,57 +1528,6 @@ case class Column private (
     errors.toArray
   }
 
-  def validate(
-      value: String
-  ): (Array[ErrorWithoutContext], List[Any]) = {
-    val errors = ArrayBuffer.empty[ErrorWithoutContext]
-    if (nullParam.contains(value)) {
-      // Since the cell value is among the null values specified for this CSV-W, it can be considered as the default null value which is ""
-      val errorWithoutContext = getErrorIfRequiredValueAndValueEmpty("")
-      if (errorWithoutContext.isDefined) {
-        errors.addOne(errorWithoutContext.get)
-      }
-      (errors.toArray, List.empty)
-    } else {
-      val valuesArrayToReturn = ArrayBuffer.empty[Any]
-      val values = separator match {
-        case Some(separator) => value.split(separator)
-        case None            => Array[String](value)
-      }
-      val parserForDataType = datatypeParser(baseDataType)
-      for (v <- values) {
-        parserForDataType(v) match {
-          case Left(errorMessageContent) => {
-            errors.addOne(
-              ErrorWithoutContext(
-                errorMessageContent.`type`,
-                s"'$v' - ${errorMessageContent.content} (${format.flatMap(_.pattern).getOrElse("no format provided")})"
-              )
-            )
-            valuesArrayToReturn.addOne(s"invalid - $v")
-          }
-          case Right(s) => {
-            errors.addAll(validateLength(s.toString))
-            errors.addAll(validateValue(s))
-            getErrorIfRequiredValueAndValueEmpty(s.toString) match {
-              case Some(e) => errors.addOne(e)
-              case None    => {}
-            }
-            validateFormat(s.toString) match {
-              case Some(e) => errors.addOne(e)
-              case None    => {}
-            }
-
-            if (errors.isEmpty) {
-              valuesArrayToReturn.addOne(s)
-            }
-          }
-        }
-      }
-      (errors.toArray, valuesArrayToReturn.toList)
-    }
-  }
-
   def validateHeader(columnName: String): WarningsAndErrors = {
     var errors = Array[ErrorWithCsvContext]()
     var validHeaders = Array[String]()
@@ -1567,5 +1547,20 @@ case class Column private (
       )
     }
     models.WarningsAndErrors(Array(), errors)
+  }
+
+  private def mapJodaDateTimeToZonedDateTime(jDt: DateTime) = {
+    val zoneId: ZoneId = jDt.getZone.toTimeZone.toZoneId
+    val localDateTime: LocalDateTime =
+      LocalDateTime.of(
+        jDt.getYear,
+        Month.of(jDt.getMonthOfYear),
+        jDt.getDayOfMonth,
+        jDt.getHourOfDay,
+        jDt.getMinuteOfHour,
+        jDt.getSecondOfMinute,
+        (jDt.getMillisOfSecond * 1000).toInt
+      )
+    ZonedDateTime.of(localDateTime, zoneId)
   }
 }

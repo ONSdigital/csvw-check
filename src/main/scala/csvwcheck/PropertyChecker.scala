@@ -5,8 +5,8 @@ import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{DateFormatError, MetadataError, NumberFormatError}
 import csvwcheck.models.DateFormat
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
+import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import org.joda.time.DateTime
-import traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 
 import java.net.{URI, URL}
 import scala.jdk.CollectionConverters._
@@ -239,118 +239,6 @@ object PropertyChecker {
     }
   }
 
-  private def ProcessCommonPropertyValue(valueCopy: ObjectNode) = {
-    if (
-      (!valueCopy.path("@type").isMissingNode) && (!valueCopy
-        .path("@language")
-        .isMissingNode)
-    ) {
-      throw MetadataError(
-        "common property with @value has both @language and @type"
-      )
-    }
-    var fieldNames = Array.from(valueCopy.fieldNames().asScala)
-    fieldNames = fieldNames.filter(!_.contains("@type"))
-    fieldNames = fieldNames.filter(!_.contains("@language"))
-    if (fieldNames.length > 1) {
-      throw MetadataError(
-        "common property with @value has properties other than @language or @type"
-      )
-    }
-  }
-
-  private def ProcessCommonPropertyLanguage(
-      valueCopy: ObjectNode,
-      v: JsonNode
-  ) = {
-    if (valueCopy.path("@value").isMissingNode) {
-      throw MetadataError("common property with @language lacks a @value")
-    }
-    val matcher = Bcp47Language.r.pattern.matcher(v.asText())
-    if (!matcher.matches() || v.isEmpty) {
-      throw MetadataError(
-        s"common property has invalid @language (${v.asText()})"
-      )
-    }
-  }
-
-  private def processCommonPropertyType(
-      valueCopy: ObjectNode,
-      p: String,
-      v: JsonNode
-  ): Unit = {
-    val valueNode = valueCopy.path("@value")
-    v match {
-      case s: TextNode => {
-        if (
-          (!valueNode.isMissingNode) && BuiltInDataTypes.types
-            .contains(s.asText)
-        ) {
-          // No exceptions raised in this case
-        } else if (
-          (valueNode.isMissingNode) && BuiltInTypes.contains(
-            s.asText
-          )
-        ) {
-          // No exceptions raised in this case as well
-        } else {
-          val arr: ArrayNode = JsonNodeFactory.instance.arrayNode()
-          arr.add(s)
-          processCommonPropertyType(valueCopy, p, arr)
-        }
-      }
-      case a: ArrayNode => {
-        val typeArrayElements = Array.from(a.elements().asScala)
-        val propertyRegEx = "^[a-z]+:.*$".r
-        for (typeElement <- typeArrayElements) {
-          // typeElement should be Textual here
-          val matcher = propertyRegEx.pattern.matcher(typeElement.asText())
-          if (
-            matcher.matches() && NameSpaces.values.contains(
-              typeElement.asText.split(":")(0)
-            )
-          ) {
-            // No exceptions raised in this case
-          } else {
-            // typeElement Must be an absolute URI
-            try {
-              val scheme = new URI(typeElement.asText).getScheme
-              if (scheme.isEmpty)
-                throw MetadataError(
-                  s"common property has invalid @type (${typeElement.asText})"
-                )
-            } catch {
-              case e: Exception =>
-                throw MetadataError(
-                  s"common property has invalid @type (${typeElement.asText})"
-                )
-            }
-          }
-        }
-      }
-    }
-  }
-
-  def convertValueFacet(
-      value: ObjectNode,
-      property: String,
-      datatype: String
-  ): Array[String] = {
-    if (!value.path(property).isMissingNode) {
-      if (
-        PropertyCheckerConstants.DateFormatDataTypes.contains(datatype) ||
-        PropertyCheckerConstants.NumericFormatDataTypes.contains(datatype)
-      ) {
-        return Array[String]()
-      } else {
-        throw MetadataError(
-          s"$property is only allowed for numeric, date/time and duration types"
-        )
-      }
-    }
-    return Array[String]()
-  }
-
   def booleanProperty(
       csvwPropertyType: PropertyType.Value
   ): (JsonNode, String, String) => (
@@ -506,37 +394,6 @@ object PropertyChecker {
         case _ =>
           (
             NullNode.getInstance(),
-            Array[String](PropertyChecker.invalidValueWarning),
-            csvwPropertyType
-          )
-      }
-    }
-  }
-
-  def linkProperty(
-      csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (v, baseUrl, lang) =>
-    {
-      v match {
-        case s: TextNode => {
-          val matcher =
-            PropertyChecker.startsWithUnderscore.pattern.matcher(s.asText())
-          if (matcher.matches) {
-            throw MetadataError(s"URL ${s.asText} starts with _:")
-          }
-          val baseUrlCopy = baseUrl match {
-            case "" => s.asText()
-            case _  => new URL(new URL(baseUrl), s.asText()).toString
-          }
-          (new TextNode(baseUrlCopy), Array[String](), csvwPropertyType)
-        }
-        case _ =>
-          (
-            new TextNode(""),
             Array[String](PropertyChecker.invalidValueWarning),
             csvwPropertyType
           )
@@ -837,6 +694,57 @@ object PropertyChecker {
         }
       }
       (datatypeNode, warnings, csvwPropertyType)
+    }
+  }
+
+  def convertValueFacet(
+      value: ObjectNode,
+      property: String,
+      datatype: String
+  ): Array[String] = {
+    if (!value.path(property).isMissingNode) {
+      if (
+        PropertyCheckerConstants.DateFormatDataTypes.contains(datatype) ||
+        PropertyCheckerConstants.NumericFormatDataTypes.contains(datatype)
+      ) {
+        return Array[String]()
+      } else {
+        throw MetadataError(
+          s"$property is only allowed for numeric, date/time and duration types"
+        )
+      }
+    }
+    return Array[String]()
+  }
+
+  def linkProperty(
+      csvwPropertyType: PropertyType.Value
+  ): (JsonNode, String, String) => (
+      JsonNode,
+      Array[String],
+      PropertyType.Value
+  ) = { (v, baseUrl, lang) =>
+    {
+      v match {
+        case s: TextNode => {
+          val matcher =
+            PropertyChecker.startsWithUnderscore.pattern.matcher(s.asText())
+          if (matcher.matches) {
+            throw MetadataError(s"URL ${s.asText} starts with _:")
+          }
+          val baseUrlCopy = baseUrl match {
+            case "" => s.asText()
+            case _  => new URL(new URL(baseUrl), s.asText()).toString
+          }
+          (new TextNode(baseUrlCopy), Array[String](), csvwPropertyType)
+        }
+        case _ =>
+          (
+            new TextNode(""),
+            Array[String](PropertyChecker.invalidValueWarning),
+            csvwPropertyType
+          )
+      }
     }
   }
 
@@ -1646,5 +1554,97 @@ object PropertyChecker {
     }
     transformationsToReturn.add(transformationsMainObject)
     warnings
+  }
+
+  private def ProcessCommonPropertyValue(valueCopy: ObjectNode) = {
+    if (
+      (!valueCopy.path("@type").isMissingNode) && (!valueCopy
+        .path("@language")
+        .isMissingNode)
+    ) {
+      throw MetadataError(
+        "common property with @value has both @language and @type"
+      )
+    }
+    var fieldNames = Array.from(valueCopy.fieldNames().asScala)
+    fieldNames = fieldNames.filter(!_.contains("@type"))
+    fieldNames = fieldNames.filter(!_.contains("@language"))
+    if (fieldNames.length > 1) {
+      throw MetadataError(
+        "common property with @value has properties other than @language or @type"
+      )
+    }
+  }
+
+  private def ProcessCommonPropertyLanguage(
+      valueCopy: ObjectNode,
+      v: JsonNode
+  ) = {
+    if (valueCopy.path("@value").isMissingNode) {
+      throw MetadataError("common property with @language lacks a @value")
+    }
+    val matcher = Bcp47Language.r.pattern.matcher(v.asText())
+    if (!matcher.matches() || v.isEmpty) {
+      throw MetadataError(
+        s"common property has invalid @language (${v.asText()})"
+      )
+    }
+  }
+
+  private def processCommonPropertyType(
+      valueCopy: ObjectNode,
+      p: String,
+      v: JsonNode
+  ): Unit = {
+    val valueNode = valueCopy.path("@value")
+    v match {
+      case s: TextNode => {
+        if (
+          (!valueNode.isMissingNode) && BuiltInDataTypes.types
+            .contains(s.asText)
+        ) {
+          // No exceptions raised in this case
+        } else if (
+          (valueNode.isMissingNode) && BuiltInTypes.contains(
+            s.asText
+          )
+        ) {
+          // No exceptions raised in this case as well
+        } else {
+          val arr: ArrayNode = JsonNodeFactory.instance.arrayNode()
+          arr.add(s)
+          processCommonPropertyType(valueCopy, p, arr)
+        }
+      }
+      case a: ArrayNode => {
+        val typeArrayElements = Array.from(a.elements().asScala)
+        val propertyRegEx = "^[a-z]+:.*$".r
+        for (typeElement <- typeArrayElements) {
+          // typeElement should be Textual here
+          val matcher = propertyRegEx.pattern.matcher(typeElement.asText())
+          if (
+            matcher.matches() && NameSpaces.values.contains(
+              typeElement.asText.split(":")(0)
+            )
+          ) {
+            // No exceptions raised in this case
+          } else {
+            // typeElement Must be an absolute URI
+            try {
+              val scheme = new URI(typeElement.asText).getScheme
+              if (scheme.isEmpty)
+                throw MetadataError(
+                  s"common property has invalid @type (${typeElement.asText})"
+                )
+            } catch {
+              case e: Exception =>
+                throw MetadataError(
+                  s"common property has invalid @type (${typeElement.asText})"
+                )
+            }
+          }
+        }
+      }
+    }
   }
 }

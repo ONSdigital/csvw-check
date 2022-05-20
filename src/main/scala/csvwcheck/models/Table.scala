@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNo
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.helpers.MapHelpers
-import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
+import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import csvwcheck.{PropertyChecker, models}
 import org.apache.commons.csv.CSVRecord
 
@@ -142,21 +142,6 @@ object Table {
       .orElse(inheritedPropertiesCopy.get("tableSchema"))
   }
 
-  private def getDialect(
-      tableProperties: Map[String, JsonNode]
-  ): Option[Dialect] = {
-    tableProperties
-      .get("dialect")
-      .flatMap {
-        case d: ObjectNode => Some(Dialect.fromJson(d))
-        case d if d.isNull => None
-        case d =>
-          throw MetadataError(
-            s"Unexpected JsonNode type ${d.getClass.getName}"
-          )
-      }
-  }
-
   private def createTableForExistingSchema(
       tableSchema: JsonNode,
       inheritedProperties: Map[String, JsonNode],
@@ -223,6 +208,21 @@ object Table {
           s"Table schema must be object for table $url "
         )
     }
+  }
+
+  private def getDialect(
+      tableProperties: Map[String, JsonNode]
+  ): Option[Dialect] = {
+    tableProperties
+      .get("dialect")
+      .flatMap {
+        case d: ObjectNode => Some(Dialect.fromJson(d))
+        case d if d.isNull => None
+        case d =>
+          throw MetadataError(
+            s"Unexpected JsonNode type ${d.getClass.getName}"
+          )
+      }
   }
 
   private def ensureColumnsNodeIsArray(
@@ -454,27 +454,6 @@ object Table {
     }
   }
 
-  private def initializeTableWithDefaults(
-      annotations: Map[String, JsonNode],
-      warnings: Array[WarningWithCsvContext],
-      url: String
-  ): (Table, Array[WarningWithCsvContext]) = {
-    val table = new Table(
-      url = url,
-      id = None,
-      columns = Array(),
-      dialect = None,
-      foreignKeys = Array(),
-      notes = None,
-      primaryKey = Array(),
-      rowTitleColumns = Array(),
-      schemaId = None,
-      suppressOutput = false,
-      annotations = annotations
-    )
-    (table, warnings)
-  }
-
   private def getMaybeSchemaIdFromTableSchema(
       schema: ObjectNode
   ): Option[String] = {
@@ -516,6 +495,27 @@ object Table {
       case Some(value) => value.asBoolean()
       case _           => false
     }
+  }
+
+  private def initializeTableWithDefaults(
+      annotations: Map[String, JsonNode],
+      warnings: Array[WarningWithCsvContext],
+      url: String
+  ): (Table, Array[WarningWithCsvContext]) = {
+    val table = new Table(
+      url = url,
+      id = None,
+      columns = Array(),
+      dialect = None,
+      foreignKeys = Array(),
+      notes = None,
+      primaryKey = Array(),
+      rowTitleColumns = Array(),
+      schemaId = None,
+      suppressOutput = false,
+      annotations = annotations
+    )
+    (table, warnings)
   }
 }
 

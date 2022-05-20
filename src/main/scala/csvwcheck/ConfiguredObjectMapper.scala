@@ -1,6 +1,6 @@
 package csvwcheck
-import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
+import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
 
 object ConfiguredObjectMapper {
   val objectMapper = new ObjectMapper()

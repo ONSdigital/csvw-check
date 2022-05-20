@@ -3,7 +3,7 @@ package csvwcheck.models
 import com.ibm.icu.text.SimpleDateFormat
 import com.ibm.icu.util.GregorianCalendar
 import csvwcheck.errors.DateFormatError
-import csvwcheck.models.DateFormat.{RegExGroups, dateTimeFormatEndingWithX, fields, mapDataTypeToDefaultValueRegEx, mapDataTypeToDefaultValueRegExGroups, utcZoneId}
+import csvwcheck.models.DateFormat._
 
 import java.text.ParsePosition
 import java.time._
@@ -12,34 +12,6 @@ import java.util.regex.Matcher
 import scala.util.matching.Regex
 
 object DateFormat {
-  private val xmlSchemaBaseUrl = "http://www.w3.org/2001/XMLSchema#"
-
-  object RegExGroups {
-    val years = "years"
-    val months = "months"
-    val days = "days"
-    val hours = "hours"
-    val minutes = "minutes"
-    val seconds = "seconds"
-    val fractionalSeconds = "fractionalSeconds"
-    val endOfDay = "endOfDay"
-    val timeZone = "timeZone"
-    val tzZulu = "tzZulu"
-    val tzSign = "tzSign"
-    val tzHours = "tzHours"
-    val tzMinutes = "tzMinute"
-    val tz14 = "tz14"
-
-    val timeZoneRegExNamedGroups = Set(
-      timeZone,
-      tzZulu,
-      tzSign,
-      tzHours,
-      tzMinutes,
-      tz14
-    )
-  }
-
   val digit = "[0-9]"
   val yearGrp = s"(?<${RegExGroups.years}>-?([1-9]$digit{3,}|0$digit{3}))"
   val monthGrp = s"(?<${RegExGroups.months}>(0[1-9]|1[0-2]))"
@@ -54,7 +26,6 @@ object DateFormat {
     s"(?<${RegExGroups.timeZone}>(?<${RegExGroups.tzZulu}>Z)|(?<${RegExGroups.tzSign}>[+-])" +
       s"((?<${RegExGroups.tzHours}>0$digit|1[0-3]):" +
       s"(?<${RegExGroups.tzMinutes}>$minutes)|(?<${RegExGroups.tz14}>14:00)))"
-
   val mapDataTypeToDefaultValueRegEx = Map(
     s"${xmlSchemaBaseUrl}dateTime" -> s"^$yearGrp-$monthGrp-($dayGrp)T($hourGrp:$minuteGrp:$secondGrp|$endOfDay)($timeZone)?$$".r,
     s"${xmlSchemaBaseUrl}date" -> s"^$yearGrp-$monthGrp-$dayGrp($timeZone)?$$".r,
@@ -66,9 +37,7 @@ object DateFormat {
     s"${xmlSchemaBaseUrl}gYearMonth" -> s"^$yearGrp-$monthGrp($timeZone)?$$".r,
     s"${xmlSchemaBaseUrl}time" -> s"^($hourGrp:$minuteGrp:$secondGrp|$endOfDay)($timeZone)?$$".r
   )
-
   val dateTimeFormatEndingWithX: Regex = ".*[^Xx][Xx]$".r
-
   /**
     * Each XSD date/time datatype has a default format. `mapDataTypeToDefaultValueRegEx` contains regular expressions
     * describing these default formats.
@@ -121,6 +90,8 @@ object DateFormat {
       RegExGroups.endOfDay
     ).union(RegExGroups.timeZoneRegExNamedGroups)
   )
+  val utcZoneId = TimeZone.getTimeZone("UTC").toZoneId
+  private val xmlSchemaBaseUrl = "http://www.w3.org/2001/XMLSchema#"
   private val fields = Array[String](
     "yyyy",
     "M",
@@ -138,48 +109,40 @@ object DateFormat {
     "xxx"
   )
 
-  val utcZoneId = TimeZone.getTimeZone("UTC").toZoneId
+  object RegExGroups {
+    val years = "years"
+    val months = "months"
+    val days = "days"
+    val hours = "hours"
+    val minutes = "minutes"
+    val seconds = "seconds"
+    val fractionalSeconds = "fractionalSeconds"
+    val endOfDay = "endOfDay"
+    val timeZone = "timeZone"
+    val tzZulu = "tzZulu"
+    val tzSign = "tzSign"
+    val tzHours = "tzHours"
+    val tzMinutes = "tzMinute"
+    val tz14 = "tz14"
+
+    val timeZoneRegExNamedGroups = Set(
+      timeZone,
+      tzZulu,
+      tzSign,
+      tzHours,
+      tzMinutes,
+      tz14
+    )
+  }
 }
 case class DateFormat(format: Option[String], dataType: String) {
 
-  def getFormat(): Option[String] = format
   val simpleDateFormatter: Option[SimpleDateFormat] = format.map(f => {
     ensureDateTimeFormatContainsRecognizedSymbols(f)
     new SimpleDateFormat(mapTFormatsToUts35(f))
   })
 
-  private def mapTFormatsToUts35(formatIn: String): String = {
-    // As per W3C specification for CSV-W, datetime format patterns mentioned here in this method should also be accepted.
-    // The SimpleDateFormat class does not recognize the time separator(T)
-    // and thus these 3 formats specified in the link below are transformed to include the time separator (as a special char)
-    // https://www.w3.org/TR/2015/REC-tabular-data-model-20151217/#h-formats-for-dates-and-times
-    val format = formatIn.replaceAll("yyyy-MM-ddTHH:mm", "yyyy-MM-dd'T'HH:mm")
-    format
-  }
-
-  /**
-    * This function ensures that the pattern received does not contain symbols which this class does not
-    * know to process. An exception is thrown when it finds a symbol outside the recognised list.
-    *
-    * @param pattern
-    */
-  private def ensureDateTimeFormatContainsRecognizedSymbols(pattern: String) = {
-    var testPattern = pattern
-    // Fractional sections are variable length so are dealt with outside of the `fields` map.
-    testPattern = testPattern.replaceAll("S+", "")
-    testPattern = testPattern.replaceAll("'.+'", "")
-
-    val fieldsLongestFirst = fields.sortBy(_.length).reverse
-    for (k <- fieldsLongestFirst) testPattern = testPattern.replaceAll(k, "")
-    // http://www.unicode.org/reports/tr35/tr35-dates.html#Date_Field_Symbol_Table
-    val matcher =
-      "[GyYuUrQqMLlwWdDFgEecahHKkjJmsSAzZOvVXx]".r.pattern.matcher(testPattern)
-    if (matcher.find()) {
-      throw new DateFormatError(
-        "Unrecognised date field symbols in date format"
-      )
-    }
-  }
+  def getFormat(): Option[String] = format
 
   def parse(inputDate: String): Either[String, ZonedDateTime] = {
     simpleDateFormatter match {
@@ -222,6 +185,38 @@ case class DateFormat(format: Option[String], dataType: String) {
     } catch {
       case e => Left(e.getMessage)
     }
+  }
+
+  private def getZonedDateTimeForIcuCalendar(
+      parsedDateTime: GregorianCalendar
+  ): ZonedDateTime = {
+    val zoneOffset =
+      ZoneOffset.ofTotalSeconds(parsedDateTime.getTimeZone.getRawOffset / 1000)
+    val dateTime = LocalDateTime.ofEpochSecond(
+      parsedDateTime.getTimeInMillis / 1000,
+      ((parsedDateTime.getTimeInMillis % 1000) * 1e6).toInt,
+      zoneOffset
+    )
+
+    ZonedDateTime.ofLocal(
+      dateTime,
+      ZoneId.ofOffset("UTC", zoneOffset),
+      zoneOffset
+    )
+  }
+
+  private def parseInputDateTimeRetainTimeZoneInfo(
+      formatter: SimpleDateFormat,
+      inputDate: String
+  ) = {
+    val calendar = new GregorianCalendar(
+      // Default timezone where the user's string does not specify one.
+      com.ibm.icu.util.TimeZone.getTimeZone("UTC")
+    )
+    calendar.setLenient(false)
+    formatter.setLenient(false)
+    formatter.parse(inputDate, calendar, new ParsePosition(0))
+    calendar
   }
 
   private def parseWithDefaultFormatForDataType(
@@ -268,18 +263,6 @@ case class DateFormat(format: Option[String], dataType: String) {
         throw DateFormatError(
           s"Unmatched datatype ${dataType} in `mapDataTypeToDefaultValueRegExGroups`"
         )
-    }
-  }
-
-  private def getMaybeNamedGroup(
-      defaultFormatRegExMatcher: Matcher,
-      namedGroupsExpected: Set[String],
-      groupName: String
-  ): Option[String] = {
-    if (namedGroupsExpected.contains(groupName)) {
-      Option(defaultFormatRegExMatcher.group(groupName))
-    } else {
-      None
     }
   }
 
@@ -356,6 +339,18 @@ case class DateFormat(format: Option[String], dataType: String) {
     (localDate, localTime)
   }
 
+  private def getMaybeNamedGroup(
+      defaultFormatRegExMatcher: Matcher,
+      namedGroupsExpected: Set[String],
+      groupName: String
+  ): Option[String] = {
+    if (namedGroupsExpected.contains(groupName)) {
+      Option(defaultFormatRegExMatcher.group(groupName))
+    } else {
+      None
+    }
+  }
+
   private def parseTimeZoneIdForDefaultFormat(
       defaultFormatRegExMatcher: Matcher,
       namedGroupsExpected: Set[String]
@@ -415,35 +410,36 @@ case class DateFormat(format: Option[String], dataType: String) {
     }
   }
 
-  private def getZonedDateTimeForIcuCalendar(
-      parsedDateTime: GregorianCalendar
-  ): ZonedDateTime = {
-    val zoneOffset =
-      ZoneOffset.ofTotalSeconds(parsedDateTime.getTimeZone.getRawOffset / 1000)
-    val dateTime = LocalDateTime.ofEpochSecond(
-      parsedDateTime.getTimeInMillis / 1000,
-      ((parsedDateTime.getTimeInMillis % 1000) * 1e6).toInt,
-      zoneOffset
-    )
-
-    ZonedDateTime.ofLocal(
-      dateTime,
-      ZoneId.ofOffset("UTC", zoneOffset),
-      zoneOffset
-    )
+  private def mapTFormatsToUts35(formatIn: String): String = {
+    // As per W3C specification for CSV-W, datetime format patterns mentioned here in this method should also be accepted.
+    // The SimpleDateFormat class does not recognize the time separator(T)
+    // and thus these 3 formats specified in the link below are transformed to include the time separator (as a special char)
+    // https://www.w3.org/TR/2015/REC-tabular-data-model-20151217/#h-formats-for-dates-and-times
+    val format = formatIn.replaceAll("yyyy-MM-ddTHH:mm", "yyyy-MM-dd'T'HH:mm")
+    format
   }
 
-  private def parseInputDateTimeRetainTimeZoneInfo(
-      formatter: SimpleDateFormat,
-      inputDate: String
-  ) = {
-    val calendar = new GregorianCalendar(
-      // Default timezone where the user's string does not specify one.
-      com.ibm.icu.util.TimeZone.getTimeZone("UTC")
-    )
-    calendar.setLenient(false)
-    formatter.setLenient(false)
-    formatter.parse(inputDate, calendar, new ParsePosition(0))
-    calendar
+  /**
+    * This function ensures that the pattern received does not contain symbols which this class does not
+    * know to process. An exception is thrown when it finds a symbol outside the recognised list.
+    *
+    * @param pattern
+    */
+  private def ensureDateTimeFormatContainsRecognizedSymbols(pattern: String) = {
+    var testPattern = pattern
+    // Fractional sections are variable length so are dealt with outside of the `fields` map.
+    testPattern = testPattern.replaceAll("S+", "")
+    testPattern = testPattern.replaceAll("'.+'", "")
+
+    val fieldsLongestFirst = fields.sortBy(_.length).reverse
+    for (k <- fieldsLongestFirst) testPattern = testPattern.replaceAll(k, "")
+    // http://www.unicode.org/reports/tr35/tr35-dates.html#Date_Field_Symbol_Table
+    val matcher =
+      "[GyYuUrQqMLlwWdDFgEecahHKkjJmsSAzZOvVXx]".r.pattern.matcher(testPattern)
+    if (matcher.find()) {
+      throw new DateFormatError(
+        "Unrecognised date field symbols in date format"
+      )
+    }
   }
 }

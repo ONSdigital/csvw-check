@@ -1,10 +1,10 @@
 package csvwcheck.models
 
-import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
-import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
-import csvwcheck.errors.MetadataError
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode, TextNode}
 import csvwcheck.enums.TrimType
+import csvwcheck.errors.MetadataError
+import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
+import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 
 object Dialect {
 

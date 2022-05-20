@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
-import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
+import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import csvwcheck.{PropertyChecker, models}
 import org.apache.commons.csv.CSVRecord
 
@@ -87,6 +87,68 @@ object TableGroup {
     tableGroupNode
   }
 
+  def processContextGetBaseUrlLang(
+      rootNode: ObjectNode,
+      baseUrl: String,
+      lang: String
+  ): (String, String, Array[WarningWithCsvContext]) = {
+    val context = rootNode.get("@context")
+
+    val (baseUrlNew, langNew, warnings) = context match {
+      case a: ArrayNode => validateContextArrayNode(a, baseUrl, lang)
+      case s: TextNode if s.asText == csvwContextUri =>
+        (baseUrl, lang, Array[WarningWithCsvContext]())
+      case _ => throw MetadataError("Invalid Context")
+    }
+    rootNode.remove("@context")
+    (baseUrlNew, langNew, warnings)
+  }
+
+  // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#top-level-properties
+  def validateContextArrayNode(
+      context: ArrayNode,
+      baseUrl: String,
+      lang: String
+  ): (String, String, Array[WarningWithCsvContext]) = {
+    def validateFirstItemInContext(): Unit = {
+      context.get(0) match {
+        case s: TextNode if s.asText == csvwContextUri => {}
+        case _ =>
+          throw MetadataError(
+            s"First item in @context must be string ${csvwContextUri} "
+          )
+      }
+    }
+
+    context.size() match {
+      case 2 => {
+        // if @context contains 2 elements, the first element will be the namespace for csvw - http://www.w3.org/ns/csvw
+        // The second element can be @language or @base - "@context": ["http://www.w3.org/ns/csvw", {"@language": "en"}]
+        validateFirstItemInContext()
+        context.get(1) match {
+          case contextBaseAndLangObject: ObjectNode =>
+            getAndValidateBaseAndLangFromContextObject(
+              contextBaseAndLangObject,
+              baseUrl,
+              lang
+            )
+          case _ =>
+            throw new MetadataError(
+              "Second @context array value must be an object"
+            )
+        }
+      }
+      case 1 => {
+        // If @context contains just one element, the namespace for csvw should always be http://www.w3.org/ns/csvw
+        // "@context": "http://www.w3.org/ns/csvw"
+        validateFirstItemInContext()
+        (baseUrl, lang, Array[WarningWithCsvContext]())
+      }
+      case l =>
+        throw new MetadataError(s"Unexpected @context array length $l")
+    }
+  }
+
   /**
     * This function validates the second item in context property.
     * The second element can be @language or @base - "@context": ["http://www.w3.org/ns/csvw", {"@language": "en"}]
@@ -136,68 +198,6 @@ object TableGroup {
         })
       }
     }
-    (baseUrlNew, langNew, warnings)
-  }
-
-  // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#top-level-properties
-  def validateContextArrayNode(
-      context: ArrayNode,
-      baseUrl: String,
-      lang: String
-  ): (String, String, Array[WarningWithCsvContext]) = {
-    def validateFirstItemInContext(): Unit = {
-      context.get(0) match {
-        case s: TextNode if s.asText == csvwContextUri => {}
-        case _ =>
-          throw MetadataError(
-            s"First item in @context must be string ${csvwContextUri} "
-          )
-      }
-    }
-
-    context.size() match {
-      case 2 => {
-        // if @context contains 2 elements, the first element will be the namespace for csvw - http://www.w3.org/ns/csvw
-        // The second element can be @language or @base - "@context": ["http://www.w3.org/ns/csvw", {"@language": "en"}]
-        validateFirstItemInContext()
-        context.get(1) match {
-          case contextBaseAndLangObject: ObjectNode =>
-            getAndValidateBaseAndLangFromContextObject(
-              contextBaseAndLangObject,
-              baseUrl,
-              lang
-            )
-          case _ =>
-            throw new MetadataError(
-              "Second @context array value must be an object"
-            )
-        }
-      }
-      case 1 => {
-        // If @context contains just one element, the namespace for csvw should always be http://www.w3.org/ns/csvw
-        // "@context": "http://www.w3.org/ns/csvw"
-        validateFirstItemInContext()
-        (baseUrl, lang, Array[WarningWithCsvContext]())
-      }
-      case l =>
-        throw new MetadataError(s"Unexpected @context array length $l")
-    }
-  }
-
-  def processContextGetBaseUrlLang(
-      rootNode: ObjectNode,
-      baseUrl: String,
-      lang: String
-  ): (String, String, Array[WarningWithCsvContext]) = {
-    val context = rootNode.get("@context")
-
-    val (baseUrlNew, langNew, warnings) = context match {
-      case a: ArrayNode => validateContextArrayNode(a, baseUrl, lang)
-      case s: TextNode if s.asText == csvwContextUri =>
-        (baseUrl, lang, Array[WarningWithCsvContext]())
-      case _ => throw MetadataError("Invalid Context")
-    }
-    rootNode.remove("@context")
     (baseUrlNew, langNew, warnings)
   }
 

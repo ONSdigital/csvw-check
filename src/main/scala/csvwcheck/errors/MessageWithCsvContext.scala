@@ -1,8 +1,8 @@
 package csvwcheck.errors
 
 /**
- * Represents an abstract Error/Warning to be displayed to the user.
- */
+  * Represents an abstract Error/Warning to be displayed to the user.
+  */
 abstract class MessageWithCsvContext {
   def `type`: String
   def category: String
@@ -22,10 +22,10 @@ case class ErrorWithCsvContext(
 ) extends MessageWithCsvContext {}
 
 case class WarningWithCsvContext(
-  `type`: String,
-  category: String,
-  row: String,
-  column: String,
-  content: String,
-  constraints: String
+    `type`: String,
+    category: String,
+    row: String,
+    column: String,
+    content: String,
+    constraints: String
 ) extends MessageWithCsvContext {}
