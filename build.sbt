@@ -1,4 +1,4 @@
-name := "csvw-check"
+name := "csvwcheck"
 
 organization := "ONS"
 version := "0.1"
@@ -12,28 +12,28 @@ enablePlugins(DockerPlugin)
 dockerBaseImage := "openjdk:11"
 dockerEntrypoint := Seq("bash")
 dockerEnvVars := Map("PATH" -> "$PATH:/opt/docker/bin")
-packageName in Docker := "csvw-check"
+Docker / packageName := "csvwcheck"
 
 libraryDependencies += "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2"
 
-libraryDependencies += "io.cucumber" %% "cucumber-scala" % "6.8.2" % Test
-libraryDependencies += "io.cucumber" % "cucumber-junit" % "6.8.2" % Test
+libraryDependencies += "io.cucumber" %% "cucumber-scala" % "8.3.2" % Test
+libraryDependencies += "io.cucumber" % "cucumber-junit" % "7.3.3" % Test
 libraryDependencies += "com.novocode" % "junit-interface" % "0.11" % Test
-libraryDependencies += "org.scalatest" %% "scalatest" % "3.0.8" % Test
+libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.12" % Test
 
-libraryDependencies += "io.spray" %% "spray-json" % "1.3.5"
-libraryDependencies += "org.apache.jena" % "jena-arq" % "3.14.0"
-libraryDependencies += "joda-time" % "joda-time" % "2.10.8"
-libraryDependencies += "com.github.scopt" %% "scopt" % "4.0.0"
-libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.6.10"
-libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.2.3"
-libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.2"
-libraryDependencies += "com.fasterxml.jackson.core" % "jackson-databind" % "2.12.1"
-libraryDependencies += "com.fasterxml.jackson.core" % "jackson-annotations" % "2.12.1"
-libraryDependencies += "com.fasterxml.jackson.core" % "jackson-core" % "2.12.1"
-libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.0.0"
-libraryDependencies += "com.ibm.icu" % "icu4j" % "68.2"
-libraryDependencies += "org.apache.commons" % "commons-csv" % "1.8"
+libraryDependencies += "io.spray" %% "spray-json" % "1.3.6"
+libraryDependencies += "org.apache.jena" % "jena-arq" % "4.4.0"
+libraryDependencies += "joda-time" % "joda-time" % "2.10.14"
+libraryDependencies += "com.github.scopt" %% "scopt" % "4.0.1"
+libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.6.19"
+libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.2.11"
+libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.4"
+libraryDependencies += "com.fasterxml.jackson.core" % "jackson-databind" % "2.13.3"
+libraryDependencies += "com.fasterxml.jackson.core" % "jackson-annotations" % "2.13.3"
+libraryDependencies += "com.fasterxml.jackson.core" % "jackson-core" % "2.13.3"
+libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.6.1"
+libraryDependencies += "com.ibm.icu" % "icu4j" % "71.1"
+libraryDependencies += "org.apache.commons" % "commons-csv" % "1.9.0"
 // Here, `libraryDependencies` is a set of dependencies, and by using `+=`,
 // we're adding the scala-parser-combinators dependency to the set of dependencies
 // that sbt will go and fetch when it starts up.

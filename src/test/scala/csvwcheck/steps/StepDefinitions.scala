@@ -1,0 +1,113 @@
+package csvwcheck.steps
+
+import akka.actor.ActorSystem
+import akka.stream.scaladsl.Sink
+import csvwcheck.Validator
+import csvwcheck.models.WarningsAndErrors
+import io.cucumber.scala.{EN, ScalaDsl}
+import org.slf4j.LoggerFactory
+import sttp.client3._
+import sttp.client3.testing._
+import sttp.model._
+
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
+
+class StepDefinitions extends ScalaDsl with EN {
+  private val fixturesPath = "src/test/resources/features/fixtures/"
+  private var csvFilePath = ""
+  private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
+  private var link = ""
+  private val csv: String = ""
+  private val metadata: String = ""
+  private val content: String = ""
+  private var schemaUrl: Option[String] = None
+  private val fileUrl = ""
+  private var csvUrl: Option[String] = None
+  private var notFoundStartsWith = List[String]()
+  private var notFountEndsWith = List[String]()
+
+  // Assume we use sttp as http client.
+  // Call this funciton and set the testing backend object. Pass the backend object into validator function
+  // Stubbing for sttp is done as given in their docs at https://sttp.softwaremill.com/en/latest/testing.html
+  def setTestingBackend(): Unit = {
+    SttpBackendStub.synchronous
+      .whenRequestMatchesPartial({
+        case r if r.uri.path.startsWith(List(fileUrl)) =>
+          Response.ok(content)
+        case r if r.uri.path.startsWith(List(schemaUrl)) =>
+          Response.ok(metadata)
+        case r if r.uri.path.startsWith(List(csvUrl)) =>
+          Response.ok(csv)
+        case r if r.uri.path.endsWith(notFountEndsWith) =>
+          Response("Not found", StatusCode.NotFound)
+        case r if r.uri.path.endsWith(notFoundStartsWith) =>
+          Response("Not found", StatusCode.NotFound)
+      })
+  }
+
+  Given("""^I have a CSV file called "(.*?)"$""") { (filename: String) =>
+    csvFilePath = fixturesPath + filename
+  }
+
+  Given("""^it is stored at the url "(.*?)"$""") { (url: String) =>
+    csvUrl = Some(url)
+    // notFoundEndsWith is a list which holds all the url endwith strings for which a 404 should be returned.
+    // This list is later used in setTestingBackend function to mock http calls
+    notFountEndsWith = "/.well-known/csvm" :: notFountEndsWith
+    notFountEndsWith = "-metadata.json" :: notFountEndsWith
+    notFountEndsWith = "csv-metadata.json" :: notFountEndsWith
+  }
+
+  Given("""^there is no file at the url "(.*?)"$""") { (url: String) =>
+    // notFoundStartsWith is a list which holds all the url startwith strings for which a 404 should be returned.
+    // This list is later used in setTestingBackend function to mock http calls
+    notFoundStartsWith = url :: notFoundStartsWith
+  }
+
+  Given("""^I have a metadata file called "([^"]*)"$""") { _: String =>
+//    metadataFilePath = fixturesPath + filename
+//    metadata = Source.fromFile(metadataFilePath).getLines.mkString
+  }
+
+  And("""^the (schema|metadata) is stored at the url "(.*?)"$""") {
+    (_: String, url: String) =>
+      schemaUrl = Some(url)
+  }
+
+  Given("""^it has a Link header holding "(.*?)"$""") { l: String =>
+    link = s"""$l; type='application/csvm+json'"""
+  }
+
+  And("""^I have a file called "(.*?)" at the url "(.*?)"$""") {
+    (_: String, _: String) =>
+      {
+        //      if (url.endsWith(".json")) schemaUrl = Some(url)
+        //      if (url.endsWith(".csv")) csvUrl = Some(url)
+      }
+  }
+
+  When("I carry out CSVW validation") { () =>
+    implicit val system: ActorSystem = ActorSystem("actor-system")
+    val validator = new Validator(schemaUrl, csvUrl)
+    val akkaStream =
+      validator.validate().map(wAndE => warningsAndErrors = wAndE)
+    Await.ready(akkaStream.runWith(Sink.ignore), Duration.Inf)
+  }
+
+  Then("there should not be errors") { () =>
+    assert(warningsAndErrors.errors.length == 0, warningsAndErrors.errors.map(e => e.toString).mkString(", "))
+  }
+
+  And("there should not be warnings") { () =>
+    assert(warningsAndErrors.warnings.length == 0, warningsAndErrors.warnings.map(w => w.toString).mkString(", "))
+  }
+
+  Then("there should be errors") { () =>
+    assert(warningsAndErrors.errors.length > 0)
+  }
+
+  Then("""there should be warnings""") { () =>
+    assert(warningsAndErrors.warnings.length > 0)
+  }
+}
