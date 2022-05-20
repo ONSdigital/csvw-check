@@ -8,6 +8,7 @@ import csvwcheck.traits.NumberParser
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.util.matching.Regex
 import scala.util.parsing.combinator.RegexParsers
 
 case class LdmlNumberFormatParser(
@@ -19,8 +20,8 @@ case class LdmlNumberFormatParser(
   /**
     * Don't automatically consume/skip any whitespace characters.
     */
-  override val whiteSpace = "".r
-  val logger = Logger(this.getClass.getName)
+  override val whiteSpace: Regex = "".r
+  private val logger = Logger(this.getClass.getName)
 
   def numericDigitChars =
     Set('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '#', '@', ',')
@@ -29,21 +30,21 @@ case class LdmlNumberFormatParser(
 
   def minusSignChars = Set('-')
 
-  def signChars = plusSignChars.union(minusSignChars)
+  private def signChars = plusSignChars.union(minusSignChars)
 
   // https://www.unicode.org/reports/tr35/tr35.html#Loose_Matching
-  def quoteCharsRegEx = "[\u0027\u2018\u02BB\u02BC\u2019\u05F3]".r
+  private def quoteCharsRegEx = "[\u0027\u2018\u02BB\u02BC\u2019\u05F3]".r
 
-  def signCharsRegEx = s"[${signChars.mkString}]".r
+  private def signCharsRegEx = s"[${signChars.mkString}]".r
 
   def parseQuote(
       format: ArrayCursor[Char]
   ): Either[String, Parser[Option[ParsedNumberPart]]] = {
     val quotedText = new mutable.StringBuilder()
     var quoteEnded = false
-    while (format.hasNext() && !quoteEnded) {
+    while (format.hasNext && !quoteEnded) {
       format.next() match {
-        case '\'' if format.hasNext() && format.peekNext() == '\'' =>
+        case '\'' if format.hasNext && format.peekNext() == '\'' =>
           // Escaped quotation mark `''` (two single quotes)
           format.next()
           quotedText.append("''")
@@ -75,7 +76,7 @@ case class LdmlNumberFormatParser(
       )
     )
     var isFractionalPart = false
-    while (format.hasNext() && !numberEnded) {
+    while (format.hasNext && !numberEnded) {
       val nextChar = format.next()
       nextChar match {
         case '.' =>
@@ -111,9 +112,9 @@ case class LdmlNumberFormatParser(
     var currentGroupSize: Int = 0
     val groupSizes = mutable.ArrayBuffer[Int]()
 
-    while (format.hasNext() && !finished) {
+    while (format.hasNext && !finished) {
       format.next() match {
-        case '0' => {
+        case '0' =>
           if (nonPaddingDigits > 0 && isFractionalPart) {
             throw NumberFormatError(
               "Zero-padding digits defined after optional digits in fractional part."
@@ -121,8 +122,7 @@ case class LdmlNumberFormatParser(
           }
           zeroPaddingDigits += 1
           if (groupsPresent) currentGroupSize += 1
-        }
-        case '#' => {
+        case '#' =>
           if (zeroPaddingDigits > 0 && !isFractionalPart) {
             throw NumberFormatError(
               "Optional digits defined after zero-padding digits in integer part."
@@ -130,7 +130,6 @@ case class LdmlNumberFormatParser(
           }
           nonPaddingDigits += 1
           if (groupsPresent) currentGroupSize += 1
-        }
         case char @ '@' =>
           throw NumberFormatError(
             s"Found significant figures character '$char'. Significant figures functionality not implemented."
@@ -165,6 +164,7 @@ case class LdmlNumberFormatParser(
 
     val firstGroupSize =
       if (groupSizes.isEmpty) None else Some(groupSizes(0))
+    //noinspection IndexBoundsCheck
     val secondGroupSize =
       if (groupSizes.length <= 1) None else Some(groupSizes(1))
 
@@ -188,11 +188,12 @@ case class LdmlNumberFormatParser(
   /**
     * Enforces that the primary/secondary group characters must be correctly used within a number.
     *
-    * @param firstGroupSize
-    * @param secondGroupSize
+    * @param firstGroupSize - the number of chars in the first group
+    * @param secondGroupSize - the number of chars in the second group
+    * @param isInFractionalPart - whether or not these groups are in the fraction part of the number.
     * @return
     */
-  def enforceGroupsRemoveGroupCharsParser(
+  private def enforceGroupsRemoveGroupCharsParser(
       firstGroupSize: Option[Int],
       secondGroupSize: Option[Int],
       isInFractionalPart: Boolean
@@ -238,7 +239,7 @@ case class LdmlNumberFormatParser(
     var parsers = prefixParsers
 
     var subPatternComplete: Boolean = false
-    while (format.hasNext() && !subPatternComplete) {
+    while (format.hasNext && !subPatternComplete) {
       format.next() match {
         case '\'' =>
           parseQuote(format) match {
@@ -331,7 +332,7 @@ case class LdmlNumberFormatParser(
       }
     }
 
-    val exponentDigits = parseDigits(format, false) ^^ (_.get)
+    val exponentDigits = parseDigits(format, isFractionalPart = false) ^^ (_.get)
 
     exponentWithSignParser ~ exponentDigits ^^ {
       case sign ~ digits =>
@@ -352,7 +353,7 @@ case class LdmlNumberFormatParser(
        followed by at least one digit, with only an optional sign in between. A regular expression may be helpful here."
       https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Parsing_Numbers
      */
-    if (!(positionInFormat.hasPrevious() && positionInFormat.hasNext()))
+    if (!(positionInFormat.hasPrevious && positionInFormat.hasNext))
       return false
 
     val previousIsDigit =
@@ -431,6 +432,7 @@ case class LdmlNumberFormatParser(
               case Success(digitsWithoutGroupingChar, _) =>
                 Success(digitsWithoutGroupingChar, currentPosition)
               case Failure(err, _) => Failure(err, currentPosition)
+              case Error(err, _) => Error(err, currentPosition)
             }
           } catch {
             case e: Throwable =>
@@ -438,6 +440,7 @@ case class LdmlNumberFormatParser(
               Failure(e.getMessage, currentPosition)
           }
         case failure @ Failure(_, _) => failure
+        case error @  Error(_, _) => error
       }
     }
   }
@@ -532,9 +535,9 @@ case class LdmlNumberFormatParser(
   private def getParser(
       formatIn: String
   ): Parser[BigDecimal] = {
-    val format = ArrayCursor[Char](formatIn.toCharArray)
+    val format = ArrayCursor[Char](formatIn.toCharArray.toSeq)
     var subPatterns = Array.empty[LdmlNumericSubPattern]
-    while (format.hasNext()) {
+    while (format.hasNext) {
       subPatterns :+= extractSubPatternParsers(format)
     }
 
@@ -575,12 +578,12 @@ case class LdmlNumberFormatParser(
           )
 
         (
-          positivePattern.toParser() |
-            finalNegativePattern.toParser()
+          positivePattern.toParser |
+            finalNegativePattern.toParser
         ) ^^ mapNumberPartsToParsedNumber
       })
-      .getOrElse(positivePattern.toParser() ^^ mapNumberPartsToParsedNumber)
-      .map(parsedNumber => parsedNumber.toBigDecimal())
+      .getOrElse(positivePattern.toParser ^^ mapNumberPartsToParsedNumber)
+      .map(parsedNumber => parsedNumber.toBigDecimal)
   }
 
   private def mapNumberPartsToParsedNumber(
@@ -612,9 +615,9 @@ case class LdmlNumberFormatParser(
     * "Each subpattern has a prefix, a numeric part, and a suffix."
     *  https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Number_Format_Patterns
     *
-    * @param prefixParsers
-    * @param numericPartParser
-    * @param suffixParsers
+    * @param prefixParsers - The parsers which consume bits of the pattern before hitting numeric parts.
+    * @param numericPartParsers - The parsers for the numeric parts of the string.
+    * @param suffixParsers - The parsers which consume bits of the pattern after the numeric parts.
     */
   case class LdmlNumericSubPattern(
       prefixParsers: Array[NumberPartParser],
@@ -626,7 +629,7 @@ case class LdmlNumberFormatParser(
       * Accumulate all of the existing parser up together into a parser which returns a list of results.
       * @return
       */
-    def toParser(): Parser[Array[ParsedNumberPart]] = {
+    def toParser: Parser[Array[ParsedNumberPart]] = {
       val Array(firstParser, remainingParsers @ _*) =
         Array.concat(prefixParsers, numericPartParsers, suffixParsers)
 

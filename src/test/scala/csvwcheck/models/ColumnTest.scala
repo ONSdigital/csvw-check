@@ -4,12 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{IntNode, JsonNodeFactory, ObjectNode, TextNode}
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors.{ErrorWithoutContext, WarningWithCsvContext}
-import org.scalatest.FunSuite
+import org.scalatest.funsuite.AnyFunSuite
 
 import scala.collection.mutable
-import scala.collection.mutable.Map
 
-class ColumnTest extends FunSuite {
+//noinspection HttpUrlsUsage
+class ColumnTest extends AnyFunSuite {
   def getColumnWithFormat(formatJson: Option[String]): Column = {
     val json =
       s"""
@@ -25,7 +25,7 @@ class ColumnTest extends FunSuite {
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map[String, JsonNode]()
+      mutable.Map[String, JsonNode]()
     )
     column
   }
@@ -39,12 +39,12 @@ class ColumnTest extends FunSuite {
         |""".stripMargin
 
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val (column, _) = Column.fromJson(
       1,
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map[String, JsonNode]()
+      mutable.Map[String, JsonNode]()
     )
 
     val datatypeDefaultValue = "http://www.w3.org/2001/XMLSchema#string"
@@ -53,7 +53,7 @@ class ColumnTest extends FunSuite {
     assert(column.baseDataType === datatypeDefaultValue)
     assert(column.lang === "und")
     assert(column.textDirection === "inherit")
-    assert(column.annotations === Map[String, JsonNode]())
+    assert(column.annotations === mutable.Map[String, JsonNode]())
     assert(!column.virtual)
     assert(column.columnOrdinal == 1)
     assert(!column.ordered)
@@ -67,6 +67,7 @@ class ColumnTest extends FunSuite {
   }
 
   test("should override default values") {
+    //noinspection HttpUrlsUsage
     val json =
       """
         |{
@@ -131,12 +132,12 @@ class ColumnTest extends FunSuite {
         |""".stripMargin
 
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val (_, warnings) = Column.fromJson(
       1,
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map()
+      mutable.Map()
     )
     assert(warnings(0).`type` === "invalid_value")
     assert(warnings(0).content === "null: true")
@@ -159,7 +160,7 @@ class ColumnTest extends FunSuite {
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map()
+      mutable.Map()
     )
     assert(warnings.length === 0)
     assert(column.nullParam === Array[String](""))
@@ -176,12 +177,12 @@ class ColumnTest extends FunSuite {
         |""".stripMargin
 
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val (column, _) = Column.fromJson(
       1,
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map()
+      mutable.Map()
     )
     val expectedDatatypeValue: ObjectNode = JsonNodeFactory.instance
       .objectNode()
@@ -201,10 +202,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processFloatDatatype("4268.22752E11")
     assert(result.isRight)
-    result match {
-      case Right(floatValue) => {
+    (result: @unchecked) match {
+      case Right(floatValue) =>
         assert(floatValue == "4268.22752E11".toFloat)
-      }
     }
   }
 
@@ -215,10 +215,9 @@ class ColumnTest extends FunSuite {
         "-3E2.4"
       ) //the exponent must be an integer
     assert(result.isLeft)
-    result match {
-      case Left(ErrorWithoutContext(errorType, _)) => {
+    (result: @unchecked) match {
+      case Left(ErrorWithoutContext(errorType, _)) =>
         assert(errorType == "invalid_float")
-      }
     }
   }
 
@@ -227,10 +226,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processDoubleDatatype("4268.22752E11")
     assert(result.isRight)
-    result match {
-      case Right(doubleDatatype) => {
+    (result: @unchecked) match {
+      case Right(doubleDatatype) =>
         assert(doubleDatatype == 4.26822752e14)
-      }
     }
   }
 
@@ -240,10 +238,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processDoubleDatatype("-INF")
     assert(result.isRight)
-    result match {
-      case Right(doubleValue) => {
+    (result: @unchecked) match {
+      case Right(doubleValue) =>
         assert(doubleValue.isNegInfinity)
-      }
     }
   }
 
@@ -253,10 +250,9 @@ class ColumnTest extends FunSuite {
     assert(
       result.isLeft
     ) //values are case-sensitive, must be capitalized correctly
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_double")
-      }
     }
   }
 
@@ -267,10 +263,9 @@ class ColumnTest extends FunSuite {
     assert(
       result.isLeft
     ) // 0 is not considered negative
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_negativeInteger")
-      }
     }
   }
 
@@ -282,10 +277,9 @@ class ColumnTest extends FunSuite {
       columnWithNoFormat
         .processNegativeInteger("-00122") // leading zeros are permitted
     assert(result.isRight)
-    result match {
-      case Right(negativeInteger) => {
+    (result: @unchecked) match {
+      case Right(negativeInteger) =>
         assert(negativeInteger.toString == "-122")
-      }
     }
   }
 
@@ -298,10 +292,9 @@ class ColumnTest extends FunSuite {
         "3.0"
       ) //value must not contain a decimal point
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_nonPositiveInteger")
-      }
     }
   }
 
@@ -310,10 +303,9 @@ class ColumnTest extends FunSuite {
     val result = columnWithNoFormat
       .processNonPositiveInteger("0")
     assert(result.isRight)
-    result match {
-      case Right(nonPositiveInteger) => {
+    (result: @unchecked) match {
+      case Right(nonPositiveInteger) =>
         assert(nonPositiveInteger.toString == "0")
-      }
     }
   }
 
@@ -323,10 +315,9 @@ class ColumnTest extends FunSuite {
     val result = columnWithNoFormat
       .processUnsignedByte("+3") //
     assert(result.isRight)
-    result match {
-      case Right(unsignedByte) => {
+    (result: @unchecked) match {
+      case Right(unsignedByte) =>
         assert(unsignedByte.toString == "3")
-      }
     }
   }
 
@@ -337,10 +328,9 @@ class ColumnTest extends FunSuite {
         "256"
       ) // Number is too large to be a unsigned byte
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_unsignedByte")
-      }
     }
   }
 
@@ -352,10 +342,9 @@ class ColumnTest extends FunSuite {
         "-123"
       ) //negative values are not allowed
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_unsignedShort")
-      }
     }
   }
 
@@ -364,10 +353,9 @@ class ColumnTest extends FunSuite {
     val result = columnWithNoFormat
       .processUnsignedShort("0")
     assert(result.isRight)
-    result match {
-      case Right(unsignedShort) => {
+    (result: @unchecked) match {
+      case Right(unsignedShort) =>
         assert(unsignedShort.toString == "0")
-      }
     }
   }
 
@@ -377,10 +365,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processUnsignedInt("4545454")
     assert(result.isRight)
-    result match {
-      case Right(unsignedInt) => {
+    (result: @unchecked) match {
+      case Right(unsignedInt) =>
         assert(unsignedInt.toString == "4545454")
-      }
     }
   }
 
@@ -389,10 +376,9 @@ class ColumnTest extends FunSuite {
     val result =
       columnWithNoFormat.processUnsignedInt("4294967299") // number is too large
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_unsignedInt")
-      }
     }
   }
 
@@ -404,10 +390,9 @@ class ColumnTest extends FunSuite {
         "18446744073709551620"
       ) // number is too large
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_unsignedLong")
-      }
     }
   }
 
@@ -415,10 +400,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processUnsignedLong("+3")
     assert(result.isRight)
-    result match {
-      case Right(unsignedLong) => {
+    (result: @unchecked) match {
+      case Right(unsignedLong) =>
         assert(unsignedLong.toString == "3")
-      }
     }
   }
 
@@ -427,10 +411,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processPositiveInteger("00122")
     assert(result.isRight)
-    result match {
-      case Right(positiveInteger) => {
+    (result: @unchecked) match {
+      case Right(positiveInteger) =>
         assert(positiveInteger.toString() == "122")
-      }
     }
   }
 
@@ -439,10 +422,9 @@ class ColumnTest extends FunSuite {
     val result =
       columnWithNoFormat.processPositiveInteger("3.0")
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_positiveInteger")
-      }
     }
   }
 
@@ -454,10 +436,9 @@ class ColumnTest extends FunSuite {
     val result =
       columnWithNoFormat.processNonNegativeInteger("-3")
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_nonNegativeInteger")
-      }
     }
   }
 
@@ -467,10 +448,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processNonNegativeInteger("0")
     assert(result.isRight)
-    result match {
-      case Right(nonNegativeInteger) => {
+    (result: @unchecked) match {
+      case Right(nonNegativeInteger) =>
         assert(nonNegativeInteger.toString() == "0")
-      }
     }
   }
 
@@ -481,10 +461,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processByteDatatype("-123")
     assert(result.isRight)
-    result match {
-      case Right(byteValue) => {
+    (result: @unchecked) match {
+      case Right(byteValue) =>
         assert(byteValue == -123)
-      }
     }
   }
 
@@ -495,10 +474,9 @@ class ColumnTest extends FunSuite {
     val result =
       columnWithNoFormat.processByteDatatype("2.23")
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_byte")
-      }
     }
   }
 
@@ -510,10 +488,9 @@ class ColumnTest extends FunSuite {
     val result =
       columnWithNoFormat.processShortDatatype("32770")
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_short")
-      }
     }
   }
 
@@ -521,10 +498,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processShortDatatype("-1231")
     assert(result.isRight)
-    result match {
-      case Right(value) => {
+    (result: @unchecked) match {
+      case Right(value) =>
         assert(value.toString == "-1231")
-      }
     }
   }
 
@@ -533,10 +509,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processIntDatatype("-12312")
     assert(result.isRight)
-    result match {
-      case Right(value) => {
+    (result: @unchecked) match {
+      case Right(value) =>
         assert(value.toString == "-12312")
-      }
     }
   }
 
@@ -547,10 +522,9 @@ class ColumnTest extends FunSuite {
     val result =
       columnWithNoFormat.processIntDatatype("2147483650") //number too large)
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(error.`type` == "invalid_int")
-      }
     }
   }
 
@@ -564,12 +538,11 @@ class ColumnTest extends FunSuite {
         "9223372036854775810"
       ) //number too large
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(
           error.`type` == "invalid_long"
         )
-      }
     }
   }
 
@@ -577,10 +550,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processLongDatatype("-1231235555")
     assert(result.isRight)
-    result match {
-      case Right(value) => {
+    (result: @unchecked) match {
+      case Right(value) =>
         assert(value.toString == "-1231235555")
-      }
     }
   }
 
@@ -589,10 +561,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processIntegerDatatype("-00122")
     assert(result.isRight)
-    result match {
-      case Right(value) => {
+    (result: @unchecked) match {
+      case Right(value) =>
         assert(value.toString() == "-122")
-      }
     }
   }
 
@@ -605,12 +576,11 @@ class ColumnTest extends FunSuite {
         "3.0"
       ) // an integer must not contain a decimal point
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(
           error.`type` == "invalid_integer"
         )
-      }
     }
   }
 
@@ -625,12 +595,11 @@ class ColumnTest extends FunSuite {
       ) // commas are not permitted unless specified in format
 
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(
           error.`type` == "invalid_decimal"
         )
-      }
     }
   }
 
@@ -640,10 +609,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processDecimalDatatype(".3")
     assert(result.isRight)
-    result match {
-      case Right(value) => {
+    (result: @unchecked) match {
+      case Right(value) =>
         assert(value == 0.3)
-      }
     }
   }
 
@@ -653,10 +621,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processDecimalDatatype("3.")
     assert(result.isRight)
-    result match {
-      case Right(value) => {
+    (result: @unchecked) match {
+      case Right(value) =>
         assert(value == 3)
-      }
     }
   }
 
@@ -667,10 +634,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processBooleanDatatype("1")
     assert(result.isRight)
-    result match {
-      case Right(value) => {
+    (result: @unchecked) match {
+      case Right(value) =>
         assert(value)
-      }
     }
   }
 
@@ -680,10 +646,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processBooleanDatatype("0")
     assert(result.isRight)
-    result match {
-      case Right(value) => {
+    (result: @unchecked) match {
+      case Right(value) =>
         assert(!value)
-      }
     }
   }
 
@@ -693,10 +658,9 @@ class ColumnTest extends FunSuite {
     val columnWithNoFormat = getColumnWithFormat(None)
     val result = columnWithNoFormat.processBooleanDatatype("true")
     assert(result.isRight)
-    result match {
-      case Right(value) => {
+    (result: @unchecked) match {
+      case Right(value) =>
         assert(value)
-      }
     }
   }
 
@@ -721,15 +685,14 @@ class ColumnTest extends FunSuite {
         jsonNode.asInstanceOf[ObjectNode],
         "https://www.w3.org/",
         "und",
-        Map[String, JsonNode]()
+        mutable.Map[String, JsonNode]()
       )
     }
     val result = columnWithFormat.processBooleanDatatype("Y")
     assert(result.isRight)
-    result match {
-      case Right(value) => {
+    (result: @unchecked) match {
+      case Right(value) =>
         assert(value)
-      }
     }
   }
 
@@ -742,12 +705,11 @@ class ColumnTest extends FunSuite {
         "TRUE"
       ) // values are case sensitive
     assert(result.isLeft)
-    result match {
-      case Left(error) => {
+    (result: @unchecked) match {
+      case Left(error) =>
         assert(
           error.`type` == "invalid_boolean"
         )
-      }
     }
   }
 
@@ -763,12 +725,12 @@ class ColumnTest extends FunSuite {
       |}
       |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val (column, _) = Column.fromJson(
       1,
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map[String, JsonNode]()
+      mutable.Map[String, JsonNode]()
     )
 
     val errors = column.validateLength("12")
@@ -788,12 +750,12 @@ class ColumnTest extends FunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val (column, _) = Column.fromJson(
       1,
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map[String, JsonNode]()
+      mutable.Map[String, JsonNode]()
     )
 
     val errors = column.validateLength("ABCDEFG")
@@ -814,12 +776,12 @@ class ColumnTest extends FunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val (column, _) = Column.fromJson(
       1,
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map[String, JsonNode]()
+      mutable.Map[String, JsonNode]()
     )
     val errors = column.validateLength("ABC4")
     assert(errors.length == 1)
@@ -841,12 +803,12 @@ class ColumnTest extends FunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val (column, _) = Column.fromJson(
       1,
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map[String, JsonNode]()
+      mutable.Map[String, JsonNode]()
     )
     val error1 =
       column.validateValue(5)
@@ -902,12 +864,12 @@ class ColumnTest extends FunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val (column, _) = Column.fromJson(
       1,
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map[String, JsonNode]()
+      mutable.Map[String, JsonNode]()
     )
     val error1 =
       column.validateValue(3)
@@ -965,12 +927,12 @@ class ColumnTest extends FunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val (column, _) = Column.fromJson(
       1,
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map[String, JsonNode]()
+      mutable.Map[String, JsonNode]()
     )
     val error1 =
       column.validateValue(3)
@@ -1022,12 +984,12 @@ class ColumnTest extends FunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val (column, _) = Column.fromJson(
       1,
       jsonNode.asInstanceOf[ObjectNode],
       "https://www.w3.org/",
       "und",
-      Map[String, JsonNode]()
+      mutable.Map[String, JsonNode]()
     )
     val error1 =
       column.validateValue(BigDecimal("9223372036854771000"))

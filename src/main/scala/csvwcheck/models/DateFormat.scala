@@ -12,21 +12,21 @@ import scala.util.matching.Regex
 
 object DateFormat {
   private val xmlSchemaBaseUrl = "http://www.w3.org/2001/XMLSchema#"
-  val digit = "[0-9]"
-  val yearGrp = s"(?<${RegExGroups.years}>-?([1-9]$digit{3,}|0$digit{3}))"
-  val monthGrp = s"(?<${RegExGroups.months}>(0[1-9]|1[0-2]))"
-  val dayGrp = s"(?<${RegExGroups.days}>(0[1-9]|[12]$digit|3[01]))"
-  val hourGrp = s"(?<${RegExGroups.hours}>([01]$digit|2[0-3]))"
-  val minutes = s"[0-5]$digit"
-  val minuteGrp = s"(?<${RegExGroups.minutes}>$minutes)"
-  val secondGrp =
+  private val digit = "[0-9]"
+  private val yearGrp = s"(?<${RegExGroups.years}>-?([1-9]$digit{3,}|0$digit{3}))"
+  private val monthGrp = s"(?<${RegExGroups.months}>(0[1-9]|1[0-2]))"
+  private val dayGrp = s"(?<${RegExGroups.days}>(0[1-9]|[12]$digit|3[01]))"
+  private val hourGrp = s"(?<${RegExGroups.hours}>([01]$digit|2[0-3]))"
+  private val minutes = s"[0-5]$digit"
+  private val minuteGrp = s"(?<${RegExGroups.minutes}>$minutes)"
+  private val secondGrp =
     s"(?<${RegExGroups.seconds}>[0-5]$digit)(\\.(?<${RegExGroups.fractionalSeconds}>$digit+))?"
-  val endOfDay = s"(?<${RegExGroups.endOfDay}>24:00:00(\\.0+)?)"
-  val timeZone =
+  private val endOfDay = s"(?<${RegExGroups.endOfDay}>24:00:00(\\.0+)?)"
+  private val timeZone =
     s"(?<${RegExGroups.timeZone}>(?<${RegExGroups.tzZulu}>Z)|(?<${RegExGroups.tzSign}>[+-])" +
       s"((?<${RegExGroups.tzHours}>0$digit|1[0-3]):" +
       s"(?<${RegExGroups.tzMinutes}>$minutes)|(?<${RegExGroups.tz14}>14:00)))"
-  val mapDataTypeToDefaultValueRegEx = Map(
+  private val mapDataTypeToDefaultValueRegEx = Map(
     s"${xmlSchemaBaseUrl}dateTime" -> s"^$yearGrp-$monthGrp-($dayGrp)T($hourGrp:$minuteGrp:$secondGrp|$endOfDay)($timeZone)?$$".r,
     s"${xmlSchemaBaseUrl}date" -> s"^$yearGrp-$monthGrp-$dayGrp($timeZone)?$$".r,
     s"${xmlSchemaBaseUrl}dateTimeStamp" -> s"^$yearGrp-$monthGrp-($dayGrp)T($hourGrp:$minuteGrp:$secondGrp|$endOfDay)($timeZone)$$".r,
@@ -37,14 +37,14 @@ object DateFormat {
     s"${xmlSchemaBaseUrl}gYearMonth" -> s"^$yearGrp-$monthGrp($timeZone)?$$".r,
     s"${xmlSchemaBaseUrl}time" -> s"^($hourGrp:$minuteGrp:$secondGrp|$endOfDay)($timeZone)?$$".r
   )
-  val dateTimeFormatEndingWithX: Regex = ".*[^Xx][Xx]$".r
+  private val dateTimeFormatEndingWithX: Regex = ".*[^Xx][Xx]$".r
   /**
     * Each XSD date/time datatype has a default format. `mapDataTypeToDefaultValueRegEx` contains regular expressions
     * describing these default formats.
     *
     * This map enumerates the named groups contained within the aforementioned regular expressions.
     */
-  val mapDataTypeToDefaultValueRegExGroups = Map[String, Set[String]](
+  private val mapDataTypeToDefaultValueRegExGroups = Map[String, Set[String]](
     s"${xmlSchemaBaseUrl}dateTime" -> Set(
       RegExGroups.years,
       RegExGroups.months,
@@ -90,7 +90,7 @@ object DateFormat {
       RegExGroups.endOfDay
     ).union(RegExGroups.timeZoneRegExNamedGroups)
   )
-  val utcZoneId = TimeZone.getTimeZone("UTC").toZoneId
+  private val utcZoneId = TimeZone.getTimeZone("UTC").toZoneId
   private val fields = Array[String](
     "yyyy",
     "M",
@@ -142,8 +142,6 @@ case class DateFormat(format: Option[String], dataType: String) {
     new SimpleDateFormat(mapTFormatsToUts35(f))
   })
 
-  def getFormat(): Option[String] = format
-
   def parse(inputDate: String): Either[String, ZonedDateTime] = {
     simpleDateFormatter match {
       case Some(formatter) => parseWithUts35FormatString(formatter, inputDate)
@@ -183,7 +181,7 @@ case class DateFormat(format: Option[String], dataType: String) {
         Left("Value does not match expected UTS-35 format")
       }
     } catch {
-      case e => Left(e.getMessage)
+      case e: Throwable => Left(e.getMessage)
     }
   }
 
@@ -232,7 +230,7 @@ case class DateFormat(format: Option[String], dataType: String) {
       mapDataTypeToDefaultValueRegEx.get(dataType),
       mapDataTypeToDefaultValueRegExGroups.get(dataType)
     ) match {
-      case (Some(defaultValueRegex), Some(namedGroupsExpected)) => {
+      case (Some(defaultValueRegex), Some(namedGroupsExpected)) =>
         val defaultFormatRegExMatcher =
           defaultValueRegex.pattern.matcher(inputDate)
         if (defaultFormatRegExMatcher.matches()) {
@@ -249,19 +247,18 @@ case class DateFormat(format: Option[String], dataType: String) {
           } catch {
             // For example 04-31 is not a valid date since april has only 30 days. Invalid range exception will be
             // thrown here, but if the date is non parsable return Left
-            case e => Left(e.getMessage)
+            case e: Throwable => Left(e.getMessage)
           }
         } else {
           Left(s"Does not match expected format '${format.getOrElse("")}'")
         }
-      }
       case (None, _) =>
         throw DateFormatError(
-          s"Unmatched datatype ${dataType} in `mapDataTypeToDefaultValueRegEx`"
+          s"Unmatched datatype $dataType in `mapDataTypeToDefaultValueRegEx`"
         )
       case (_, None) =>
         throw DateFormatError(
-          s"Unmatched datatype ${dataType} in `mapDataTypeToDefaultValueRegExGroups`"
+          s"Unmatched datatype $dataType in `mapDataTypeToDefaultValueRegExGroups`"
         )
     }
   }
@@ -423,9 +420,9 @@ case class DateFormat(format: Option[String], dataType: String) {
     * This function ensures that the pattern received does not contain symbols which this class does not
     * know to process. An exception is thrown when it finds a symbol outside the recognised list.
     *
-    * @param pattern
+    * @param pattern - The date time format pattern
     */
-  private def ensureDateTimeFormatContainsRecognizedSymbols(pattern: String) = {
+  private def ensureDateTimeFormatContainsRecognizedSymbols(pattern: String): Unit = {
     var testPattern = pattern
     // Fractional sections are variable length so are dealt with outside of the `fields` map.
     testPattern = testPattern.replaceAll("S+", "")
@@ -437,7 +434,7 @@ case class DateFormat(format: Option[String], dataType: String) {
     val matcher =
       "[GyYuUrQqMLlwWdDFgEecahHKkjJmsSAzZOvVXx]".r.pattern.matcher(testPattern)
     if (matcher.find()) {
-      throw new DateFormatError(
+      throw DateFormatError(
         "Unrecognised date field symbols in date format"
       )
     }

@@ -14,21 +14,16 @@ import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 
 class StepDefinitions extends ScalaDsl with EN {
-  // Definitions for steps in scenarios given in csvw_validation_tests.feature
-  // Adapted from https://github.com/Data-Liberation-Front/csvlint.rb/tree/master/features/step_definitions
-  private val log = LoggerFactory.getLogger(classOf[StepDefinitions])
   private val fixturesPath = "src/test/resources/features/fixtures/"
   private var csvFilePath = ""
   private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
   private var link = ""
-  private var csv: String = ""
-  private var metadataFilePath: String = ""
-  private var metadata: String = ""
-  private var content: String = ""
+  private val csv: String = ""
+  private val metadata: String = ""
+  private val content: String = ""
   private var schemaUrl: Option[String] = None
-  private var fileUrl = ""
+  private val fileUrl = ""
   private var csvUrl: Option[String] = None
-  private var testingBackend = None
   private var notFoundStartsWith = List[String]()
   private var notFountEndsWith = List[String]()
 
@@ -36,7 +31,7 @@ class StepDefinitions extends ScalaDsl with EN {
   // Call this funciton and set the testing backend object. Pass the backend object into validator function
   // Stubbing for sttp is done as given in their docs at https://sttp.softwaremill.com/en/latest/testing.html
   def setTestingBackend(): Unit = {
-    var testingBackend = SttpBackendStub.synchronous
+    SttpBackendStub.synchronous
       .whenRequestMatchesPartial({
         case r if r.uri.path.startsWith(List(fileUrl)) =>
           Response.ok(content)
@@ -70,13 +65,13 @@ class StepDefinitions extends ScalaDsl with EN {
     notFoundStartsWith = url :: notFoundStartsWith
   }
 
-  Given("""^I have a metadata file called "([^"]*)"$""") { filename: String =>
+  Given("""^I have a metadata file called "([^"]*)"$""") { _: String =>
 //    metadataFilePath = fixturesPath + filename
 //    metadata = Source.fromFile(metadataFilePath).getLines.mkString
   }
 
   And("""^the (schema|metadata) is stored at the url "(.*?)"$""") {
-    (schemaType: String, url: String) =>
+    (_: String, url: String) =>
       schemaUrl = Some(url)
   }
 
@@ -85,7 +80,7 @@ class StepDefinitions extends ScalaDsl with EN {
   }
 
   And("""^I have a file called "(.*?)" at the url "(.*?)"$""") {
-    (fileName: String, url: String) =>
+    (_: String, _: String) =>
       {
         //      if (url.endsWith(".json")) schemaUrl = Some(url)
         //      if (url.endsWith(".csv")) csvUrl = Some(url)

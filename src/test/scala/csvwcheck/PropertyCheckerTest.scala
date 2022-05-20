@@ -3,11 +3,13 @@ import com.fasterxml.jackson.databind.node._
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.MetadataError
-import org.scalatest.{FunSuite, Tag}
+import org.scalatest.Tag
+import org.scalatest.funsuite.AnyFunSuite
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
-class PropertyCheckerTest extends FunSuite {
+//noinspection HttpUrlsUsage
+class PropertyCheckerTest extends AnyFunSuite {
   test("boolean property checker should return correct types") {
     val result = PropertyChecker.checkProperty(
       "suppressOutput",
@@ -23,7 +25,7 @@ class PropertyCheckerTest extends FunSuite {
   test(
     "boolean property checker should return invalid for non boolean values"
   ) {
-    val (value, warnings, typeString) = PropertyChecker.checkProperty(
+    val (value, warnings, _) = PropertyChecker.checkProperty(
       "suppressOutput",
       new TextNode("w3c"),
       "https://www.w3.org/",
@@ -36,7 +38,7 @@ class PropertyCheckerTest extends FunSuite {
   test(
     "boolean property checker should return zero warnings for boolean values"
   ) {
-    val (value, warnings, typeString) = PropertyChecker.checkProperty(
+    val (value, warnings, _) = PropertyChecker.checkProperty(
       "suppressOutput",
       BooleanNode.getTrue,
       "https://www.w3.org/",
@@ -126,7 +128,7 @@ class PropertyCheckerTest extends FunSuite {
     "notes property checker returns values, warnings array for valid input"
   ) {
     //    val notesArray = Array("firstNote", "SecondNote", "ThirdNote")
-    var arrayNode = JsonNodeFactory.instance.arrayNode()
+    val arrayNode = JsonNodeFactory.instance.arrayNode()
     arrayNode.add("FirstNote")
     arrayNode.add("secondNote") // Find a better way initialize ArrayNode
     val (values, warnings, _) =
@@ -186,7 +188,7 @@ class PropertyCheckerTest extends FunSuite {
       "",
       "und"
     )
-    var expectedValues = new TextNode("sample value")
+    val expectedValues = new TextNode("sample value")
     assert(warnings === Array[String]())
     assert(values === expectedValues)
   }
@@ -249,7 +251,7 @@ class PropertyCheckerTest extends FunSuite {
     assert(warnings === Array[String]())
   }
 
-  val t = Tag("Some Group")
+  private val t = Tag("Some Group")
   test(
     "datatype property checker returns expected value for object with invalid base and format",
     t
@@ -310,7 +312,7 @@ class PropertyCheckerTest extends FunSuite {
   }
 
   test(
-    "datatype property checker returns expected warnings and values for invalid datatype"
+    "Data type property checker returns expected warnings and values for invalid datatype"
   ) {
     val expectedJsonNode = JsonNodeFactory.instance.objectNode()
     expectedJsonNode.put("@id", "http://www.w3.org/2001/XMLSchema#string")
@@ -326,7 +328,7 @@ class PropertyCheckerTest extends FunSuite {
     assert(typeString === PropertyType.Inherited)
   }
 
-  test("datatype object with integer base cannot have length facet") {
+  test("Data type object with integer base cannot have length facet") {
     val json =
       """
         |{
@@ -340,7 +342,7 @@ class PropertyCheckerTest extends FunSuite {
       PropertyChecker.checkProperty("datatype", jsonNode, "", "und")
     }
     assert(
-      thrown.getMessage === "datatypes based on http://www.w3.org/2001/XMLSchema#integer cannot have a length facet"
+      thrown.getMessage === "Data types based on http://www.w3.org/2001/XMLSchema#integer cannot have a length facet"
     )
   }
 
@@ -358,7 +360,7 @@ class PropertyCheckerTest extends FunSuite {
       PropertyChecker.checkProperty("datatype", jsonNode, "", "und")
     }
     assert(
-      thrown.getMessage === "datatypes based on http://www.w3.org/2001/XMLSchema#integer cannot have a minLength facet"
+      thrown.getMessage === "Data types based on http://www.w3.org/2001/XMLSchema#integer cannot have a minLength facet"
     )
   }
 
@@ -376,7 +378,7 @@ class PropertyCheckerTest extends FunSuite {
       PropertyChecker.checkProperty("datatype", jsonNode, "", "und")
     }
     assert(
-      thrown.getMessage === "datatypes based on http://www.w3.org/2001/XMLSchema#integer cannot have a maxLength facet"
+      thrown.getMessage === "Data types based on http://www.w3.org/2001/XMLSchema#integer cannot have a maxLength facet"
     )
   }
 
@@ -522,7 +524,7 @@ class PropertyCheckerTest extends FunSuite {
 
     for (json <- jsonArray) {
       val jsonNode = objectMapper.readTree(json)
-      val thrown = intercept[MetadataError] {
+      intercept[MetadataError] {
         PropertyChecker.checkProperty("datatype", jsonNode, "", "und")
       }
     }
@@ -555,7 +557,7 @@ class PropertyCheckerTest extends FunSuite {
 
     for (json <- jsonArray) {
       val jsonNode = objectMapper.readTree(json)
-      val thrown = intercept[MetadataError] {
+      intercept[MetadataError] {
         PropertyChecker.checkProperty("datatype", jsonNode, "", "und")
       }
     }
@@ -789,7 +791,7 @@ class PropertyCheckerTest extends FunSuite {
                  | }
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (values, warnings, _) = PropertyChecker.checkProperty(
+    val (_, warnings, _) = PropertyChecker.checkProperty(
       "foreignKeys",
       jsonNode,
       baseUrl = "https://chickenburgers.com",
@@ -906,7 +908,7 @@ class PropertyCheckerTest extends FunSuite {
   ) {
     val validTextDirection =
       new TextNode("Some value which is not a text direction")
-    val (values, warnings, _) = PropertyChecker.checkProperty(
+    val (_, warnings, _) = PropertyChecker.checkProperty(
       "textDirection",
       validTextDirection,
       baseUrl = "https://www.w3.org",
@@ -1093,7 +1095,7 @@ class PropertyCheckerTest extends FunSuite {
         |""".stripMargin
 
     val jsonNode = objectMapper.readTree(json)
-    val (values, warnings, _) =
+    val (_, warnings, _) =
       PropertyChecker.checkProperty("datatype", jsonNode, "", "und")
 
     assert(warnings(0).contains("invalid_regex"))

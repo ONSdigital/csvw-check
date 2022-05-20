@@ -4,11 +4,12 @@ import com.fasterxml.jackson.databind.node.{JsonNodeFactory, ObjectNode, TextNod
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors.MetadataError
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
-import org.scalatest.FunSuite
+import org.scalatest.funsuite.AnyFunSuite
 
-import scala.collection.mutable.Map
+import scala.collection.mutable
 
-class TableTest extends FunSuite {
+//noinspection HttpUrlsUsage
+class TableTest extends AnyFunSuite {
   test("should create a table from pre-parsed CSV-W metadata") {
     val json =
       """{
@@ -80,22 +81,21 @@ class TableTest extends FunSuite {
       tableObject1.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/countries.json",
       "und",
-      Map(),
-      Map()
+      mutable.Map(),
+      mutable.Map()
     )
 
-    val (table2, w2) = Table.fromJson(
+    val (table2, _) = Table.fromJson(
       tableObject2.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/countries.json",
       "und",
-      Map(),
-      Map()
+      mutable.Map(),
+      mutable.Map()
     )
 
     assert(table1.url === "http://w3c.github.io/csvw/tests/countries.csv")
     assert(table1.id.get === "http://w3c.github.io/csvw/tests/sample_id_value")
     assert(table1.columns.length === 4)
-    val expectedDialect = JsonNodeFactory.instance.objectNode()
     assert(table1.dialect.get.encoding === "utf-8")
     assert(table2.foreignKeys.length === 1)
     assert(table2.foreignKeys(0).localColumns(0).name.get === "countryRef")
@@ -152,8 +152,8 @@ class TableTest extends FunSuite {
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
         "und",
-        Map(),
-        Map()
+        mutable.Map(),
+        mutable.Map()
       )
     }
     assert(thrown.getMessage === "Multiple columns named year")
@@ -198,8 +198,8 @@ class TableTest extends FunSuite {
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
         "und",
-        Map(),
-        Map()
+        mutable.Map(),
+        mutable.Map()
       )
     }
     assert(
@@ -242,8 +242,8 @@ class TableTest extends FunSuite {
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
         "und",
-        Map(),
-        Map()
+        mutable.Map(),
+        mutable.Map()
       )
     }
     assert(thrown.getMessage === "URL not found for table")
@@ -264,8 +264,8 @@ class TableTest extends FunSuite {
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
         "und",
-        Map(),
-        Map()
+        mutable.Map(),
+        mutable.Map()
       )
     }
     assert(
@@ -288,8 +288,8 @@ class TableTest extends FunSuite {
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
         "und",
-        Map(),
-        Map()
+        mutable.Map(),
+        mutable.Map()
       )
     }
     assert(

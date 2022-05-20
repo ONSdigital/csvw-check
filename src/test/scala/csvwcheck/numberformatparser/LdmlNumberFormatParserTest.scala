@@ -1,9 +1,10 @@
 package csvwcheck.numberformatparser
 
 import csvwcheck.errors.NumberFormatError
-import org.scalatest.FunSuite
+import org.scalatest.funsuite.AnyFunSuite
 
-class LdmlNumberFormatParserTest extends FunSuite {
+//noinspection ComparingUnrelatedTypes
+class LdmlNumberFormatParserTest extends AnyFunSuite {
 
   test("Parsing a Basic Number Works") {
     val numberFormatParser = LdmlNumberFormatParser()

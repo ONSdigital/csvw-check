@@ -13,6 +13,7 @@ import csvwcheck.traits.OptionExtensions.OptionIfDefined
 import org.apache.commons.csv.{CSVFormat, CSVParser, CSVRecord}
 
 import java.io.File
+import java.lang
 import java.net.URI
 import java.nio.charset.Charset
 import scala.collection.mutable
@@ -27,20 +28,20 @@ class Validator(
     val schemaUri: Option[String],
     csvUri: Option[String] = None
 ) {
-  type ForeignKeys = Map[ChildTableForeignKey, Set[KeyWithContext]]
+  type ForeignKeys = mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]]
   type ForeignKeyReferences =
-    Map[ParentTableForeignKeyReference, Set[KeyWithContext]]
-  type MapTableToForeignKeys = Map[Table, ForeignKeys]
-  type MapTableToForeignKeyReferences = Map[Table, ForeignKeyReferences]
+    mutable.Map[ParentTableForeignKeyReference, mutable.Set[KeyWithContext]]
+  type MapTableToForeignKeys = mutable.Map[Table, ForeignKeys]
+  type MapTableToForeignKeyReferences = mutable.Map[Table, ForeignKeyReferences]
   type TableState =
     (WarningsAndErrors, MapTableToForeignKeys, MapTableToForeignKeyReferences)
   type TableStateWithPrimaryKeyHashes = (
       ArrayBuffer[WarningWithCsvContext], // Collection of warnings
       ArrayBuffer[ErrorWithCsvContext], // Collection of errors
-      Map[ChildTableForeignKey, mutable.Set[
+      mutable.Map[ChildTableForeignKey, mutable.Set[
         KeyWithContext
       ]], // Map of childTableForeignKey to Set[KeyWithContext]
-      Map[ParentTableForeignKeyReference, mutable.Set[
+      mutable.Map[ParentTableForeignKeyReference, mutable.Set[
         KeyWithContext
       ]], // Map of parentTableForeignKey reference
       // to Set[KeyWithContext]
@@ -76,7 +77,7 @@ class Validator(
       .flatten
       .distinct
 
-    findAndValidateCsvwSchemaFileForCsv(maybeCsvUri, schemaUrisToCheck)
+    findAndValidateCsvwSchemaFileForCsv(maybeCsvUri, schemaUrisToCheck.toSeq)
   }
 
   def validateSchemaTables(
@@ -110,8 +111,8 @@ class Validator(
       .fold[TableState](
         (
           WarningsAndErrors(),
-          Map(),
-          Map()
+          mutable.Map(),
+          mutable.Map()
         )
       ) {
         case (
@@ -126,7 +127,7 @@ class Validator(
                 foreignKeyReferencesSource,
                 table
               )
-            ) => {
+            ) =>
           val wAndE = WarningsAndErrors(
             warningsAndErrorsAccumulator.warnings ++ warningsAndErrorsSource.warnings,
             warningsAndErrorsAccumulator.errors ++ warningsAndErrorsSource.errors
@@ -138,7 +139,6 @@ class Validator(
             foreignKeysAccumulator,
             foreignKeyReferencesAccumulator
           )
-        }
       }
       .map {
         case (warningsAndErrors, allForeignKeys, allForeignKeyReferences) =>
@@ -154,20 +154,22 @@ class Validator(
   }
 
   def getCsvFormat(dialect: Dialect): CSVFormat = {
-    val format = CSVFormat.RFC4180
-      .withDelimiter(dialect.delimiter)
-      .withQuote(dialect.quoteChar)
-      .withTrim() // Default for trim is true. Implement trim as per w3c spec, issue for this exists
-      .withIgnoreEmptyLines(dialect.skipBlankRows)
+    var formatBuilder = CSVFormat.RFC4180.builder()
+      .setDelimiter(dialect.delimiter)
+      .setQuote(dialect.quoteChar)
+      .setTrim(true) // Implement trim as per w3c spec, issue for this exists
+      .setIgnoreEmptyLines(dialect.skipBlankRows)
 
-    if (dialect.doubleQuote) {
+    formatBuilder = if (dialect.doubleQuote) {
       // https://github.com/apache/commons-csv/commit/c025d73d31ca9c9c467f3bad142ca62d7ebee76b
       // Above link explains that escaping with a double-quote mark only works if you avoid specifying the escape character.
       // The default behaviour of CsvParser will ensure the escape functions correctly.
-      format
+      formatBuilder
     } else {
-      format.withEscape('\\')
+      formatBuilder.setEscape('\\')
     }
+
+    formatBuilder.build()
   }
 
   def getParser(
@@ -255,7 +257,7 @@ class Validator(
           parser,
           degreeOfParallelismInTable
         ).recover {
-          case NonFatal(err) => {
+          case NonFatal(err) =>
             logger.debug(err)
             val warnings = Array(
               WarningWithCsvContext(
@@ -270,10 +272,9 @@ class Validator(
 
             (
               models.WarningsAndErrors(warnings = warnings),
-              Map(),
-              Map()
+              mutable.Map(),
+              mutable.Map()
             )
-          }
         }
       case Left(warningsAndErrors) =>
         if (tableUri.toString != csvUri.get && !sourceUriUsed) {
@@ -293,8 +294,8 @@ class Validator(
         val collection = List(
           (
             warningsAndErrors,
-            Map[ChildTableForeignKey, Set[KeyWithContext]](),
-            Map[ParentTableForeignKeyReference, Set[KeyWithContext]]()
+            mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]](),
+            mutable.Map[ParentTableForeignKeyReference, mutable.Set[KeyWithContext]]()
           )
         )
         Source(collection)
@@ -341,7 +342,7 @@ class Validator(
             Right((tableGroup, warningsAndErrors))
           else {
             val message =
-              s"Schema file does not contain a definition for ${maybeCsvUri}"
+              s"Schema file does not contain a definition for $maybeCsvUri"
             Left(
               SchemaDoesNotContainCsvError(
                 new IllegalArgumentException(message)
@@ -356,10 +357,9 @@ class Validator(
       case metadataError: MetadataError =>
         Left(GeneralCsvwLoadError(metadataError))
       case e: java.io.FileNotFoundException => Left(CascadeToOtherFilesError(e))
-      case e: Throwable => {
+      case e: Throwable =>
         logger.debug(e)
         Left(GeneralCsvwLoadError(e))
-      }
     }
   }
 
@@ -392,7 +392,7 @@ class Validator(
       schemaUrisToCheck: Seq[URI]
   ): Source[WarningsAndErrors, NotUsed] = {
     schemaUrisToCheck match {
-      case Seq() => {
+      case Seq() =>
         if (schemaUri.isDefined) {
           val error = ErrorWithCsvContext(
             "metadata",
@@ -407,7 +407,6 @@ class Validator(
           )
           Source(warningsAndErrorsToReturn)
         } else Source(List(WarningsAndErrors()))
-      }
       case Seq(uri, uris @ _*) =>
         attemptToFindMatchingTableGroup(
           maybeCsvUri,
@@ -421,7 +420,7 @@ class Validator(
               )
             }
 
-          case Left(GeneralCsvwLoadError(err)) => {
+          case Left(GeneralCsvwLoadError(err)) =>
             val error = ErrorWithCsvContext(
               "metadata",
               err.getClass.getName,
@@ -432,8 +431,7 @@ class Validator(
             )
             logger.debug(err)
             Source(List(WarningsAndErrors(errors = Array(error))))
-          }
-          case Left(SchemaDoesNotContainCsvError(err)) => {
+          case Left(SchemaDoesNotContainCsvError(err)) =>
             logger.debug(err)
             findAndValidateCsvwSchemaFileForCsv(maybeCsvUri, uris).map(x => {
               WarningsAndErrors(
@@ -447,13 +445,12 @@ class Validator(
                 )
               )
             })
-          }
-          case Left(CascadeToOtherFilesError(err)) => {
+          case Left(CascadeToOtherFilesError(err)) =>
             logger.debug(err)
             val errorsAndWarnings =
               findAndValidateCsvwSchemaFileForCsv(maybeCsvUri, uris)
             errorsAndWarnings
-          }
+          case Left(err) => throw new IllegalArgumentException(s"Unhandled CsvwLoadError $err")
 
         }
     }
@@ -508,9 +505,9 @@ class Validator(
       .fold[TableStateWithPrimaryKeyHashes](
         ArrayBuffer.empty[WarningWithCsvContext],
         ArrayBuffer.empty[ErrorWithCsvContext],
-        Map(),
-        Map(),
-        Map()
+        mutable.Map(),
+        mutable.Map(),
+        mutable.Map()
       ) {
 
         /** The last item in AccumulatedValues is used to store the hashes of every primary keys and its row numbers.
@@ -536,7 +533,7 @@ class Validator(
                 mapPrimaryKeyHashToRowNumbers
               ),
               rowOutputs: Seq[ValidateRowOutput]
-            ) => {
+            ) =>
           extractInformationFromValidateRowOutputs(
             warnings,
             errors,
@@ -553,7 +550,6 @@ class Validator(
             parentTableForeignKeys,
             mapPrimaryKeyHashToRowNumbers
           )
-        }
       }
       .flatMapConcat(keyCheckAggregateValues => {
         // function getParser will return a parser here. If not, if wouldn't have reached here
@@ -660,7 +656,7 @@ class Validator(
         }
       )
       .fold[PrimaryKeysAndErrors](
-        (Set[List[Any]](), ArrayBuffer.empty[ErrorWithCsvContext])
+        (mutable.Set[List[Any]](), ArrayBuffer.empty[ErrorWithCsvContext])
       ) {
         case (
               (
@@ -668,7 +664,7 @@ class Validator(
                 errorsInAkkaStreams
               ),
               rowOutputs: Seq[ValidateRowOutput]
-            ) => {
+            ) =>
           for (rowOutput <- rowOutputs) {
             ensurePrimaryKeyValueIsNotDuplicate(primaryKeyValues, rowOutput)
               .ifDefined(e => {
@@ -676,7 +672,6 @@ class Validator(
               })
           }
           (primaryKeyValues, errorsInAkkaStreams)
-        }
       }
       .map {
         case (_, err) =>
@@ -796,17 +791,17 @@ class Validator(
 
   private def setParentTableForeignKeyReferences(
       validateRowOutput: ValidateRowOutput,
-      parentTableForeignKeyReferences: Map[ParentTableForeignKeyReference, Set[
+      parentTableForeignKeyReferences: mutable.Map[ParentTableForeignKeyReference, mutable.Set[
         KeyWithContext
       ]]
   ): Unit = {
     validateRowOutput.parentTableForeignKeyReferences
       .foreach {
-        case (k, value) => {
+        case (k, value) =>
           val allPossibleParentKeyValues =
             parentTableForeignKeyReferences.getOrElse(
               k,
-              Set[KeyWithContext]()
+              mutable.Set[KeyWithContext]()
             )
           if (allPossibleParentKeyValues.contains(value)) {
             allPossibleParentKeyValues -= value
@@ -814,35 +809,33 @@ class Validator(
           }
           allPossibleParentKeyValues += value
           parentTableForeignKeyReferences(k) = allPossibleParentKeyValues
-        }
       }
   }
 
   private def setChildTableForeignKeys(
       validateRowOutput: ValidateRowOutput,
-      childTableForeignKeys: Map[ChildTableForeignKey, Set[KeyWithContext]]
-  ) = {
+      childTableForeignKeys: mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]]
+  ): Unit = {
     validateRowOutput.childTableForeignKeys
       .foreach {
-        case (k, value) => {
+        case (k, value) =>
           val childKeyValues = childTableForeignKeys.getOrElse(
             k,
-            Set[KeyWithContext]()
+            mutable.Set[KeyWithContext]()
           )
           childKeyValues += value
           childTableForeignKeys(k) = childKeyValues
-        }
       }
   }
 
   private def validateForeignKeyReferences(
-      childTableForeignKeysByTable: Map[
+      childTableForeignKeysByTable: mutable.Map[
         Table,
-        Map[ChildTableForeignKey, Set[KeyWithContext]]
+        mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]]
       ],
-      parentTableForeignKeyReferencesByTable: Map[
+      parentTableForeignKeyReferencesByTable: mutable.Map[
         Table,
-        Map[ParentTableForeignKeyReference, Set[KeyWithContext]]
+        mutable.Map[ParentTableForeignKeyReference, mutable.Set[KeyWithContext]]
       ]
   ): Errors = {
     // Child Table : Parent Table
@@ -859,26 +852,24 @@ class Validator(
           mapParentTableForeignKeyReferenceToAllPossibleValues
       ) {
         val childTableForeignKeys
-            : Map[ChildTableForeignKey, Set[KeyWithContext]] =
+            : mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]] =
           childTableForeignKeysByTable
-            .get(parentTableForeignKeyReference.childTable)
-            .getOrElse(
+            .getOrElse(parentTableForeignKeyReference.childTable,
               throw new Exception(
                 s"Could not find corresponding child table(${parentTableForeignKeyReference.childTable.url}) for parent table ${parentTable.url}"
               )
             )
 
-        val childTableKeyValues: Set[KeyWithContext] =
+        val childTableKeyValues: mutable.Set[KeyWithContext] =
           childTableForeignKeys
-            .get(parentTableForeignKeyReference.foreignKey)
-            .getOrElse(
+            .getOrElse(parentTableForeignKeyReference.foreignKey,
               throw new Exception(
                 s"Could not find foreign key against child table." + parentTableForeignKeyReference.foreignKey.jsonObject.toPrettyString
               )
             )
 
         val keyValuesNotDefinedInParent =
-          childTableKeyValues -- allPossibleParentTableValues
+          childTableKeyValues.diff(allPossibleParentTableValues)
         if (keyValuesNotDefinedInParent.nonEmpty) {
           errors ++= keyValuesNotDefinedInParent
             .map(k =>

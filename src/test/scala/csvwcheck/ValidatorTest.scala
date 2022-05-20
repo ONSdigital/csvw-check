@@ -2,7 +2,7 @@ package csvwcheck
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.Sink
 import csvwcheck.models.{KeyWithContext, WarningsAndErrors}
-import org.scalatest.FunSuite
+import org.scalatest.funsuite.AnyFunSuite
 
 import java.io.File
 import java.time.{ZoneId, ZonedDateTime}
@@ -10,7 +10,7 @@ import scala.collection.mutable
 import scala.concurrent.Await
 import scala.concurrent.duration.DurationInt
 
-class ValidatorTest extends FunSuite {
+class ValidatorTest extends AnyFunSuite {
   val csvwExamplesBaseDir = "src/test/resources/csvwExamples/"
   implicit val system: ActorSystem = ActorSystem("actor-system")
   test("set warning when title is empty for a column") {

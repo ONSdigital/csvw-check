@@ -34,13 +34,11 @@ case class NumberFormat(
     }
     df.setDecimalFormatSymbols(decimalFormatSymbols)
     pattern match {
-      case Some(p) => {
+      case Some(p) =>
         df.applyPattern(p)
         df.setParseStrict(true)
-      }
-      case _ => {
+      case _ =>
         // Figure out what the default pattern should be
-      }
     }
   } catch {
     case e: Exception => throw NumberFormatError(e.getMessage, e)

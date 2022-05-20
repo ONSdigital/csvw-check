@@ -1,8 +1,10 @@
 package csvwcheck
+import scala.collection.mutable
 import scala.collection.mutable.HashMap
 
+//noinspection HttpUrlsUsage
 object NameSpaces {
-  val values = HashMap(
+  val values: mutable.HashMap[String, String] = mutable.HashMap(
     "dcat" -> "http://www.w3.org/ns/dcat#",
     "qb" -> "http://purl.org/linked-data/cube#",
     "grddl" -> "http://www.w3.org/2003/g/data-view#",

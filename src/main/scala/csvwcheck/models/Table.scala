@@ -10,15 +10,16 @@ import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import csvwcheck.{PropertyChecker, models}
 import org.apache.commons.csv.CSVRecord
 
+import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, Map}
 object Table {
 
   def fromJson(
-      tableDesc: ObjectNode,
-      baseUrl: String,
-      lang: String,
-      commonProperties: Map[String, JsonNode],
-      inheritedPropertiesIn: Map[String, JsonNode]
+                tableDesc: ObjectNode,
+                baseUrl: String,
+                lang: String,
+                commonProperties: mutable.Map[String, JsonNode],
+                inheritedPropertiesIn: mutable.Map[String, JsonNode]
   ): (Table, Array[WarningWithCsvContext]) = {
     val (annotations, tableProperties, inheritedProperties, warnings) =
       partitionAndValidateTablePropertiesByType(
@@ -56,36 +57,35 @@ object Table {
   }
 
   private def partitionAndValidateTablePropertiesByType(
-      commonProperties: Map[String, JsonNode],
-      inheritedProperties: Map[String, JsonNode],
-      tableDesc: ObjectNode,
-      baseUrl: String,
-      lang: String
+                                                         commonProperties: mutable.Map[String, JsonNode],
+                                                         inheritedProperties: mutable.Map[String, JsonNode],
+                                                         tableDesc: ObjectNode,
+                                                         baseUrl: String,
+                                                         lang: String
   ): (
-      Map[String, JsonNode],
-      Map[String, JsonNode],
-      Map[String, JsonNode],
+      mutable.Map[String, JsonNode],
+      mutable.Map[String, JsonNode],
+      mutable.Map[String, JsonNode],
       Array[WarningWithCsvContext]
   ) = {
     val warnings = ArrayBuffer.empty[WarningWithCsvContext]
-    val annotations = Map[String, JsonNode]()
-    val tableProperties: Map[String, JsonNode] =
+    val annotations = mutable.Map[String, JsonNode]()
+    val tableProperties: mutable.Map[String, JsonNode] =
       MapHelpers.deepCloneJsonPropertiesMap(commonProperties)
-    val inheritedPropertiesCopy: Map[String, JsonNode] =
+    val inheritedPropertiesCopy: mutable.Map[String, JsonNode] =
       MapHelpers.deepCloneJsonPropertiesMap(inheritedProperties)
     for ((property, value) <- tableDesc.getKeysAndValues) {
       (property, value) match {
-        case ("@type", s: TextNode) if s.asText == "Table" => {}
-        case ("@type", s: TextNode) => {
-          throw new MetadataError(
+        case ("@type", s: TextNode) if s.asText == "Table" =>
+        case ("@type", _: TextNode) =>
+          throw MetadataError(
             s"@type of table is not 'Table' - ${tableDesc.get("url").asText()}.@type"
           )
-        }
         case ("@type", v) =>
-          throw new MetadataError(
+          throw MetadataError(
             s"Unexpected value for '@type'. Expected string but got ${v.getNodeType} (${v.toPrettyString})"
           )
-        case _ => {
+        case _ =>
           val (newValue, w, csvwPropertyType) =
             PropertyChecker.checkProperty(property, value, baseUrl, lang)
           warnings.addAll(
@@ -105,7 +105,7 @@ object Table {
               annotations += (property -> newValue)
             case PropertyType.Table | PropertyType.Common =>
               tableProperties += (property -> newValue)
-            case PropertyType.Column => {
+            case PropertyType.Column =>
               warnings.addOne(
                 WarningWithCsvContext(
                   "invalid_property",
@@ -116,17 +116,15 @@ object Table {
                   ""
                 )
               )
-            }
             case _ => inheritedPropertiesCopy += (property -> newValue)
           }
-        }
       }
     }
     (annotations, tableProperties, inheritedPropertiesCopy, warnings.toArray)
   }
 
   private def getUrlEnsureExists(
-      tableProperties: Map[String, JsonNode]
+      tableProperties: mutable.Map[String, JsonNode]
   ): String = {
     tableProperties
       .getOrElse("url", throw MetadataError("URL not found for table"))
@@ -134,8 +132,8 @@ object Table {
   }
 
   private def extractTableSchema(
-      tableProperties: Map[String, JsonNode],
-      inheritedPropertiesCopy: Map[String, JsonNode]
+                                  tableProperties: mutable.Map[String, JsonNode],
+                                  inheritedPropertiesCopy: mutable.Map[String, JsonNode]
   ): Option[JsonNode] = {
     tableProperties
       .get("tableSchema")
@@ -143,18 +141,18 @@ object Table {
   }
 
   private def createTableForExistingSchema(
-      tableSchema: JsonNode,
-      inheritedProperties: Map[String, JsonNode],
-      baseUrl: String,
-      lang: String,
-      url: String,
-      tableProperties: Map[String, JsonNode],
-      annotations: Map[String, JsonNode],
-      existingWarnings: Array[WarningWithCsvContext]
+                                            tableSchema: JsonNode,
+                                            inheritedProperties: mutable.Map[String, JsonNode],
+                                            baseUrl: String,
+                                            lang: String,
+                                            url: String,
+                                            tableProperties: mutable.Map[String, JsonNode],
+                                            annotations: mutable.Map[String, JsonNode],
+                                            existingWarnings: Array[WarningWithCsvContext]
   ): (Table, Array[WarningWithCsvContext]) = {
 
     tableSchema match {
-      case tableSchemaObject: ObjectNode => {
+      case tableSchemaObject: ObjectNode =>
         var warnings = Array[WarningWithCsvContext]()
         warnings = warnings.concat(existingWarnings)
 
@@ -202,7 +200,6 @@ object Table {
           annotations = annotations
         )
         (table, warnings)
-      }
       case _ =>
         throw MetadataError(
           s"Table schema must be object for table $url "
@@ -211,7 +208,7 @@ object Table {
   }
 
   private def getDialect(
-      tableProperties: Map[String, JsonNode]
+      tableProperties: mutable.Map[String, JsonNode]
   ): Option[Dialect] = {
     tableProperties
       .get("dialect")
@@ -248,10 +245,10 @@ object Table {
   }
 
   private def validateAndExtractColumnsFromSchema(
-      baseUrl: String,
-      lang: String,
-      inheritedProperties: Map[String, JsonNode],
-      tableSchemaObject: ObjectNode
+                                                   baseUrl: String,
+                                                   lang: String,
+                                                   inheritedProperties: mutable.Map[String, JsonNode],
+                                                   tableSchemaObject: ObjectNode
   ): (Array[Column], Array[WarningWithCsvContext]) = {
     val warnings = ArrayBuffer.empty[WarningWithCsvContext]
 
@@ -262,9 +259,9 @@ object Table {
 
     val columns = columnObjects.zipWithIndex
       .flatMap {
-        case (col, i) => {
+        case (col, i) =>
           col match {
-            case colObj: ObjectNode => {
+            case colObj: ObjectNode =>
               val colNum = i + 1
               val (colDef, w) = Column.fromJson(
                 colNum,
@@ -286,8 +283,7 @@ object Table {
                 )
               )
               Some(colDef)
-            }
-            case _ => {
+            case _ =>
               warnings.addOne(
                 WarningWithCsvContext(
                   "invalid_column_description",
@@ -299,9 +295,7 @@ object Table {
                 )
               )
               None
-            }
           }
-        }
       }
 
     val columnNames = columns.flatMap(c => c.name)
@@ -318,7 +312,7 @@ object Table {
       .keys
 
     if (duplicateColumnNames.nonEmpty) {
-      throw new MetadataError(
+      throw MetadataError(
         s"Multiple columns named ${duplicateColumnNames.mkString(", ")}"
       )
     }
@@ -328,7 +322,7 @@ object Table {
     var virtualColumns = false
     for (column <- columns) {
       if (virtualColumns && !column.virtual) {
-        throw new MetadataError(
+        throw MetadataError(
           s"virtual columns before non-virtual column ${column.name.get} (${column.columnOrdinal})"
         )
       }
@@ -350,7 +344,7 @@ object Table {
         maybeCol match {
           case Some(col) => rowTitlesColumns.addOne(col)
           case None =>
-            throw new MetadataError(
+            throw MetadataError(
               s"rowTitles references non-existant column - ${rowTitle.asText()}"
             )
         }
@@ -382,7 +376,7 @@ object Table {
           maybeCol match {
             case Some(col) => foreignKeyColumns.addOne(col)
             case None =>
-              throw new MetadataError(
+              throw MetadataError(
                 s"foreignKey references non-existent column - ${reference.asText()}"
               )
           }
@@ -413,7 +407,7 @@ object Table {
         )
         maybeCol match {
           case Some(col) => primaryKeyColumns :+= col
-          case None => {
+          case None =>
             warnings.addOne(
               WarningWithCsvContext(
                 "invalid_column_reference",
@@ -425,7 +419,6 @@ object Table {
               )
             )
             primaryKeyValid = false
-          }
 
         }
       }
@@ -436,8 +429,8 @@ object Table {
   }
 
   private def setTableSchemaInheritedProperties(
-      inheritedProperties: Map[String, JsonNode],
-      tableSchemaObject: ObjectNode
+                                                 inheritedProperties: mutable.Map[String, JsonNode],
+                                                 tableSchemaObject: ObjectNode
   ): Unit = {
     for ((property, value) <- tableSchemaObject.getKeysAndValues) {
       if (
@@ -465,7 +458,7 @@ object Table {
     }
   }
 
-  private def getId(tableProperties: Map[String, JsonNode]): Option[String] = {
+  private def getId(tableProperties: mutable.Map[String, JsonNode]): Option[String] = {
     val idNode = tableProperties.get("@id")
     idNode match {
       case Some(value) => Some(value.asText())
@@ -474,7 +467,7 @@ object Table {
   }
 
   private def getNotes(
-      tableProperties: Map[String, JsonNode]
+      tableProperties: mutable.Map[String, JsonNode]
   ): Option[ArrayNode] = {
     val notesNode = tableProperties.get("notes")
     notesNode match {
@@ -488,7 +481,7 @@ object Table {
   }
 
   private def getSuppressOutput(
-      tableProperties: Map[String, JsonNode]
+      tableProperties: mutable.Map[String, JsonNode]
   ): Boolean = {
     val suppressOutputNode = tableProperties.get("suppressOutput")
     suppressOutputNode match {
@@ -498,9 +491,9 @@ object Table {
   }
 
   private def initializeTableWithDefaults(
-      annotations: Map[String, JsonNode],
-      warnings: Array[WarningWithCsvContext],
-      url: String
+                                           annotations: mutable.Map[String, JsonNode],
+                                           warnings: Array[WarningWithCsvContext],
+                                           url: String
   ): (Table, Array[WarningWithCsvContext]) = {
     val table = new Table(
       url = url,
@@ -530,7 +523,7 @@ case class Table private (
     rowTitleColumns: Array[Column],
     schemaId: Option[String],
     suppressOutput: Boolean,
-    annotations: Map[String, JsonNode]
+    annotations: mutable.Map[String, JsonNode]
 ) {
 
   /**
@@ -652,7 +645,7 @@ case class Table private (
           columnName,
           ""
         )
-      } else (columnNames :+= columnName)
+      } else columnNames :+= columnName
       if (columnIndex < columns.length) {
         val column = columns(columnIndex)
         val WarningsAndErrors(w, e) = column.validateHeader(columnName)

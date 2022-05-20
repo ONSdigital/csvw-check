@@ -112,16 +112,16 @@ object TableGroup {
   ): (String, String, Array[WarningWithCsvContext]) = {
     def validateFirstItemInContext(): Unit = {
       context.get(0) match {
-        case s: TextNode if s.asText == csvwContextUri => {}
+        case s: TextNode if s.asText == csvwContextUri =>
         case _ =>
           throw MetadataError(
-            s"First item in @context must be string ${csvwContextUri} "
+            s"First item in @context must be string $csvwContextUri "
           )
       }
     }
 
     context.size() match {
-      case 2 => {
+      case 2 =>
         // if @context contains 2 elements, the first element will be the namespace for csvw - http://www.w3.org/ns/csvw
         // The second element can be @language or @base - "@context": ["http://www.w3.org/ns/csvw", {"@language": "en"}]
         validateFirstItemInContext()
@@ -133,28 +133,26 @@ object TableGroup {
               lang
             )
           case _ =>
-            throw new MetadataError(
+            throw MetadataError(
               "Second @context array value must be an object"
             )
         }
-      }
-      case 1 => {
+      case 1 =>
         // If @context contains just one element, the namespace for csvw should always be http://www.w3.org/ns/csvw
         // "@context": "http://www.w3.org/ns/csvw"
         validateFirstItemInContext()
         (baseUrl, lang, Array[WarningWithCsvContext]())
-      }
       case l =>
-        throw new MetadataError(s"Unexpected @context array length $l")
+        throw MetadataError(s"Unexpected @context array length $l")
     }
   }
 
   /**
     * This function validates the second item in context property.
     * The second element can be @language or @base - "@context": ["http://www.w3.org/ns/csvw", {"@language": "en"}]
-    * @param contextBaseAndLangObject
-    * @param baseUrl
-    * @param lang
+    * @param contextBaseAndLangObject - The context object.
+    * @param baseUrl - The base URL of the CSV-W
+    * @param lang - The language.
     * @return newBaseUrl, newLang, warnings (if any)
     */
   def getAndValidateBaseAndLangFromContextObject(
@@ -192,7 +190,7 @@ object TableGroup {
             "metadata",
             "",
             "",
-            s"${property}: ${value}",
+            s"$property: $value",
             ""
           )
         })
@@ -215,7 +213,7 @@ object TableGroup {
           i,
           reference
         )
-        val mapNameToColumn: mutable.Map[String, Column] = Map()
+        val mapNameToColumn: mutable.Map[String, Column] = mutable.Map()
         for (column <- parentTable.columns) {
           column.name
             .foreach(columnName => mapNameToColumn += (columnName -> column))
@@ -229,9 +227,9 @@ object TableGroup {
             mapNameToColumn.get(columnReference.asText()) match {
               case Some(column) => column
               case None =>
-                throw new MetadataError(
+                throw MetadataError(
                   s"column named ${columnReference.asText()} does not exist in ${parentTable.url}," +
-                    s" $$.tables[?(@.url = '${tableUrl}')].tableSchema.foreign_keys[${i}].reference.columnReference"
+                    s" $$.tables[?(@.url = '$tableUrl')].tableSchema.foreign_keys[$i].reference.columnReference"
                 )
             }
           })
@@ -250,11 +248,11 @@ object TableGroup {
   }
 
   private def setReferencedTableOrThrowException(
-      baseUrl: String,
-      tables: Map[String, Table],
-      tableUrl: String,
-      foreignKeyArrayIndex: Int,
-      reference: JsonNode
+                                                  baseUrl: String,
+                                                  tables: mutable.Map[String, Table],
+                                                  tableUrl: String,
+                                                  foreignKeyArrayIndex: Int,
+                                                  reference: JsonNode
   ): Table = {
     val resourceNode = reference.path("resource")
     if (resourceNode.isMissingNode) {
@@ -272,9 +270,9 @@ object TableGroup {
       referencedTables match {
         case referencedTable :: _ => referencedTable
         case Nil =>
-          throw new MetadataError(
-            s"Could not find foreign key referenced schema ${schemaUrl}, " +
-              s"$$.tables[?(@.url = '${tableUrl}')].tableSchema.foreignKeys[${foreignKeyArrayIndex}].reference.SchemaReference"
+          throw MetadataError(
+            s"Could not find foreign key referenced schema $schemaUrl, " +
+              s"$$.tables[?(@.url = '$tableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference.SchemaReference"
           )
       }
     } else {
@@ -283,13 +281,12 @@ object TableGroup {
         resourceNode.asText()
       ).toString
       tables.get(referencedTableUrl) match {
-        case Some(refTable) => {
+        case Some(refTable) =>
           refTable
-        }
         case None =>
-          throw new MetadataError(
-            s"Could not find foreign key referenced table ${referencedTableUrl}, " +
-              s"$$.tables[?(@.url = '${tableUrl}')].tableSchema.foreignKeys[${foreignKeyArrayIndex}].reference.resource"
+          throw MetadataError(
+            s"Could not find foreign key referenced table $referencedTableUrl, " +
+              s"$$.tables[?(@.url = '$tableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference.resource"
           )
       }
     }
@@ -298,7 +295,7 @@ object TableGroup {
   private def ensureTypeofTableGroup(tableGroupNode: ObjectNode): Unit = {
     val typeNode = tableGroupNode.path("@type")
     if (!typeNode.isMissingNode && typeNode.asText != "TableGroup") {
-      throw new MetadataError(
+      throw MetadataError(
         s"@type of table group is not 'TableGroup', found @type to be a '${typeNode.asText()}'"
       )
     }
@@ -309,14 +306,14 @@ object TableGroup {
       baseUrl: String,
       lang: String
   ): (
-      Map[String, JsonNode],
-      Map[String, JsonNode],
-      Map[String, JsonNode],
+      mutable.Map[String, JsonNode],
+      mutable.Map[String, JsonNode],
+      mutable.Map[String, JsonNode],
       Array[WarningWithCsvContext]
   ) = {
-    val annotations = Map[String, JsonNode]()
-    val commonProperties = Map[String, JsonNode]()
-    val inheritedProperties = Map[String, JsonNode]()
+    val annotations = mutable.Map[String, JsonNode]()
+    val commonProperties = mutable.Map[String, JsonNode]()
+    val inheritedProperties = mutable.Map[String, JsonNode]()
     val warnings = ArrayBuffer.empty[WarningWithCsvContext]
     for ((property, value) <- tableGroupNode.getKeysAndValues) {
       if (!validProperties.contains(property)) {
@@ -339,7 +336,7 @@ object TableGroup {
           case PropertyType.Common     => commonProperties += (property -> newValue)
           case PropertyType.Inherited =>
             inheritedProperties += (property -> newValue)
-          case _ => {
+          case _ =>
             warnings.addOne(
               WarningWithCsvContext(
                 "invalid_property",
@@ -350,7 +347,6 @@ object TableGroup {
                 ""
               )
             )
-          }
         }
       }
       ()
@@ -382,18 +378,18 @@ object TableGroup {
   }
 
   def extractTablesFromNode(
-      tablesArrayNode: ArrayNode,
-      baseUrl: String,
-      lang: String,
-      commonProperties: Map[String, JsonNode],
-      inheritedProperties: Map[String, JsonNode]
+                             tablesArrayNode: ArrayNode,
+                             baseUrl: String,
+                             lang: String,
+                             commonProperties: mutable.Map[String, JsonNode],
+                             inheritedProperties: mutable.Map[String, JsonNode]
   ): (mutable.Map[String, Table], WarningsAndErrors) = {
     val warnings = ArrayBuffer.empty[WarningWithCsvContext]
     val errors = ArrayBuffer.empty[ErrorWithCsvContext]
-    val tables = Map[String, Table]()
+    val tables = mutable.Map[String, Table]()
     for (tableElement <- tablesArrayNode.elements().asScalaArray) {
       tableElement match {
-        case tableElementObject: ObjectNode => {
+        case tableElementObject: ObjectNode =>
           var tableUrl = tableElement.get("url")
           if (!tableUrl.isTextual) {
             errors.addOne(
@@ -421,8 +417,7 @@ object TableGroup {
           )
           tables += (tableUrl.asText -> table)
           warnings.addAll(w)
-        }
-        case _ => {
+        case _ =>
           warnings.addOne(
             WarningWithCsvContext(
               "invalid_table_description",
@@ -433,7 +428,6 @@ object TableGroup {
               ""
             )
           )
-        }
       }
     }
     (
@@ -442,7 +436,7 @@ object TableGroup {
     )
   }
 
-  private def getId(commonProperties: Map[String, JsonNode]) = {
+  private def getId(commonProperties: mutable.Map[String, JsonNode]) = {
     commonProperties
       .get("@id")
       .map(idNode => idNode.asText())
@@ -450,11 +444,11 @@ object TableGroup {
 
 }
 case class TableGroup private (
-    baseUrl: String,
-    id: Option[String],
-    tables: Map[String, Table],
-    notes: Option[JsonNode],
-    annotations: Map[String, JsonNode]
+                                baseUrl: String,
+                                id: Option[String],
+                                tables: mutable.Map[String, Table],
+                                notes: Option[JsonNode],
+                                annotations: mutable.Map[String, JsonNode]
 ) {
 
   def validateHeader(

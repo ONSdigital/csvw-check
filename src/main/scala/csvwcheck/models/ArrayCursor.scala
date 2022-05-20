@@ -16,16 +16,16 @@ case class ArrayCursor[T: ClassTag](private val values: Seq[T]) {
   val arrayValues: Array[T] = Array.from[T](values)
   private var currentIndex: Int = -1
 
-  def hasNext() = hasValue(1)
+  def hasNext: Boolean = hasValue(1)
 
-  def hasPrevious() = hasValue(-1)
+  def hasPrevious: Boolean = hasValue(-1)
 
   /**
     * Whether or not the Array has a value `offset` items relative to the current index.
-    * @param offset
-    * @return
+    * @param offset - The offset from the current position at which to check for a value
+    * @return Boolean
     */
-  def hasValue(offset: Int) = {
+  def hasValue(offset: Int): Boolean = {
     val offsetPosition = currentIndex + offset
     val maxIndex = arrayValues.length - 1
     maxIndex >= 0 && offsetPosition >= 0 && offsetPosition <= maxIndex

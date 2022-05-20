@@ -1,11 +1,11 @@
 package csvwcheck.models
 
 import csvwcheck.errors.DateFormatError
-import org.scalatest.FunSuite
+import org.scalatest.funsuite.AnyFunSuite
 
 import java.time.Month
 
-class DateFormatTest extends FunSuite {
+class DateFormatTest extends AnyFunSuite {
   test(
     "it throws an exception for unrecognized date field symbols in date format"
   ) {

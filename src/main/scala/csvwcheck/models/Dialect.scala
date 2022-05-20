@@ -30,9 +30,7 @@ object Dialect {
       .getOrElse('\"')
 
     val doubleQuote = dialectNode
-      .getMaybeNode("doubleQuote")
-      .map(_.asBoolean())
-      .getOrElse(true)
+      .getMaybeNode("doubleQuote").forall(_.asBoolean())
 
     val commentPrefix = dialectNode
       .getMaybeNode("commentPrefix")
@@ -40,7 +38,7 @@ object Dialect {
       .getOrElse("#")
 
     val header =
-      dialectNode.getMaybeNode("header").map(_.asBoolean()).getOrElse(true)
+      dialectNode.getMaybeNode("header").forall(_.asBoolean())
 
     val headerRowCount =
       dialectNode.getMaybeNode("headerRowCount").map(_.asInt).getOrElse(1)
@@ -57,14 +55,10 @@ object Dialect {
       dialectNode.getMaybeNode("skipColumns").map(_.asInt()).getOrElse(0)
 
     val skipBlankRows = dialectNode
-      .getMaybeNode("skipBlankRows")
-      .map(_.asBoolean())
-      .getOrElse(false)
+      .getMaybeNode("skipBlankRows").exists(_.asBoolean())
 
     val skipInitialSpace = dialectNode
-      .getMaybeNode("skipInitialSpace")
-      .map(_.asBoolean)
-      .getOrElse(false)
+      .getMaybeNode("skipInitialSpace").exists(_.asBoolean)
     val trim = dialectNode
       .getMaybeNode("trim")
       .map(n => TrimType.fromString(n.asText))

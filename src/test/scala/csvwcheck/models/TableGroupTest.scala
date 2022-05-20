@@ -3,9 +3,10 @@ package csvwcheck.models
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors.MetadataError
-import org.scalatest.FunSuite
+import org.scalatest.funsuite.AnyFunSuite
 
-class TableGroupTest extends FunSuite {
+//noinspection HttpUrlsUsage
+class TableGroupTest extends AnyFunSuite {
   test("should create table group object from pre parsed metadata") {
     val json =
       """
@@ -64,12 +65,10 @@ class TableGroupTest extends FunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (tableGroup, warnings) = TableGroup.fromJson(
+    val (tableGroup, _) = TableGroup.fromJson(
       jsonNode.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/countries.json"
     )
-    val table2 =
-      tableGroup.tables("http://w3c.github.io/csvw/tests/country_slice.csv")
     assert(tableGroup.id.isEmpty)
     assert(tableGroup.tables.size === 2)
     assert(tableGroup.annotations.size === 0)
@@ -158,7 +157,7 @@ class TableGroupTest extends FunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (tableGroup, warnings) = TableGroup.fromJson(
+    val (tableGroup, _) = TableGroup.fromJson(
       jsonNode.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/"
     )
@@ -285,7 +284,7 @@ class TableGroupTest extends FunSuite {
         |  }
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (tableGroup, warnings) = TableGroup.fromJson(
+    val (tableGroup, _) = TableGroup.fromJson(
       jsonNode.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/test040-metadata.json"
     )

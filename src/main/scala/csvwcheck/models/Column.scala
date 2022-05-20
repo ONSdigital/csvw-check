@@ -29,16 +29,16 @@ object Column {
     .set("@id", new TextNode(s"${xmlSchema}string"))
   val rdfSyntaxNs = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 
-  val validDecimalDatatypeRegex =
+  private val validDecimalDatatypeRegex =
     "(\\+|-)?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)".r
 
   // https://www.w3.org/TR/xmlschema11-2/#float, https://www.w3.org/TR/xmlschema11-2/#double
   val validDoubleDatatypeRegex, validFloatDatatypeRegex =
     "(\\+|-)?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([Ee](\\+|-)?[0-9]+)?|(\\+|-)?INF|NaN".r
 
-  val validIntegerRegex = "[\\-+]?[0-9]+".r
+  private val validIntegerRegex = "[\\-+]?[0-9]+".r
 
-  val validLongDatatypeRegex = "[\\-+]?[0-9]+".r
+  private val validLongDatatypeRegex = "[\\-+]?[0-9]+".r
 
   // https://www.w3.org/TR/xmlschema11-2/#duration
   val validDurationRegex: Regex =
@@ -55,7 +55,7 @@ object Column {
       columnDesc: ObjectNode,
       baseUrl: String,
       lang: String,
-      inheritedProperties: Map[String, JsonNode]
+      inheritedProperties: mutable.Map[String, JsonNode]
   ): (Column, Array[ErrorWithoutContext]) = {
 
     val inheritedPropertiesCopy =
@@ -132,7 +132,7 @@ object Column {
     (column, warnings)
   }
 
-  def getOrdered(inheritedProperties: Map[String, JsonNode]): Boolean = {
+  def getOrdered(inheritedProperties: mutable.Map[String, JsonNode]): Boolean = {
     val inheritedPropertiesNode = inheritedProperties.get("ordered")
     inheritedPropertiesNode match {
       case Some(value) => value.asBoolean()
@@ -140,7 +140,7 @@ object Column {
     }
   }
 
-  def getTextDirection(inheritedProperties: Map[String, JsonNode]): String = {
+  def getTextDirection(inheritedProperties: mutable.Map[String, JsonNode]): String = {
     val textDirectionNode = inheritedProperties.get("textDirection")
     textDirectionNode match {
       case Some(value) => value.asText()
@@ -148,7 +148,7 @@ object Column {
     }
   }
 
-  def getSuppressOutput(columnProperties: Map[String, JsonNode]): Boolean = {
+  def getSuppressOutput(columnProperties: mutable.Map[String, JsonNode]): Boolean = {
     val suppressOutputNode = columnProperties.get("suppressOutput")
     suppressOutputNode match {
       case Some(value) => value.asBoolean()
@@ -156,7 +156,7 @@ object Column {
     }
   }
 
-  def getVirtual(columnProperties: Map[String, JsonNode]): Boolean = {
+  def getVirtual(columnProperties: mutable.Map[String, JsonNode]): Boolean = {
     val virtualNode = columnProperties.get("virtual")
     virtualNode match {
       case Some(value) => value.asBoolean()
@@ -164,28 +164,28 @@ object Column {
     }
   }
 
-  def getRequired(inheritedProperties: Map[String, JsonNode]): Boolean = {
+  def getRequired(inheritedProperties: mutable.Map[String, JsonNode]): Boolean = {
     inheritedProperties.get("required") match {
       case Some(value) => value.asBoolean()
       case _           => false
     }
   }
 
-  def getDefault(inheritedProperties: Map[String, JsonNode]): String = {
+  def getDefault(inheritedProperties: mutable.Map[String, JsonNode]): String = {
     inheritedProperties.get("default") match {
       case Some(value) => value.asInstanceOf[TextNode].asText()
       case _           => ""
     }
   }
 
-  def getId(columnProperties: Map[String, JsonNode]): Option[String] = {
+  def getId(columnProperties: mutable.Map[String, JsonNode]): Option[String] = {
     val idNode = columnProperties.get("@id")
     if (idNode.isDefined) Some(idNode.get.asText()) else None
   }
 
   def getName(
-      columnProperties: Map[String, JsonNode],
-      lang: String
+               columnProperties: mutable.Map[String, JsonNode],
+               lang: String
   ): Option[String] = {
     val name = columnProperties.get("name")
     val titles = columnProperties.get("titles")
@@ -203,29 +203,27 @@ object Column {
   }
 
   def getNullParam(
-      inheritedProperties: Map[String, JsonNode]
+      inheritedProperties: mutable.Map[String, JsonNode]
   ): Array[String] = {
     inheritedProperties.get("null") match {
-      case Some(value) => {
+      case Some(value) =>
         value match {
-          case a: ArrayNode => {
+          case a: ArrayNode =>
             var nullParamsToReturn = Array[String]()
             val nullParams = Array.from(a.elements.asScala)
             for (np <- nullParams)
               nullParamsToReturn :+= np.asText()
             nullParamsToReturn
-          }
           case s: TextNode => Array[String](s.asText())
           case _ =>
             throw MetadataError("unexpected value for null property")
         }
-      }
       case None => Array[String]("")
     }
   }
 
   def getAboutUrl(
-      inheritedProperties: Map[String, JsonNode]
+      inheritedProperties: mutable.Map[String, JsonNode]
   ): Option[String] = {
     val aboutUrlNode = inheritedProperties.get("aboutUrl")
     aboutUrlNode match {
@@ -235,7 +233,7 @@ object Column {
   }
 
   def getPropertyUrl(
-      inheritedProperties: Map[String, JsonNode]
+      inheritedProperties: mutable.Map[String, JsonNode]
   ): Option[String] = {
     val propertyUrlNode = inheritedProperties.get("propertyUrl")
     propertyUrlNode match {
@@ -245,7 +243,7 @@ object Column {
   }
 
   def getValueUrl(
-      inheritedProperties: Map[String, JsonNode]
+      inheritedProperties: mutable.Map[String, JsonNode]
   ): Option[String] = {
     val valueUrlNode = inheritedProperties.get("valueUrl")
     valueUrlNode match {
@@ -255,7 +253,7 @@ object Column {
   }
 
   def getSeparator(
-      inheritedProperties: Map[String, JsonNode]
+      inheritedProperties: mutable.Map[String, JsonNode]
   ): Option[String] = {
     val separatorNode = inheritedProperties.get("separator")
     separatorNode match {
@@ -266,15 +264,14 @@ object Column {
 
   def getTitleValues(
       titles: Option[JsonNode]
-  ): Map[String, Array[String]] = {
-    val langToTitles = Map[String, Array[String]]()
+  ): mutable.Map[String, Array[String]] = {
+    val langToTitles = mutable.Map[String, Array[String]]()
     titles match {
-      case Some(titles) => {
+      case Some(titles) =>
         for ((l, v) <- titles.asInstanceOf[ObjectNode].getKeysAndValues) {
           langToTitles(l) = Array.from(v.elements().asScala.map(_.asText()))
         }
         langToTitles
-      }
       case _ => langToTitles
     }
   }
@@ -293,23 +290,22 @@ object Column {
       columnOrdinal: Int,
       baseUrl: String,
       lang: String,
-      inheritedProperties: Map[String, JsonNode]
+      inheritedProperties: mutable.Map[String, JsonNode]
   ): (
-      Map[String, JsonNode],
-      Map[String, JsonNode],
+      mutable.Map[String, JsonNode],
+      mutable.Map[String, JsonNode],
       Array[ErrorWithoutContext]
   ) = {
     val warnings = ArrayBuffer.empty[ErrorWithoutContext]
-    val annotations = Map[String, JsonNode]()
-    val columnProperties = Map[String, JsonNode]()
+    val annotations = mutable.Map[String, JsonNode]()
+    val columnProperties = mutable.Map[String, JsonNode]()
     for ((property, value) <- columnDesc.getKeysAndValues) {
       (property, value) match {
-        case ("@type", v: TextNode) if v.asText != "Column" => {
-          throw new MetadataError(
+        case ("@type", v: TextNode) if v.asText != "Column" =>
+          throw MetadataError(
             s"columns[$columnOrdinal].@type, @type of column is not 'Column'"
           )
-        }
-        case _ => {
+        case _ =>
           val (v, w, csvwPropertyType) =
             PropertyChecker.checkProperty(property, value, baseUrl, lang)
           warnings.addAll(
@@ -325,18 +321,16 @@ object Column {
               inheritedProperties += (property -> v)
             case PropertyType.Common | PropertyType.Column =>
               columnProperties += (property -> v)
-            case PropertyType.Annotation => {
+            case PropertyType.Annotation =>
               annotations += (property -> v)
-            }
             case _ =>
               warnings.addOne(
                 ErrorWithoutContext(
                   s"invalid_property",
-                  s"column: ${property}"
+                  s"column: $property"
                 )
               )
           }
-        }
       }
     }
     (annotations, columnProperties, warnings.toArray)
@@ -348,7 +342,7 @@ object Column {
     } else {
       formatNode match {
         case s: TextNode => Some(Format(Some(s.asText()), None, None))
-        case _ => {
+        case _ =>
           val formatObjectNode = formatNode.asInstanceOf[ObjectNode]
 
           def getMaybeValueFromNode(
@@ -367,13 +361,12 @@ object Column {
             .map(d => d(0))
 
           Some(Format(pattern, decimalChar, groupChar))
-        }
       }
     }
   }
 
   private def getLangOrDefault(
-      inheritedPropertiesCopy: Map[String, JsonNode]
+      inheritedPropertiesCopy: mutable.Map[String, JsonNode]
   ): String = {
     inheritedPropertiesCopy.get("lang") match {
       case Some(lang) => lang.asText()
@@ -382,7 +375,7 @@ object Column {
   }
 
   private def getDatatypeOrDefault(
-      inheritedPropertiesCopy: Map[String, JsonNode]
+      inheritedPropertiesCopy: mutable.Map[String, JsonNode]
   ): JsonNode = {
     inheritedPropertiesCopy.get("datatype") match {
       case Some(datatype) => datatype
@@ -427,7 +420,7 @@ case class Column private (
     valueUrl: Option[String],
     virtual: Boolean,
     format: Option[Format],
-    annotations: Map[String, JsonNode]
+    annotations: mutable.Map[String, JsonNode]
 ) {
   lazy val minInclusiveNumeric: Option[BigDecimal] =
     minInclusive.map(BigDecimal(_))
@@ -464,100 +457,103 @@ case class Column private (
         logger.debug(e)
         Left(e.getMessage)
     }
-  val datatypeParser: Map[String, String => Either[
+  val datatypeParser: mutable.Map[String, String => Either[
     ErrorWithoutContext,
     Any
   ]] =
-    Map(
-      s"${rdfSyntaxNs}XMLLiteral" -> trimValue _,
-      s"${rdfSyntaxNs}HTML" -> trimValue _,
-      "http://www.w3.org/ns/csvw#JSON" -> trimValue _,
-      s"${xmlSchema}anyAtomicType" -> allValueValid _,
-      s"${xmlSchema}anyURI" -> trimValue _,
-      s"${xmlSchema}base64Binary" -> trimValue _,
-      s"${xmlSchema}hexBinary" -> trimValue _,
-      s"${xmlSchema}QName" -> trimValue _,
-      s"${xmlSchema}string" -> allValueValid _,
-      s"${xmlSchema}normalizedString" -> trimValue _,
-      s"${xmlSchema}token" -> trimValue _,
-      s"${xmlSchema}language" -> trimValue _,
-      s"${xmlSchema}Name" -> trimValue _,
-      s"${xmlSchema}NMTOKEN" -> trimValue _,
-      s"${xmlSchema}boolean" -> processBooleanDatatype _,
-      s"${xmlSchema}decimal" -> processDecimalDatatype _,
-      s"${xmlSchema}integer" -> processIntegerDatatype _,
-      s"${xmlSchema}long" -> processLongDatatype _,
-      s"${xmlSchema}int" -> processIntDatatype _,
-      s"${xmlSchema}short" -> processShortDatatype _,
-      s"${xmlSchema}byte" -> processByteDatatype _,
-      s"${xmlSchema}nonNegativeInteger" -> processNonNegativeInteger _,
-      s"${xmlSchema}positiveInteger" -> processPositiveInteger _,
-      s"${xmlSchema}unsignedLong" -> processUnsignedLong _,
-      s"${xmlSchema}unsignedInt" -> processUnsignedInt _,
-      s"${xmlSchema}unsignedShort" -> processUnsignedShort _,
-      s"${xmlSchema}unsignedByte" -> processUnsignedByte _,
-      s"${xmlSchema}nonPositiveInteger" -> processNonPositiveInteger _,
-      s"${xmlSchema}negativeInteger" -> processNegativeInteger _,
-      s"${xmlSchema}double" -> processDoubleDatatype _,
-      s"${xmlSchema}float" -> processFloatDatatype _,
+    mutable.Map(
+      s"${rdfSyntaxNs}XMLLiteral" -> trimValue,
+      s"${rdfSyntaxNs}HTML" -> trimValue,
+      "http://www.w3.org/ns/csvw#JSON" -> trimValue,
+      s"${xmlSchema}anyAtomicType" -> allValueValid,
+      s"${xmlSchema}anyURI" -> trimValue,
+      s"${xmlSchema}base64Binary" -> trimValue,
+      s"${xmlSchema}hexBinary" -> trimValue,
+      s"${xmlSchema}QName" -> trimValue,
+      s"${xmlSchema}string" -> allValueValid,
+      s"${xmlSchema}normalizedString" -> trimValue,
+      s"${xmlSchema}token" -> trimValue,
+      s"${xmlSchema}language" -> trimValue,
+      s"${xmlSchema}Name" -> trimValue,
+      s"${xmlSchema}NMTOKEN" -> trimValue,
+      s"${xmlSchema}boolean" -> processBooleanDatatype,
+      s"${xmlSchema}decimal" -> processDecimalDatatype,
+      s"${xmlSchema}integer" -> processIntegerDatatype,
+      s"${xmlSchema}long" -> processLongDatatype,
+      s"${xmlSchema}int" -> processIntDatatype,
+      s"${xmlSchema}short" -> processShortDatatype,
+      s"${xmlSchema}byte" -> processByteDatatype,
+      s"${xmlSchema}nonNegativeInteger" -> processNonNegativeInteger,
+      s"${xmlSchema}positiveInteger" -> processPositiveInteger,
+      s"${xmlSchema}unsignedLong" -> processUnsignedLong,
+      s"${xmlSchema}unsignedInt" -> processUnsignedInt,
+      s"${xmlSchema}unsignedShort" -> processUnsignedShort,
+      s"${xmlSchema}unsignedByte" -> processUnsignedByte,
+      s"${xmlSchema}nonPositiveInteger" -> processNonPositiveInteger,
+      s"${xmlSchema}negativeInteger" -> processNegativeInteger,
+      s"${xmlSchema}double" -> processDoubleDatatype,
+      s"${xmlSchema}float" -> processFloatDatatype,
       // Date Time related datatype
-      s"${xmlSchema}date" -> processDateDatatype _,
-      s"${xmlSchema}dateTime" -> processDateTimeDatatype _,
-      s"${xmlSchema}dateTimeStamp" -> processDateTimeStamp _,
-      s"${xmlSchema}gDay" -> processGDay _,
-      s"${xmlSchema}gMonth" -> processGMonth _,
-      s"${xmlSchema}gMonthDay" -> processGMonthDay _,
-      s"${xmlSchema}gYear" -> processGYear _,
-      s"${xmlSchema}gYearMonth" -> processGYearMonth _,
-      s"${xmlSchema}time" -> processTime _,
-      s"${xmlSchema}duration" -> processDuration _,
-      s"${xmlSchema}dayTimeDuration" -> processDayTimeDuration _,
-      s"${xmlSchema}yearMonthDuration" -> processYearMonthDuration _
+      s"${xmlSchema}date" -> processDateDatatype,
+      s"${xmlSchema}dateTime" -> processDateTimeDatatype,
+      s"${xmlSchema}dateTimeStamp" -> processDateTimeStamp,
+      s"${xmlSchema}gDay" -> processGDay,
+      s"${xmlSchema}gMonth" -> processGMonth,
+      s"${xmlSchema}gMonthDay" -> processGMonthDay,
+      s"${xmlSchema}gYear" -> processGYear,
+      s"${xmlSchema}gYearMonth" -> processGYearMonth,
+      s"${xmlSchema}time" -> processTime,
+      s"${xmlSchema}duration" -> processDuration,
+      s"${xmlSchema}dayTimeDuration" -> processDayTimeDuration,
+      s"${xmlSchema}yearMonthDuration" -> processYearMonthDuration
     )
-  val datatypeFormatValidation = Map(
-    s"${rdfSyntaxNs}XMLLiteral" -> regexpValidation _,
-    s"${rdfSyntaxNs}HTML" -> regexpValidation _,
-    "http://www.w3.org/ns/csvw#JSON" -> regexpValidation _,
-    s"${xmlSchema}anyAtomicType" -> regexpValidation _,
-    s"${xmlSchema}anyURI" -> regexpValidation _,
-    s"${xmlSchema}base64Binary" -> regexpValidation _,
-    s"${xmlSchema}boolean" -> noAdditionalValidation _,
-    s"${xmlSchema}date" -> noAdditionalValidation _,
-    s"${xmlSchema}dateTime" -> noAdditionalValidation _,
-    s"${xmlSchema}dateTimeStamp" -> noAdditionalValidation _,
-    s"${xmlSchema}decimal" -> noAdditionalValidation _,
-    s"${xmlSchema}integer" -> noAdditionalValidation _,
-    s"${xmlSchema}long" -> noAdditionalValidation _,
-    s"${xmlSchema}int" -> noAdditionalValidation _,
-    s"${xmlSchema}short" -> noAdditionalValidation _,
-    s"${xmlSchema}byte" -> noAdditionalValidation _,
-    s"${xmlSchema}nonNegativeInteger" -> noAdditionalValidation _,
-    s"${xmlSchema}positiveInteger" -> noAdditionalValidation _,
-    s"${xmlSchema}unsignedLong" -> noAdditionalValidation _,
-    s"${xmlSchema}unsignedInt" -> noAdditionalValidation _,
-    s"${xmlSchema}unsignedShort" -> noAdditionalValidation _,
-    s"${xmlSchema}unsignedByte" -> noAdditionalValidation _,
-    s"${xmlSchema}nonPositiveInteger" -> noAdditionalValidation _,
-    s"${xmlSchema}negativeInteger" -> noAdditionalValidation _,
-    s"${xmlSchema}double" -> noAdditionalValidation _,
-    s"${xmlSchema}duration" -> regexpValidation _,
-    s"${xmlSchema}dayTimeDuration" -> regexpValidation _,
-    s"${xmlSchema}yearMonthDuration" -> regexpValidation _,
-    s"${xmlSchema}float" -> noAdditionalValidation _,
-    s"${xmlSchema}gDay" -> noAdditionalValidation _,
-    s"${xmlSchema}gMonth" -> noAdditionalValidation _,
-    s"${xmlSchema}gMonthDay" -> noAdditionalValidation _,
-    s"${xmlSchema}gYear" -> noAdditionalValidation _,
-    s"${xmlSchema}gYearMonth" -> noAdditionalValidation _,
-    s"${xmlSchema}hexBinary" -> regexpValidation _,
-    s"${xmlSchema}QName" -> regexpValidation _,
-    s"${xmlSchema}string" -> regexpValidation _,
-    s"${xmlSchema}normalizedString" -> regexpValidation _,
-    s"${xmlSchema}token" -> regexpValidation _,
-    s"${xmlSchema}language" -> regexpValidation _,
-    s"${xmlSchema}Name" -> regexpValidation _,
-    s"${xmlSchema}NMTOKEN" -> regexpValidation _,
-    s"${xmlSchema}time" -> noAdditionalValidation _
+
+  val noAdditionalValidation: Function[String, Boolean] = (_: String) => true
+
+  private val datatypeFormatValidation: mutable.Map[String, Function[String, Boolean]] = mutable.Map(
+    s"${rdfSyntaxNs}XMLLiteral" -> regexpValidation,
+    s"${rdfSyntaxNs}HTML" -> regexpValidation,
+    "http://www.w3.org/ns/csvw#JSON" -> regexpValidation,
+    s"${xmlSchema}anyAtomicType" -> regexpValidation,
+    s"${xmlSchema}anyURI" -> regexpValidation,
+    s"${xmlSchema}base64Binary" -> regexpValidation,
+    s"${xmlSchema}boolean" -> noAdditionalValidation,
+    s"${xmlSchema}date" -> noAdditionalValidation,
+    s"${xmlSchema}dateTime" -> noAdditionalValidation,
+    s"${xmlSchema}dateTimeStamp" -> noAdditionalValidation,
+    s"${xmlSchema}decimal" -> noAdditionalValidation,
+    s"${xmlSchema}integer" -> noAdditionalValidation,
+    s"${xmlSchema}long" -> noAdditionalValidation,
+    s"${xmlSchema}int" -> noAdditionalValidation,
+    s"${xmlSchema}short" -> noAdditionalValidation,
+    s"${xmlSchema}byte" -> noAdditionalValidation,
+    s"${xmlSchema}nonNegativeInteger" -> noAdditionalValidation,
+    s"${xmlSchema}positiveInteger" -> noAdditionalValidation,
+    s"${xmlSchema}unsignedLong" -> noAdditionalValidation,
+    s"${xmlSchema}unsignedInt" -> noAdditionalValidation,
+    s"${xmlSchema}unsignedShort" -> noAdditionalValidation,
+    s"${xmlSchema}unsignedByte" -> noAdditionalValidation,
+    s"${xmlSchema}nonPositiveInteger" -> noAdditionalValidation,
+    s"${xmlSchema}negativeInteger" -> noAdditionalValidation,
+    s"${xmlSchema}double" -> noAdditionalValidation,
+    s"${xmlSchema}duration" -> regexpValidation,
+    s"${xmlSchema}dayTimeDuration" -> regexpValidation,
+    s"${xmlSchema}yearMonthDuration" -> regexpValidation,
+    s"${xmlSchema}float" -> noAdditionalValidation,
+    s"${xmlSchema}gDay" -> noAdditionalValidation,
+    s"${xmlSchema}gMonth" -> noAdditionalValidation,
+    s"${xmlSchema}gMonthDay" -> noAdditionalValidation,
+    s"${xmlSchema}gYear" -> noAdditionalValidation,
+    s"${xmlSchema}gYearMonth" -> noAdditionalValidation,
+    s"${xmlSchema}hexBinary" -> regexpValidation,
+    s"${xmlSchema}QName" -> regexpValidation,
+    s"${xmlSchema}string" -> regexpValidation,
+    s"${xmlSchema}normalizedString" -> regexpValidation,
+    s"${xmlSchema}token" -> regexpValidation,
+    s"${xmlSchema}language" -> regexpValidation,
+    s"${xmlSchema}Name" -> regexpValidation,
+    s"${xmlSchema}NMTOKEN" -> regexpValidation,
+    s"${xmlSchema}time" -> noAdditionalValidation
   )
   private val logger = Logger(this.getClass.getName)
 
@@ -567,7 +563,6 @@ case class Column private (
     regEx.pattern.matcher(value).matches()
   }
 
-  def noAdditionalValidation(value: String) = true
 
   def trimValue(
       value: String
@@ -583,7 +578,7 @@ case class Column private (
       value: String
   ): Either[ErrorWithoutContext, Boolean] = {
     format.flatMap(f => f.pattern) match {
-      case Some(pattern) => {
+      case Some(pattern) =>
         val patternValues = pattern.split("""\|""")
         if (patternValues(0) == value) {
           Right(true)
@@ -596,8 +591,7 @@ case class Column private (
               "Not in list of expected values"
             )
           )
-      }
-      case None => {
+      case None =>
         if (Array[String]("true", "1").contains(value)) {
           Right(true)
         } else if (Array[String]("false", "0").contains(value)) {
@@ -609,7 +603,6 @@ case class Column private (
               "Not in default expected values (true/false/1/0)"
             )
           )
-      }
     }
   }
 
@@ -738,11 +731,11 @@ case class Column private (
     } else {
       parseNumberAgainstFormat(value) match {
         case Left(w) => Left(ErrorWithoutContext("invalid_long", w))
-        case Right(parsedValue) => {
+        case Right(parsedValue) =>
           try {
             Right(parsedValue.longValue)
           } catch {
-            case _ =>
+            case _: Throwable =>
               Left(
                 ErrorWithoutContext(
                   "invalid_long",
@@ -750,7 +743,6 @@ case class Column private (
                 )
               )
           }
-        }
       }
     }
   }
@@ -825,7 +817,7 @@ case class Column private (
     } else {
       parseNumberAgainstFormat(value) match {
         case Left(w) => Left(ErrorWithoutContext("invalid_short", w))
-        case Right(parsedNumber) => {
+        case Right(parsedNumber) =>
           val parsedValue = parsedNumber.longValue
           if (parsedValue > Short.MaxValue || parsedValue < Short.MinValue)
             Left(
@@ -835,7 +827,6 @@ case class Column private (
               )
             )
           else Right(parsedValue.shortValue())
-        }
       }
     }
   }
@@ -936,7 +927,7 @@ case class Column private (
     result match {
       case Left(w) =>
         Left(ErrorWithoutContext("invalid_positiveInteger", w.content))
-      case Right(parsedValue) => {
+      case Right(parsedValue) =>
         if (parsedValue <= 0) {
           Left(
             ErrorWithoutContext(
@@ -945,7 +936,6 @@ case class Column private (
             )
           )
         } else Right(parsedValue)
-      }
     }
   }
 
@@ -956,7 +946,7 @@ case class Column private (
     result match {
       case Left(w) =>
         Left(ErrorWithoutContext("invalid_unsignedLong", w.content))
-      case Right(parsedValue) => {
+      case Right(parsedValue) =>
         if (parsedValue > unsignedLongMaxValue) {
           Left(
             ErrorWithoutContext(
@@ -965,7 +955,6 @@ case class Column private (
             )
           )
         } else Right(parsedValue)
-      }
     }
   }
 
@@ -976,7 +965,7 @@ case class Column private (
     result match {
       case Left(w) =>
         Left(ErrorWithoutContext("invalid_unsignedInt", w.content))
-      case Right(parsedValue) => {
+      case Right(parsedValue) =>
         if (parsedValue > 4294967295L) {
           Left(
             ErrorWithoutContext(
@@ -985,7 +974,6 @@ case class Column private (
             )
           )
         } else Right(parsedValue.longValue())
-      }
     }
   }
 
@@ -996,7 +984,7 @@ case class Column private (
     result match {
       case Left(w) =>
         Left(ErrorWithoutContext("invalid_unsignedShort", w.content))
-      case Right(parsedValue) => {
+      case Right(parsedValue) =>
         if (parsedValue > 65535) {
           Left(
             ErrorWithoutContext(
@@ -1005,7 +993,6 @@ case class Column private (
             )
           )
         } else Right(parsedValue.intValue())
-      }
     }
   }
 
@@ -1016,7 +1003,7 @@ case class Column private (
     result match {
       case Left(w) =>
         Left(ErrorWithoutContext("invalid_nonNegativeInteger", w.content))
-      case Right(parsedValue) => {
+      case Right(parsedValue) =>
         if (parsedValue < 0) {
           Left(
             ErrorWithoutContext(
@@ -1025,7 +1012,6 @@ case class Column private (
             )
           )
         } else Right(parsedValue)
-      }
     }
   }
 
@@ -1069,7 +1055,7 @@ case class Column private (
     try {
       Right(parsedValue.toBigInt.bigInteger)
     } catch {
-      case e =>
+      case e: Throwable =>
         Left(ErrorWithoutContext("invalid_integer", e.getMessage))
     }
   }
@@ -1081,11 +1067,10 @@ case class Column private (
     result match {
       case Left(w) =>
         Left(ErrorWithoutContext("invalid_unsignedByte", w.content))
-      case Right(parsedValue) => {
+      case Right(parsedValue) =>
         if (parsedValue > 255) {
           Left(ErrorWithoutContext("invalid_unsignedByte", "Greater than 255"))
         } else Right(parsedValue.shortValue())
-      }
     }
   }
 
@@ -1096,7 +1081,7 @@ case class Column private (
     result match {
       case Left(w) =>
         Left(ErrorWithoutContext("invalid_nonPositiveInteger", w.content))
-      case Right(parsedValue) => {
+      case Right(parsedValue) =>
         if (parsedValue > 0) {
           Left(
             ErrorWithoutContext(
@@ -1105,7 +1090,6 @@ case class Column private (
             )
           )
         } else Right(parsedValue)
-      }
     }
   }
 
@@ -1116,7 +1100,7 @@ case class Column private (
     result match {
       case Left(w) =>
         Left(ErrorWithoutContext("invalid_negativeInteger", w.content))
-      case Right(parsedValue) => {
+      case Right(parsedValue) =>
         if (parsedValue >= 0) {
           Left(
             ErrorWithoutContext(
@@ -1125,7 +1109,6 @@ case class Column private (
             )
           )
         } else Right(parsedValue)
-      }
     }
   }
 
@@ -1327,7 +1310,7 @@ case class Column private (
       val parserForDataType = datatypeParser(baseDataType)
       for (v <- values) {
         parserForDataType(v) match {
-          case Left(errorMessageContent) => {
+          case Left(errorMessageContent) =>
             errors.addOne(
               ErrorWithoutContext(
                 errorMessageContent.`type`,
@@ -1335,23 +1318,21 @@ case class Column private (
               )
             )
             valuesArrayToReturn.addOne(s"invalid - $v")
-          }
-          case Right(s) => {
+          case Right(s) =>
             errors.addAll(validateLength(s.toString))
             errors.addAll(validateValue(s))
             getErrorIfRequiredValueAndValueEmpty(s.toString) match {
               case Some(e) => errors.addOne(e)
-              case None    => {}
+              case None    =>
             }
             validateFormat(s.toString) match {
               case Some(e) => errors.addOne(e)
-              case None    => {}
+              case None    =>
             }
 
             if (errors.isEmpty) {
               valuesArrayToReturn.addOne(s)
             }
-          }
         }
       }
       (errors.toArray, valuesArrayToReturn.toList)
@@ -1368,18 +1349,17 @@ case class Column private (
 
   def validateFormat(value: String): Option[ErrorWithoutContext] = {
     format match {
-      case Some(f) => {
+      case Some(f) =>
         val formatValidator = datatypeFormatValidation(baseDataType)
         if (formatValidator(value)) None
         else {
           Some(
             ErrorWithoutContext(
               "format",
-              s"Value in csv does not match the format specified in metadata, Value: ${value} Format: ${f.pattern.get}"
+              s"Value in csv does not match the format specified in metadata, Value: $value Format: ${f.pattern.get}"
             )
           )
         }
-      }
       case None => None
     }
   }
@@ -1401,7 +1381,7 @@ case class Column private (
         errors.addOne(
           ErrorWithoutContext(
             "minLength",
-            s"value '${value}' length less than minLength specified - $minLength"
+            s"value '$value' length less than minLength specified - $minLength"
           )
         )
       }
@@ -1409,7 +1389,7 @@ case class Column private (
         errors.addOne(
           ErrorWithoutContext(
             "maxLength",
-            s"value '${value}' length greater than maxLength specified - $maxLength"
+            s"value '$value' length greater than maxLength specified - $maxLength"
           )
         )
       }
@@ -1417,7 +1397,7 @@ case class Column private (
         errors.addOne(
           ErrorWithoutContext(
             "length",
-            s"value '${value}' length different from length specified - ${length.get}"
+            s"value '$value' length different from length specified - ${length.get}"
           )
         )
       }
@@ -1428,9 +1408,9 @@ case class Column private (
   def validateValue(value: Any): Array[ErrorWithoutContext] =
     value match {
       case numericValue: Number    => validateNumericValue(numericValue)
-      case s: String               => Array[ErrorWithoutContext]()
+      case _: String               => Array[ErrorWithoutContext]()
       case datetime: ZonedDateTime => validateDateTimeValue(datetime)
-      case b: Boolean              => Array[ErrorWithoutContext]()
+      case _: Boolean              => Array[ErrorWithoutContext]()
       case _ =>
         throw new IllegalArgumentException(
           s"Have not mapped ${value.getClass} yet."
@@ -1469,7 +1449,7 @@ case class Column private (
           bigDecimalValue => maxInclusiveNumeric.exists(bigDecimalValue > _),
           bigDecimalValue => maxExclusiveNumeric.exists(bigDecimalValue >= _)
         )
-      case bi: BigInteger => {
+      case bi: BigInteger =>
         checkValueRangeConstraints[BigInt](
           BigInt(bi),
           bigIntValue => minInclusiveInt.exists(bigIntValue < _),
@@ -1477,7 +1457,6 @@ case class Column private (
           bigIntValue => maxInclusiveInt.exists(bigIntValue > _),
           bigIntValue => maxExclusiveInt.exists(bigIntValue >= _)
         )
-      }
       case _ =>
         throw new IllegalArgumentException(
           s"Unmatched numeric type ${numericValue.getClass}"
@@ -1559,7 +1538,7 @@ case class Column private (
         jDt.getHourOfDay,
         jDt.getMinuteOfHour,
         jDt.getSecondOfMinute,
-        (jDt.getMillisOfSecond * 1000).toInt
+        jDt.getMillisOfSecond * 1000
       )
     ZonedDateTime.of(localDateTime, zoneId)
   }

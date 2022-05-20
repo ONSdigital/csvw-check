@@ -26,11 +26,10 @@ object Schema {
       )
     } catch {
       case metadataError: MetadataError => Left(metadataError.getMessage)
-      case e: Throwable => {
+      case e: Throwable =>
         val sw = new StringWriter
         e.printStackTrace(new PrintWriter(sw))
         Left(sw.toString)
-      }
     }
   }
 
