@@ -302,7 +302,7 @@ case class LdmlNumberFormatParser(
       if (isFractionalPart) "fractional" else "integer"
 
     val greedyDigitAndGroupingMatcher: Parser[String] =
-      s"$digitAndGroupingMatcherRegex{" + minimumDigits.toString + ",}".r | failure(
+      (s"$digitAndGroupingMatcherRegex{" + minimumDigits.toString + ",}").r | failure(
         s"Expected a minimum of $minimumDigits $numberPartDescription digits."
       )
 
