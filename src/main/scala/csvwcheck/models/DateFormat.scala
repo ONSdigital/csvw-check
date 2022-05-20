@@ -3,7 +3,6 @@ package csvwcheck.models
 import com.ibm.icu.text.SimpleDateFormat
 import com.ibm.icu.util.GregorianCalendar
 import csvwcheck.errors.DateFormatError
-import csvwcheck.models.DateFormat._
 
 import java.text.ParsePosition
 import java.time._
@@ -12,6 +11,7 @@ import java.util.regex.Matcher
 import scala.util.matching.Regex
 
 object DateFormat {
+  private val xmlSchemaBaseUrl = "http://www.w3.org/2001/XMLSchema#"
   val digit = "[0-9]"
   val yearGrp = s"(?<${RegExGroups.years}>-?([1-9]$digit{3,}|0$digit{3}))"
   val monthGrp = s"(?<${RegExGroups.months}>(0[1-9]|1[0-2]))"
@@ -91,7 +91,6 @@ object DateFormat {
     ).union(RegExGroups.timeZoneRegExNamedGroups)
   )
   val utcZoneId = TimeZone.getTimeZone("UTC").toZoneId
-  private val xmlSchemaBaseUrl = "http://www.w3.org/2001/XMLSchema#"
   private val fields = Array[String](
     "yyyy",
     "M",
@@ -136,6 +135,7 @@ object DateFormat {
   }
 }
 case class DateFormat(format: Option[String], dataType: String) {
+  import csvwcheck.models.DateFormat._
 
   val simpleDateFormatter: Option[SimpleDateFormat] = format.map(f => {
     ensureDateTimeFormatContainsRecognizedSymbols(f)

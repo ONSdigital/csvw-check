@@ -263,7 +263,7 @@ class Validator(
                 "CSV requested not found in metadata",
                 "",
                 "",
-                "",
+                s"Schema: ${schema.baseUrl}, tableUri: $tableUri",
                 ""
               )
             )

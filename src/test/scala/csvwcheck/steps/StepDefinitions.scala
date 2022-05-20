@@ -14,7 +14,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 
 class StepDefinitions extends ScalaDsl with EN {
-  // Definitions for csvwcheck.steps in scenarios given in csvw_validation_tests.feature
+  // Definitions for steps in scenarios given in csvw_validation_tests.feature
   // Adapted from https://github.com/Data-Liberation-Front/csvlint.rb/tree/master/features/step_definitions
   private val log = LoggerFactory.getLogger(classOf[StepDefinitions])
   private val fixturesPath = "src/test/resources/features/fixtures/"
@@ -101,11 +101,11 @@ class StepDefinitions extends ScalaDsl with EN {
   }
 
   Then("there should not be errors") { () =>
-    assert(warningsAndErrors.errors.length == 0)
+    assert(warningsAndErrors.errors.length == 0, warningsAndErrors.errors.map(e => e.toString).mkString(", "))
   }
 
   And("there should not be warnings") { () =>
-    assert(warningsAndErrors.warnings.length == 0)
+    assert(warningsAndErrors.warnings.length == 0, warningsAndErrors.warnings.map(w => w.toString).mkString(", "))
   }
 
   Then("there should be errors") { () =>
