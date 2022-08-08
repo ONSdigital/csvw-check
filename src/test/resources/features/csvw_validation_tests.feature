@@ -1074,7 +1074,7 @@ Feature: CSVW Validation Tests
 	# manifest-validation#test122
 	# If the metadata file found at this location does not explicitly include a reference to the requested tabular data file then it MUST be ignored.
   #@ignore
-  @runme
+  #@runme
   Scenario: manifest-validation#test122 link-metadata not describing file uses file-metadata
     Given I have a csv file "https://w3c.github.io/csvw/tests/test122.csv" with the headers """<test122-linked-metadata.json>; rel="describedby"; type="application/csvm+json"""
     And the csv file equates to the test fixture "csvw/test122.csv"
@@ -1083,7 +1083,17 @@ Feature: CSVW Validation Tests
     When I carry out CSVW validation
     Then there should not be errors
     And there should be warnings
+    And show me
 	
+  # DELETE ME
+  @runme
+  Scenario: Trying stuff out
+    Given I have a csv file "csvw/test122.csv"
+    And I have a metadata file "csvw/test122.csv-metadata.json"
+    When I carry out CSVW validation
+
+
+
 	# manifest-validation#test123
 	# If the metadata file found at this location does not explicitly include a reference to the requested tabular data file then it MUST be ignored.
   Scenario: manifest-validation#test123 file-metadata not describing file uses directory-metadata

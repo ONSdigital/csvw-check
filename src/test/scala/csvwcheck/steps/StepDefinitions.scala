@@ -76,7 +76,6 @@ class StepDefinitions extends ScalaDsl with EN {
   private var schemaResource: CommonTestFileResource = new CommonTestFileResource()
   private var csvResource: CommonTestFileResource = new CommonTestFileResource()
 
-
   // Assume we use sttp as http client.
   // Call this funciton and set the testing backend object. Pass the backend object into validator function
   // Stubbing for sttp is done as given in their docs at https://sttp.softwaremill.com/en/latest/testing.html
@@ -119,6 +118,8 @@ class StepDefinitions extends ScalaDsl with EN {
     // Make sure the minimum required uris have been explicitly set.
     assert(schemaResource.uri != "", "A schema must be provided")
     assert(csvResource.uri != "", "A csv must be provided")
+
+    throw new ArithmeticException(s"Resource uri: $schemaResource.uri")
     
     val validator = new Validator(
       Some(schemaResource.uri.toString()),
