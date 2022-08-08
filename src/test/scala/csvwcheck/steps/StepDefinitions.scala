@@ -12,20 +12,69 @@ import sttp.model._
 
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
+import java.net.URI
+import java.net.MalformedURLException
+
+import csvwcheck.models.Schema
+import csvwcheck.models.TableGroup
+
+// Common superclass for SchemaResource and CsvResource to hold shared methods.
+class CommonTestFileResource {
+  private val fixturesPath = "src/test/resources/features/fixtures/"
+  var uri: URI = _
+  var content: String = _
+  var headers: Seq[Header] = _
+
+  /*
+  Every resource has a URI, this can be:
+  * (a) A local resource starting file://
+  * (b) A remote resource starting http:// or https://
+  * Where it is scenario (A) we read the test content in immediately.
+  * Where it is (B) a second step is required to specify the fixture holding
+  * the test content for said remote resource (see "...equates to..." steps).
+  */
+  def setUri(fileOrUrl: String) {
+      try {
+        uri = new URI(fileOrUrl)
+      } catch {
+        case e: MalformedURLException =>
+          var fixtureUri: String = fixturesPath + fileOrUrl
+          uri = new URI(fixtureUri)
+        case e: Throwable => println(s"Unable to set URI for $fileOrUrl")
+      }
+
+      // If the uri is pointing to a local file, read it in now
+      if (uri.getScheme == "file") {
+        setContent()
+      }
+  }
+
+  def setHeaders(headerString: String) {
+    if (uri.getScheme == "file") {
+        throw new RuntimeException(s"Will not set mock response headers for local file $uri, that doesn't make sense.")
+      }
+ 
+    // TODO = string to Seq[Header]
+  }
+
+  // Parse the provided fixture file
+  def setContent(fileName: Option[String] = None) {
+    assert(content == "", s"Test content for resource $uri has already been set.")
+    if (uri.getScheme == "file") {
+        throw new RuntimeException(s"URI $uri is already a local file, you don't need to specify a fixture to represent it.")
+      }
+    // TODO
+    // 1.) IF fileName, create a fixture path as URI() with fixturesPath + fileName
+    // 2.) Get the correct parser to use (csv or json) from the file extension
+    // 3.) Read the content in.
+  }
+}
 
 class StepDefinitions extends ScalaDsl with EN {
-  private val fixturesPath = "src/test/resources/features/fixtures/"
-  private var csvFilePath = ""
   private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
-  private var link = ""
-  private val csv: String = ""
-  private val metadata: String = ""
-  private val content: String = ""
-  private var schemaUrl: Option[String] = None
-  private val fileUrl = ""
-  private var csvUrl: Option[String] = None
-  private var notFoundStartsWith = List[String]()
-  private var notFountEndsWith = List[String]()
+  private var schemaResource: CommonTestFileResource = new CommonTestFileResource()
+  private var csvResource: CommonTestFileResource = new CommonTestFileResource()
+
 
   // Assume we use sttp as http client.
   // Call this funciton and set the testing backend object. Pass the backend object into validator function
@@ -33,81 +82,69 @@ class StepDefinitions extends ScalaDsl with EN {
   def setTestingBackend(): Unit = {
     SttpBackendStub.synchronous
       .whenRequestMatchesPartial({
-        case r if r.uri.path.startsWith(List(fileUrl)) =>
-          Response.ok(content)
-        case r if r.uri.path.startsWith(List(schemaUrl)) =>
-          Response.ok(metadata)
-        case r if r.uri.path.startsWith(List(csvUrl)) =>
-          Response.ok(csv)
-        case r if r.uri.path.endsWith(notFountEndsWith) =>
-          Response("Not found", StatusCode.NotFound)
-        case r if r.uri.path.endsWith(notFoundStartsWith) =>
+        case r if r.uri.path.startsWith(List(csvResource.uri)) =>
+          Response.apply(csvResource.content, StatusCode.Ok, "OK", csvResource.headers)
+        case r if r.uri.path.startsWith(List(schemaResource.uri)) =>
+          Response.ok(schemaResource.content)
+        case _ =>
           Response("Not found", StatusCode.NotFound)
       })
   }
 
-  Given("""^I have a CSV file called "(.*?)"$""") { (filename: String) =>
-    csvFilePath = fixturesPath + filename
+  Given("""^I have a csv file "(.*?)"$""") { (fileOrUrl: String) =>
+    csvResource.setUri(fileOrUrl)
   }
 
-  Given("""^it is stored at the url "(.*?)"$""") { (url: String) =>
-    csvUrl = Some(url)
-    // notFoundEndsWith is a list which holds all the url endwith strings for which a 404 should be returned.
-    // This list is later used in setTestingBackend function to mock http calls
-    notFountEndsWith = "/.well-known/csvm" :: notFountEndsWith
-    notFountEndsWith = "-metadata.json" :: notFountEndsWith
-    notFountEndsWith = "csv-metadata.json" :: notFountEndsWith
+  Given("""^I have a csv file "([^"]*)"" with the headers "([^"]*)"$""") { (fileOrUrl: String, headerString: String) =>
+    csvResource.setUri(fileOrUrl)
+    csvResource.setHeaders(headerString)
   }
 
-  Given("""^there is no file at the url "(.*?)"$""") { (url: String) =>
-    // notFoundStartsWith is a list which holds all the url startwith strings for which a 404 should be returned.
-    // This list is later used in setTestingBackend function to mock http calls
-    notFoundStartsWith = url :: notFoundStartsWith
+  Given("""^the csv file equates to the test fixture "([^"]*)"$""") { (featureFileName: String) =>
+    csvResource.setContent(featureFileName)
   }
 
-  Given("""^I have a metadata file called "([^"]*)"$""") { _: String =>
-//    metadataFilePath = fixturesPath + filename
-//    metadata = Source.fromFile(metadataFilePath).getLines.mkString
+  Given("""^I have a metadata file "([^"]*)"$""") { (fileOrUrl: String) =>
+    schemaResource.setUri(fileOrUrl)
   }
 
-  And("""^the (schema|metadata) is stored at the url "(.*?)"$""") {
-    (_: String, url: String) =>
-      schemaUrl = Some(url)
-  }
-
-  Given("""^it has a Link header holding "(.*?)"$""") { l: String =>
-    link = s"""$l; type='application/csvm+json'"""
-  }
-
-  And("""^I have a file called "(.*?)" at the url "(.*?)"$""") {
-    (_: String, _: String) =>
-      {
-        //      if (url.endsWith(".json")) schemaUrl = Some(url)
-        //      if (url.endsWith(".csv")) csvUrl = Some(url)
-      }
+  Given("""^the metadata file equates to the test fixture "([^"]*)"$""") { (featureFileName: String) =>
+    schemaResource.setContent(featureFileName)
   }
 
   When("I carry out CSVW validation") { () =>
     implicit val system: ActorSystem = ActorSystem("actor-system")
-    val validator = new Validator(schemaUrl, csvUrl)
+
+    // Make sure the minimum required uris have been explicitly set.
+    assert(schemaResource.uri != "", "A schema must be provided")
+    assert(csvResource.uri != "", "A csv must be provided")
+    
+    // Ensure the provided resource uris have test content associated with them. 
+    assert(schemaResource.content != "")
+    assert(csvResource.content != "")
+
+    val validator = new Validator(
+      Some(schemaResource.uri.toString()),
+      Some(csvResource.uri.toString())
+      )
     val akkaStream =
       validator.validate().map(wAndE => warningsAndErrors = wAndE)
     Await.ready(akkaStream.runWith(Sink.ignore), Duration.Inf)
   }
 
   Then("there should not be errors") { () =>
-    assert(warningsAndErrors.errors.length == 0, warningsAndErrors.errors.map(e => e.toString).mkString(", "))
-  }
+    assert(warningsAndErrors.errors.length == 0, warningsAndErrors.warnings.map(w => w.toString).mkString(", "))
+    }
 
   And("there should not be warnings") { () =>
-    assert(warningsAndErrors.warnings.length == 0, warningsAndErrors.warnings.map(w => w.toString).mkString(", "))
+      assert(warningsAndErrors.warnings.length == 0, warningsAndErrors.warnings.map(w => w.toString).mkString(", "))
   }
 
   Then("there should be errors") { () =>
-    assert(warningsAndErrors.errors.length > 0)
+    assert(warningsAndErrors.errors.length > 0, "Errors expected but 0 errors encountered")
   }
 
   Then("""there should be warnings""") { () =>
-    assert(warningsAndErrors.warnings.length > 0)
+    assert(warningsAndErrors.warnings.length > 0, "Warnings expected but 0 warnings encountered")
   }
 }

@@ -33,6 +33,7 @@ object Main extends App {
     case Some(config) =>
       implicit val actorSystem: ActorSystem = ActorSystem("actor-system")
       val validator = new Validator(config.inputSchema)
+      throw new ArithmeticException(config.inputSchema.toString())
       val akkaStream = validator
         .validate()
         .map(warningsAndErrors => {

@@ -61,8 +61,10 @@ class Validator(
   private var sourceUriUsed: Boolean = false
 
   def validate(): Source[WarningsAndErrors, NotUsed] = {
-    val absoluteSchemaUri = schemaUri.map(getAbsoluteSchemaUri)
 
+    // The csvw in question
+    val absoluteSchemaUri = schemaUri.map(getAbsoluteSchemaUri)
+  
     val maybeCsvUri = csvUri.map(new URI(_))
 
     val schemaUrisToCheck = maybeCsvUri
