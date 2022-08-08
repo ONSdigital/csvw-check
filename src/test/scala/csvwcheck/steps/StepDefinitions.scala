@@ -29,11 +29,12 @@ class CommonTestFileResource {
   Every resource has a URI, this can be:
   * (a) A local resource starting file://
   * (b) A remote resource starting http:// or https://
-  * Where it is scenario (A) we read the test content in immediately.
-  * Where it is (B) a second step is required to specify the fixture holding
-  * the test content for said remote resource (see "...equates to..." steps).
+  * Where it is (B) a second step will be required to specify the fixture holding
+  * the mock http content for the testingBackend.
+  * See the "...equates to..." steps).
   */
   def setUri(fileOrUrl: String) {
+      println(s"setUri - got input $fileOrUrl")
       try {
         uri = new URI(fileOrUrl)
       } catch {
@@ -42,11 +43,6 @@ class CommonTestFileResource {
           uri = new URI(fixtureUri)
         case e: Throwable => println(s"Unable to set URI for $fileOrUrl")
       }
-
-      // If the uri is pointing to a local file, read it in now
-      if (uri.getScheme == "file") {
-        setContent()
-      }
   }
 
   def setHeaders(headerString: String) {
@@ -54,12 +50,17 @@ class CommonTestFileResource {
         throw new RuntimeException(s"Will not set mock response headers for local file $uri, that doesn't make sense.")
       }
  
+    // TODO - strip the tiple quotes from headerString
     // TODO = string to Seq[Header]
   }
 
-  // Parse the provided fixture file
+  // Where the uri is a remote resource, we setContent to use a local fixture to
+  // mock the http response content via the testing backend
   def setContent(fileName: Option[String] = None) {
-    assert(content == "", s"Test content for resource $uri has already been set.")
+
+    // Default String declaration (i.e _) is null
+    // If it's not null at this point, user has already set the content for this test resource
+    assert(content == null, s"Test content for resource $uri has already been set")
     if (uri.getScheme == "file") {
         throw new RuntimeException(s"URI $uri is already a local file, you don't need to specify a fixture to represent it.")
       }
@@ -91,17 +92,17 @@ class StepDefinitions extends ScalaDsl with EN {
       })
   }
 
-  Given("""^I have a csv file "(.*?)"$""") { (fileOrUrl: String) =>
+  Given("""^I have a csv file "([^\s]+\.csv)"$""") { (fileOrUrl: String) =>
     csvResource.setUri(fileOrUrl)
   }
 
-  Given("""^I have a csv file "([^"]*)"" with the headers "([^"]*)"$""") { (fileOrUrl: String, headerString: String) =>
+  Given("""^I have a csv file "([^\s^"]+\.csv)" with the headers \"{3}(.*?)\"{3}$""") { (fileOrUrl: String, headerString: String) =>
     csvResource.setUri(fileOrUrl)
     csvResource.setHeaders(headerString)
   }
 
   Given("""^the csv file equates to the test fixture "([^"]*)"$""") { (featureFileName: String) =>
-    csvResource.setContent(featureFileName)
+    csvResource.setContent(Some(featureFileName))
   }
 
   Given("""^I have a metadata file "([^"]*)"$""") { (fileOrUrl: String) =>
@@ -109,7 +110,7 @@ class StepDefinitions extends ScalaDsl with EN {
   }
 
   Given("""^the metadata file equates to the test fixture "([^"]*)"$""") { (featureFileName: String) =>
-    schemaResource.setContent(featureFileName)
+    schemaResource.setContent(Some(featureFileName))
   }
 
   When("I carry out CSVW validation") { () =>
@@ -119,10 +120,6 @@ class StepDefinitions extends ScalaDsl with EN {
     assert(schemaResource.uri != "", "A schema must be provided")
     assert(csvResource.uri != "", "A csv must be provided")
     
-    // Ensure the provided resource uris have test content associated with them. 
-    assert(schemaResource.content != "")
-    assert(csvResource.content != "")
-
     val validator = new Validator(
       Some(schemaResource.uri.toString()),
       Some(csvResource.uri.toString())

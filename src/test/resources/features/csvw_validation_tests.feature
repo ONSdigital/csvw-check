@@ -1076,10 +1076,10 @@ Feature: CSVW Validation Tests
   #@ignore
   @runme
   Scenario: manifest-validation#test122 link-metadata not describing file uses file-metadata
-    Given I have a csv file "https://w3c.github.io/csvw/tests/test122.csv" with the headers "<test122-linked-metadata.json>; rel="describedby"; type="application/csvm+json"
-    And the csv data equates to the test fixture "csvw/test122.csv"
-    And I have a schema file "https://w3c.github.io/csvw/tests/test122.csv-metadata.json"
-    And the schema data equates to the test fixture ""csvw/test122.csv-metadata.json""
+    Given I have a csv file "https://w3c.github.io/csvw/tests/test122.csv" with the headers """<test122-linked-metadata.json>; rel="describedby"; type="application/csvm+json"""
+    And the csv file equates to the test fixture "csvw/test122.csv"
+    And I have a metadata file "https://w3c.github.io/csvw/tests/test122.csv-metadata.json"
+    And the metadata file equates to the test fixture "csvw/test122.csv-metadata.json"
     When I carry out CSVW validation
     Then there should not be errors
     And there should be warnings
