@@ -24,10 +24,19 @@ import scala.language.postfixOps
 import scala.math.sqrt
 import scala.util.control.NonFatal
 
+import sttp.client3.{HttpClientSyncBackend, Identity, basicRequest, Response}
+import sttp.model.Uri
+import sttp.client3._
+
+import spray.json._
+import DefaultJsonProtocol._
+
 class Validator(
     val schemaUri: Option[String],
-    csvUri: Option[String] = None
+    var csvUri: Option[String] = None,
+    val sttpBackend: SttpBackend[Identity, Any] = HttpClientSyncBackend()
 ) {
+
   type ForeignKeys = mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]]
   type ForeignKeyReferences =
     mutable.Map[ParentTableForeignKeyReference, mutable.Set[KeyWithContext]]
@@ -60,13 +69,20 @@ class Validator(
   private val logger = Logger(this.getClass.getName)
   private var sourceUriUsed: Boolean = false
 
+  
   def validate(): Source[WarningsAndErrors, NotUsed] = {
 
     // The csvw in question
     val absoluteSchemaUri = schemaUri.map(getAbsoluteSchemaUri)
-  
+
     val maybeCsvUri = csvUri.map(new URI(_))
 
+    // Creates variations of the absolute schema uri to check
+    // with the example input "csvw/test122.csv-metadata.json":
+    // - file:///workspace/src/test/resources/features/fixtures/csvw/test122.csv-metadata.json,
+    // - src/test/resources/features/fixtures/csvw/test122.csv-metadata.json,
+    // - src/test/resources/features/fixtures/csvw/csv-metadata.json
+    // ... why the latter two?
     val schemaUrisToCheck = maybeCsvUri
       .map(csvUri =>
         Array(
@@ -313,16 +329,36 @@ class Validator(
     }
   }
 
+  // Simple http get
+  private def httpGet(url: URI): Identity[sttp.client3.Response[Either[String,String]]] = {
+
+    val uriToUse: Uri = Uri(url) // type Uri required by sttp
+    val request = basicRequest.get(uriToUse)
+
+    val response: Identity[sttp.client3.Response[Either[String,String]]] =
+    request.send(sttpBackend)
+
+    println(s"response was: $response")
+
+    return response
+  }
+
   private def attemptToFindMatchingTableGroup(
       maybeCsvUri: Option[URI],
       possibleSchemaUri: URI
   ): Either[CsvwLoadError, (TableGroup, WarningsAndErrors)] = {
+
     try {
       val jsonNode = if (possibleSchemaUri.getScheme == "file") {
         objectMapper.readTree(new File(possibleSchemaUri))
       } else {
-        objectMapper.readTree(possibleSchemaUri.toURL)
+
+        val responseString: String = httpGet(possibleSchemaUri).body.toString()
+        println(s"responseString: $responseString")
+        
+        objectMapper.readTree(responseString)
       }
+
       val (tableGroup, warningsAndErrors) =
         Schema.fromCsvwMetadata(
           possibleSchemaUri.toString,
@@ -361,6 +397,7 @@ class Validator(
       case e: java.io.FileNotFoundException => Left(CascadeToOtherFilesError(e))
       case e: Throwable =>
         logger.debug(e)
+        println(e.toString())
         Left(GeneralCsvwLoadError(e))
     }
   }
@@ -393,8 +430,16 @@ class Validator(
       maybeCsvUri: Option[URI],
       schemaUrisToCheck: Seq[URI]
   ): Source[WarningsAndErrors, NotUsed] = {
+
+
+    println(s"findAndValidateCsvwSchemaFileForCsv starts with maybeCsvUri is: $maybeCsvUri")
+    println(s"findAndValidateCsvwSchemaFileForCsv starts with schemaUrisToCheck is: $schemaUrisToCheck")
+
+
     schemaUrisToCheck match {
       case Seq() =>
+        // TODO, understand, .... if the schema is defined throw an error because
+        // we cant locate the schema? Cant be that but thats how it reads.
         if (schemaUri.isDefined) {
           val error = ErrorWithCsvContext(
             "metadata",
@@ -408,7 +453,9 @@ class Validator(
             models.WarningsAndErrors(errors = Array[ErrorWithCsvContext](error))
           )
           Source(warningsAndErrorsToReturn)
-        } else Source(List(WarningsAndErrors()))
+        } else {
+          Source(List(WarningsAndErrors()))
+        }
       case Seq(uri, uris @ _*) =>
         attemptToFindMatchingTableGroup(
           maybeCsvUri,

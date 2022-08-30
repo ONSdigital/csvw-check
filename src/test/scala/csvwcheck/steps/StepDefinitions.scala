@@ -8,15 +8,12 @@ import io.cucumber.scala.{EN, ScalaDsl}
 import org.slf4j.LoggerFactory
 import sttp.client3._
 import sttp.client3.testing._
+import sttp.model.Header
 import sttp.model._
 
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import java.net.URI
-import java.net.MalformedURLException
-
-import csvwcheck.models.Schema
-import csvwcheck.models.TableGroup
 
 // Common superclass for SchemaResource and CsvResource to hold shared methods.
 class CommonTestFileResource {
@@ -33,41 +30,51 @@ class CommonTestFileResource {
   * the mock http content for the testingBackend.
   * See the "...equates to..." steps).
   */
-  def setUri(fileOrUrl: String) {
-      println(s"setUri - got input $fileOrUrl")
-      try {
-        uri = new URI(fileOrUrl)
-      } catch {
-        case e: MalformedURLException =>
-          var fixtureUri: String = fixturesPath + fileOrUrl
-          uri = new URI(fixtureUri)
-        case e: Throwable => println(s"Unable to set URI for $fileOrUrl")
+  def setUri(fileOrUrl: String): Unit = {
+      uri = new URI(fileOrUrl)
+
+      // If the URI does not have a scheme we're assuming it's a local file
+      // on a path relative to the fixtures dir.
+      if (uri.getScheme != "file" && uri.getScheme != "http" && uri.getScheme != "https") {
+        var fixtureUri: String = fixturesPath + fileOrUrl
+        uri = new URI(fixtureUri)
       }
   }
 
-  def setHeaders(headerString: String) {
+  def setHeaders(headerString: String): Unit = {
     if (uri.getScheme == "file") {
-        throw new RuntimeException(s"Will not set mock response headers for local file $uri, that doesn't make sense.")
+      throw new RuntimeException(s"Will not set mock response headers for local file $uri, that doesn't make sense.")
       }
- 
-    // TODO - strip the tiple quotes from headerString
-    // TODO = string to Seq[Header]
+
+    // TODO = convert contents of headerString to Seq[Header] and populate .header
   }
 
   // Where the uri is a remote resource, we setContent to use a local fixture to
-  // mock the http response content via the testing backend
-  def setContent(fileName: Option[String] = None) {
-
-    // Default String declaration (i.e _) is null
-    // If it's not null at this point, user has already set the content for this test resource
+  // mock the http response body
+  def setContent(fileName: String): Unit = {
     assert(content == null, s"Test content for resource $uri has already been set")
+
     if (uri.getScheme == "file") {
         throw new RuntimeException(s"URI $uri is already a local file, you don't need to specify a fixture to represent it.")
       }
-    // TODO
-    // 1.) IF fileName, create a fixture path as URI() with fixturesPath + fileName
-    // 2.) Get the correct parser to use (csv or json) from the file extension
-    // 3.) Read the content in.
+
+    val fixtureLocalUri: URI = URI.create(fixturesPath + fileName)
+    val extension: String = fileName.substring(fileName.lastIndexOf("."))
+
+    // TODO - we need to somehow set the local content to how it would be represented
+    // as a http response body.
+    extension match {
+      case "csv" => {
+        // Mock csv response body with content from fixtureLocalUri
+      }
+      case "json" => {
+        // Mock json response body with content from fixtureLocalUri
+      }
+      case _ => {
+        // User input error
+        throw new RuntimeException(s"Specified testing resource $fileName does not appear to be a .csv or .json file.")
+      }
+    }
   }
 }
 
@@ -75,21 +82,6 @@ class StepDefinitions extends ScalaDsl with EN {
   private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
   private var schemaResource: CommonTestFileResource = new CommonTestFileResource()
   private var csvResource: CommonTestFileResource = new CommonTestFileResource()
-
-  // Assume we use sttp as http client.
-  // Call this funciton and set the testing backend object. Pass the backend object into validator function
-  // Stubbing for sttp is done as given in their docs at https://sttp.softwaremill.com/en/latest/testing.html
-  def setTestingBackend(): Unit = {
-    SttpBackendStub.synchronous
-      .whenRequestMatchesPartial({
-        case r if r.uri.path.startsWith(List(csvResource.uri)) =>
-          Response.apply(csvResource.content, StatusCode.Ok, "OK", csvResource.headers)
-        case r if r.uri.path.startsWith(List(schemaResource.uri)) =>
-          Response.ok(schemaResource.content)
-        case _ =>
-          Response("Not found", StatusCode.NotFound)
-      })
-  }
 
   Given("""^I have a csv file "([^\s]+\.csv)"$""") { (fileOrUrl: String) =>
     csvResource.setUri(fileOrUrl)
@@ -101,7 +93,7 @@ class StepDefinitions extends ScalaDsl with EN {
   }
 
   Given("""^the csv file equates to the test fixture "([^"]*)"$""") { (featureFileName: String) =>
-    csvResource.setContent(Some(featureFileName))
+    csvResource.setContent(featureFileName)
   }
 
   Given("""^I have a metadata file "([^"]*)"$""") { (fileOrUrl: String) =>
@@ -109,7 +101,7 @@ class StepDefinitions extends ScalaDsl with EN {
   }
 
   Given("""^the metadata file equates to the test fixture "([^"]*)"$""") { (featureFileName: String) =>
-    schemaResource.setContent(Some(featureFileName))
+    schemaResource.setContent(featureFileName)
   }
 
   When("I carry out CSVW validation") { () =>
@@ -119,11 +111,28 @@ class StepDefinitions extends ScalaDsl with EN {
     assert(schemaResource.uri != "", "A schema must be provided")
     assert(csvResource.uri != "", "A csv must be provided")
 
-    throw new ArithmeticException(s"Resource uri: $schemaResource.uri")
-    
     val validator = new Validator(
       Some(schemaResource.uri.toString()),
-      Some(csvResource.uri.toString())
+      Some(csvResource.uri.toString()),
+
+      // TODO - "sttpBacked" provides our stubbed/mock http responses for testing.
+      // In some case there will be (as I understand it) some resources that are
+      // dependencies of other resources, this will need some figuring out and
+      // updating when we get to those scenarios. "A" (note singular) response mock
+      // per file type is likely be insufficient in these cases.
+      // It may be that you need a list/array of CommonTestFileResource(s) and appropriate
+      // steps to populate - unsure at this time.
+      sttpBackend = SttpBackendStub.synchronous
+      .whenRequestMatchesPartial({
+        case r if (r.uri.toString() == Uri(csvResource.uri).toString()) =>
+          Response.apply(csvResource.content, StatusCode.Ok, "OK", csvResource.headers)
+        case r if (r.uri.toString() == Uri(schemaResource.uri).toString()) =>
+          Response.ok(schemaResource.content)
+        case r =>
+          val uriString: String = r.uri.path.toString()
+          Response(s"Backend Stub - Url $uriString Not found", StatusCode.NotFound)
+      })
+    
       )
     val akkaStream =
       validator.validate().map(wAndE => warningsAndErrors = wAndE)
@@ -131,12 +140,14 @@ class StepDefinitions extends ScalaDsl with EN {
   }
 
   Then("there should not be errors") { () =>
-    assert(warningsAndErrors.errors.length == 0, warningsAndErrors.warnings.map(w => w.toString).mkString(", "))
+    var errorString = warningsAndErrors.errors.map(w => w.toString).mkString(", ")
+    assert(warningsAndErrors.errors.length == 0, s"Errors were $errorString")
     }
 
   And("there should not be warnings") { () =>
-      assert(warningsAndErrors.warnings.length == 0, warningsAndErrors.warnings.map(w => w.toString).mkString(", "))
-  }
+    var warningString = warningsAndErrors.warnings.map(w => w.toString).mkString(", ")
+    assert(warningsAndErrors.errors.length == 0, s"Warnings were $warningString")
+    }
 
   Then("there should be errors") { () =>
     assert(warningsAndErrors.errors.length > 0, "Errors expected but 0 errors encountered")
@@ -145,4 +156,5 @@ class StepDefinitions extends ScalaDsl with EN {
   Then("""there should be warnings""") { () =>
     assert(warningsAndErrors.warnings.length > 0, "Warnings expected but 0 warnings encountered")
   }
+
 }
