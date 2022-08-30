@@ -77,12 +77,6 @@ class Validator(
 
     val maybeCsvUri = csvUri.map(new URI(_))
 
-    // Creates variations of the absolute schema uri to check
-    // with the example input "csvw/test122.csv-metadata.json":
-    // - file:///workspace/src/test/resources/features/fixtures/csvw/test122.csv-metadata.json,
-    // - src/test/resources/features/fixtures/csvw/test122.csv-metadata.json,
-    // - src/test/resources/features/fixtures/csvw/csv-metadata.json
-    // ... why the latter two?
     val schemaUrisToCheck = maybeCsvUri
       .map(csvUri =>
         Array(
@@ -338,8 +332,6 @@ class Validator(
     val response: Identity[sttp.client3.Response[Either[String,String]]] =
     request.send(sttpBackend)
 
-    println(s"response was: $response")
-
     return response
   }
 
@@ -430,11 +422,6 @@ class Validator(
       maybeCsvUri: Option[URI],
       schemaUrisToCheck: Seq[URI]
   ): Source[WarningsAndErrors, NotUsed] = {
-
-
-    println(s"findAndValidateCsvwSchemaFileForCsv starts with maybeCsvUri is: $maybeCsvUri")
-    println(s"findAndValidateCsvwSchemaFileForCsv starts with schemaUrisToCheck is: $schemaUrisToCheck")
-
 
     schemaUrisToCheck match {
       case Seq() =>
