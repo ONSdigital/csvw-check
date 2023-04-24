@@ -1546,10 +1546,10 @@ object PropertyChecker {
     if (valueCopy.path("@value").isMissingNode) {
       throw MetadataError("common property with @language lacks a @value")
     }
-    val matcher = Bcp47Language.r.pattern.matcher(v.asText())
-    if (!matcher.matches() || v.isEmpty) {
+    val language = v.asText()
+    if (language.isEmpty || !Bcp47Language.r.matches(language)) {
       throw MetadataError(
-        s"common property has invalid @language (${v.asText()})"
+        s"common property has invalid @language (${language})"
       )
     }
   }
