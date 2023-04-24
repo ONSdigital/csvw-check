@@ -204,46 +204,50 @@ object TableGroup {
       tables: mutable.Map[String, Table]
   ): Unit = {
     for ((tableUrl, table) <- tables) {
-      for ((foreignKey, i) <- table.foreignKeys.zipWithIndex) {
-        val reference = foreignKey.jsonObject.get("reference")
-        val parentTable: Table = setReferencedTableOrThrowException(
-          baseUrl,
-          tables,
-          tableUrl,
-          i,
-          reference
-        )
-        val mapNameToColumn: mutable.Map[String, Column] = mutable.Map()
-        for (column <- parentTable.columns) {
-          column.name
-            .foreach(columnName => mapNameToColumn += (columnName -> column))
-        }
-
-        val parentReferencedColumns: Array[Column] = reference
-          .get("columnReference")
-          .elements()
-          .asScalaArray
-          .map(columnReference => {
-            mapNameToColumn.get(columnReference.asText()) match {
-              case Some(column) => column
-              case None =>
-                throw MetadataError(
-                  s"column named ${columnReference.asText()} does not exist in ${parentTable.url}," +
-                    s" $$.tables[?(@.url = '$tableUrl')].tableSchema.foreign_keys[$i].reference.columnReference"
-                )
+      table.schema.map(s => {
+        for ((foreignKey, i) <- s.foreignKeys.zipWithIndex) {
+          val reference = foreignKey.jsonObject.get("reference")
+          val parentTable: Table = setReferencedTableOrThrowException(
+            baseUrl,
+            tables,
+            tableUrl,
+            i,
+            reference
+          )
+          val mapNameToColumn: mutable.Map[String, Column] = mutable.Map()
+          parentTable.schema.map(parentSchema => {
+            for (column <- parentSchema.columns) {
+              column.name
+                .foreach(columnName => mapNameToColumn += (columnName -> column))
             }
           })
 
-        val foreignKeyWithTable =
-          ParentTableForeignKeyReference(
-            foreignKey,
-            parentTable,
-            parentReferencedColumns,
-            table
-          )
-        parentTable.foreignKeyReferences :+= foreignKeyWithTable
-        tables += (parentTable.url -> parentTable)
-      }
+          val parentReferencedColumns: Array[Column] = reference
+            .get("columnReference")
+            .elements()
+            .asScalaArray
+            .map(columnReference => {
+              mapNameToColumn.get(columnReference.asText()) match {
+                case Some(column) => column
+                case None =>
+                  throw MetadataError(
+                    s"column named ${columnReference.asText()} does not exist in ${parentTable.url}," +
+                      s" $$.tables[?(@.url = '$tableUrl')].tableSchema.foreign_keys[$i].reference.columnReference"
+                  )
+              }
+            })
+
+          val foreignKeyWithTable =
+            ParentTableForeignKeyReference(
+              foreignKey,
+              parentTable,
+              parentReferencedColumns,
+              table
+            )
+          parentTable.foreignKeyReferences :+= foreignKeyWithTable
+          tables += (parentTable.url -> parentTable)
+        }
+      })
     }
   }
 
@@ -263,9 +267,12 @@ object TableGroup {
       val schemaUrl =
         new URL(new URL(baseUrl), schemaReferenceNode.asText()).toString
       val referencedTables = List.from(
-        tables.values.filter(t =>
-          t.schemaId.isDefined && t.schemaId.get == schemaUrl
-        )
+        tables.values
+          .filter(t =>
+            t.schema
+              .flatMap(s => s.schemaId)
+              .exists(schemaId => schemaId == schemaUrl)
+          )
       )
       referencedTables match {
         case referencedTable :: _ => referencedTable

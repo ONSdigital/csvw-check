@@ -52,32 +52,39 @@ object PropertyChecker {
   private val NameRegExp =
     "^([A-Za-z0-9]|(%[A-F0-9][A-F0-9]))([A-Za-z0-9_]|(%[A-F0-9][A-F0-9]))*$".r
   private val Properties = Map(
-    "@language" -> languageProperty(PropertyType.Context),
     // Context Properties
+    "@language" -> languageProperty(PropertyType.Context),
     "@base" -> linkProperty(PropertyType.Context),
     // common properties
     "@id" -> linkProperty(PropertyType.Common),
+    "dialect" -> dialectProperty(PropertyType.Common),
     "notes" -> notesProperty(PropertyType.Common),
     "suppressOutput" -> booleanProperty(PropertyType.Common),
-    "null" -> nullProperty(PropertyType.Inherited),
-    "separator" -> separatorProperty(PropertyType.Inherited),
-    "lang" -> languageProperty(PropertyType.Inherited),
-    "default" -> stringProperty(PropertyType.Inherited),
-    "required" -> booleanProperty(PropertyType.Inherited),
-    "ordered" -> booleanProperty(PropertyType.Inherited),
+    // Inherited properties
+    "aboutUrl" -> uriTemplateProperty(PropertyType.Inherited),
     "datatype" -> datatypeProperty(PropertyType.Inherited),
+    "default" -> stringProperty(PropertyType.Inherited),
+    "lang" -> languageProperty(PropertyType.Inherited),
+    "null" -> nullProperty(PropertyType.Inherited),
+    "ordered" -> booleanProperty(PropertyType.Inherited),
+    "propertyUrl" -> uriTemplateProperty(PropertyType.Inherited),
+    "required" -> booleanProperty(PropertyType.Inherited),
+    "separator" -> separatorProperty(PropertyType.Inherited),
+    "textDirection" -> textDirectionProperty(PropertyType.Inherited),
+    "valueUrl" -> uriTemplateProperty(PropertyType.Inherited),
+    // Table properties
     "tableSchema" -> tableSchemaProperty(PropertyType.Table),
     "transformations" -> transformationsProperty(PropertyType.Table),
-    "aboutUrl" -> uriTemplateProperty(PropertyType.Inherited),
-    "propertyUrl" -> uriTemplateProperty(PropertyType.Inherited),
-    "valueUrl" -> uriTemplateProperty(PropertyType.Inherited),
-    "textDirection" -> textDirectionProperty(PropertyType.Inherited),
-    "dialect" -> dialectProperty(PropertyType.Common),
+    "url" -> linkProperty(PropertyType.Table),
+    // Schema Properties
+    "columns" -> columnsProperty(PropertyType.Schema),
+    "foreignKeys" -> foreignKeysProperty(PropertyType.Schema),
+    "primaryKey" -> columnReferenceProperty(PropertyType.Schema),
+    "rowTitles" -> columnReferenceProperty(PropertyType.Schema),
     // Column level properties
+    "name" -> nameProperty(PropertyType.Column),
     "titles" -> naturalLanguageProperty(PropertyType.Column),
     "virtual" -> booleanProperty(PropertyType.Column),
-    "name" -> nameProperty(PropertyType.Column),
-    "url" -> linkProperty(PropertyType.Table),
     // Dialect Properties
     "commentPrefix" -> stringProperty(PropertyType.Dialect),
     "delimiter" -> stringProperty(PropertyType.Dialect),
@@ -92,15 +99,10 @@ object PropertyChecker {
     "skipInitialSpace" -> booleanProperty(PropertyType.Dialect),
     "skipRows" -> numericProperty(PropertyType.Dialect),
     "trim" -> trimProperty(PropertyType.Dialect),
-    // Schema Properties
-    "columns" -> columnsProperty(PropertyType.Schema),
-    "primaryKey" -> columnReferenceProperty(PropertyType.Schema),
-    "foreignKeys" -> foreignKeysProperty(PropertyType.Schema),
-    "rowTitles" -> columnReferenceProperty(PropertyType.Schema),
     // Transformation properties
-    "targetFormat" -> targetFormatProperty(PropertyType.Transformation),
     "scriptFormat" -> scriptFormatProperty(PropertyType.Transformation),
     "source" -> sourceProperty(PropertyType.Transformation),
+    "targetFormat" -> targetFormatProperty(PropertyType.Transformation),
     // Foreign Key Properties
     "columnReference" -> columnReferenceProperty(PropertyType.ForeignKey),
     "reference" -> referenceProperty(PropertyType.ForeignKey),
@@ -1191,15 +1193,15 @@ object PropertyChecker {
                   throw MetadataError("@type of dialect is not 'Dialect'")
                 }
               case _ =>
-                val (newValue, w, t) = checkProperty(key, v, baseUrl, lang)
-                if (t == PropertyType.Dialect && w.isEmpty) {
+                val (newValue, propertyWarnings, propertyType) = checkProperty(key, v, baseUrl, lang)
+                if (propertyType == PropertyType.Dialect && propertyWarnings.isEmpty) {
                   valueCopy.set(key, newValue)
                 } else {
                   valueCopy.remove(key)
-                  if (t != PropertyType.Dialect) {
+                  if (propertyType != PropertyType.Dialect) {
                     warnings = warnings :+ "invalid_property"
                   }
-                  warnings = Array.concat(warnings, w)
+                  warnings = Array.concat(warnings, propertyWarnings)
                 }
             }
           }

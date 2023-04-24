@@ -95,21 +95,21 @@ class TableTest extends AnyFunSuite {
 
     assert(table1.url === "http://w3c.github.io/csvw/tests/countries.csv")
     assert(table1.id.get === "http://w3c.github.io/csvw/tests/sample_id_value")
-    assert(table1.columns.length === 4)
+    assert(table1.schema.get.columns.length === 4)
     assert(table1.dialect.get.encoding === "utf-8")
-    assert(table2.foreignKeys.length === 1)
-    assert(table2.foreignKeys(0).localColumns(0).name.get === "countryRef")
+    assert(table2.schema.get.foreignKeys.length === 1)
+    assert(table2.schema.get.foreignKeys(0).localColumns(0).name.get === "countryRef")
     assert(table1.notes.isDefined)
     assert(
       table1.notes.get.elements().asScalaArray(0) === new TextNode(
         "sample value"
       )
     )
-    assert(table1.primaryKey(0).name.get === "countryCode")
-    assert(table1.rowTitleColumns.length === 1)
-    assert(table1.rowTitleColumns(0).name.get === "countryCode")
+    assert(table1.schema.get.primaryKey(0).name.get === "countryCode")
+    assert(table1.schema.get.rowTitleColumns.length === 1)
+    assert(table1.schema.get.rowTitleColumns(0).name.get === "countryCode")
     assert(
-      table1.schemaId.get === "sample_id_value"
+      table1.schema.get.schemaId.get === "sample_id_value"
     )
     assert(table1.suppressOutput === true)
     assert(table1.annotations.isEmpty)

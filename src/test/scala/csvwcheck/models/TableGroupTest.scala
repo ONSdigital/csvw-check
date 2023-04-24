@@ -228,9 +228,9 @@ class TableGroupTest extends AnyFunSuite {
     assert(tableGroup.annotations.size === 0)
     assert(warningsAndErrors.warnings.length === 0)
     assert(tableGroup.tables.size === 1)
-    assert(table.columns.length === 10)
+    assert(table.schema.get.columns.length === 10)
     assert(
-      table.columns(0).nullParam === Array("-")
+      table.schema.get.columns(0).nullParam === Array("-")
     ) // should inherit null to all columns - assertion which justifies test name
   }
 
@@ -292,7 +292,7 @@ class TableGroupTest extends AnyFunSuite {
       tableGroup.tables("http://w3c.github.io/csvw/tests/tree-ops.csv")
 
     assert(tableGroup.tables.size === 1)
-    assert(table.columns.length === 5)
+    assert(table.schema.get.columns.length === 5)
   }
 
   test(

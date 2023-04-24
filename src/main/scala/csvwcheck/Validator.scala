@@ -714,14 +714,14 @@ class Validator(
   }
 
   private def parseRow(
-      schema: TableGroup,
-      tableUri: URI,
-      dialect: Dialect,
-      table: Table,
-      row: CSVRecord
+                        tableGroup: TableGroup,
+                        tableUri: URI,
+                        dialect: Dialect,
+                        table: Table,
+                        row: CSVRecord
   ): ValidateRowOutput = {
     if (row.getRecordNumber == 1 && dialect.header) {
-      val warningsAndErrors = schema.validateHeader(row, tableUri.toString)
+      val warningsAndErrors = tableGroup.validateHeader(row, tableUri.toString)
       ValidateRowOutput(
         warningsAndErrors = warningsAndErrors,
         recordNumber = row.getRecordNumber
@@ -743,24 +743,31 @@ class Validator(
           recordNumber = row.getRecordNumber
         )
       } else {
-        if (table.columns.length >= row.size()) {
-          table.validateRow(row)
-        } else {
-          val raggedRowsError = ErrorWithCsvContext(
-            "ragged_rows",
-            "structure",
-            row.getRecordNumber.toString,
-            "",
-            "",
-            ""
-          )
-          val warningsAndErrors =
-            WarningsAndErrors(errors = Array(raggedRowsError))
+        table.schema.map(s => {
+          if (s.columns.length >= row.size()) {
+            table.validateRow(row)
+          } else {
+            val raggedRowsError = ErrorWithCsvContext(
+              "ragged_rows",
+              "structure",
+              row.getRecordNumber.toString,
+              "",
+              "",
+              ""
+            )
+            val warningsAndErrors =
+              WarningsAndErrors(errors = Array(raggedRowsError))
+            ValidateRowOutput(
+              warningsAndErrors = warningsAndErrors,
+              recordNumber = row.getRecordNumber
+            )
+          }
+        }).getOrElse(
           ValidateRowOutput(
-            warningsAndErrors = warningsAndErrors,
+            warningsAndErrors = WarningsAndErrors(),
             recordNumber = row.getRecordNumber
           )
-        }
+        )
       }
     }
   }
