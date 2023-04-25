@@ -250,4 +250,20 @@ class ValidatorTest extends AnyFunSuite {
     set += val2 // Since the hashcode method is overridden in KeyWithContext class val1 is equal to val2
     assert(set.size == 1)
   }
+
+  test(
+    "it should cope with @language properties on strings (Issue #101)"
+  ) {
+    val testCaseFile = new File(s"${csvwExamplesBaseDir}/languagetagbroken101/goverment-year.csv-metadata.json")
+    assert(testCaseFile.exists())
+
+    val validator = new Validator(Some(s"file://${testCaseFile.getAbsolutePath}"))
+    var warningsAndErrors = WarningsAndErrors()
+    val akkaStream =
+      validator.validate().map(wAndE => warningsAndErrors = wAndE)
+    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val errors = warningsAndErrors.errors
+    assert(errors.isEmpty)
+  }
 }
+

@@ -189,17 +189,23 @@ object Table {
         val table = new Table(
           url = url,
           id = getId(tableProperties),
-          columns = columns,
+          schema = Some(
+            TableSchema(
+              columns = columns,
+              foreignKeys = foreignKeyMappings, // a new type here?
+              primaryKey = primaryKeyToReturn,
+              rowTitleColumns = rowTitlesColumns,
+              schemaId = getMaybeSchemaIdFromTableSchema(tableSchemaObject),
+            )
+          ),
           dialect = getDialect(tableProperties),
-          foreignKeys = foreignKeyMappings, // a new type here?
           notes = getNotes(tableProperties),
-          primaryKey = primaryKeyToReturn,
-          rowTitleColumns = rowTitlesColumns,
-          schemaId = getMaybeSchemaIdFromTableSchema(tableSchemaObject),
           suppressOutput = getSuppressOutput(tableProperties),
           annotations = annotations
         )
         (table, warnings)
+      // tableSchemas defined in other files have been updated to inline representations by this point already.
+      // See propertyChecker function for tableSchema.
       case _ =>
         throw MetadataError(
           s"Table schema must be object for table $url "
@@ -498,13 +504,9 @@ object Table {
     val table = new Table(
       url = url,
       id = None,
-      columns = Array(),
+      schema = None,
       dialect = None,
-      foreignKeys = Array(),
       notes = None,
-      primaryKey = Array(),
-      rowTitleColumns = Array(),
-      schemaId = None,
       suppressOutput = false,
       annotations = annotations
     )
@@ -512,16 +514,20 @@ object Table {
   }
 }
 
+case class TableSchema (
+  columns: Array[Column],
+  primaryKey: Array[Column],
+  rowTitleColumns: Array[Column],
+  foreignKeys: Array[ChildTableForeignKey],
+  schemaId: Option[String],
+)
+
 case class Table private (
     url: String,
     id: Option[String],
-    columns: Array[Column],
+    schema: Option[TableSchema],
     dialect: Option[Dialect],
-    foreignKeys: Array[ChildTableForeignKey],
     notes: Option[ArrayNode],
-    primaryKey: Array[Column],
-    rowTitleColumns: Array[Column],
-    schemaId: Option[String],
     suppressOutput: Boolean,
     annotations: mutable.Map[String, JsonNode]
 ) {
@@ -538,45 +544,49 @@ case class Table private (
       ArrayBuffer.empty[
         (ParentTableForeignKeyReference, List[Any])
       ] // to store the validated referenced Table Columns values in each row
-    val foreignKeyValues =
+    val foreignKeyValues = {
       ArrayBuffer.empty[
         (ChildTableForeignKey, List[Any])
       ] // to store the validated foreign key values in each row
-    for ((value, column) <- row.iterator.asScalaArray.zip(columns)) {
-      //catch any exception here, possibly outOfBounds  and set warning too many values
-      val (es, newValue) = column.validate(value)
-      errors = errors ++ es.map(e =>
-        ErrorWithCsvContext(
-          e.`type`,
-          "schema",
-          row.getRecordNumber.toString,
-          column.columnOrdinal.toString,
-          e.content,
-          s"required => ${column.required}"
-        )
-      )
-      if (primaryKey.contains(column)) {
-        primaryKeyValues.addAll(newValue)
-      }
-
-      for (foreignKeyReferenceObject <- foreignKeyReferences) {
-        if (
-          foreignKeyReferenceObject.parentTableReferencedColumns.contains(
-            column
-          )
-        ) {
-          foreignKeyReferenceValues.addOne(
-            (foreignKeyReferenceObject, newValue)
-          )
-        }
-      }
-
-      for (foreignKeyWrapperObject <- foreignKeys) {
-        if (foreignKeyWrapperObject.localColumns.contains(column)) {
-          foreignKeyValues.addOne((foreignKeyWrapperObject, newValue))
-        }
-      }
     }
+
+    schema.map(s => {
+      for ((value, column) <- row.iterator.asScalaArray.zip(s.columns)) {
+        //catch any exception here, possibly outOfBounds  and set warning too many values
+        val (es, newValue) = column.validate(value)
+        errors = errors ++ es.map(e =>
+          ErrorWithCsvContext(
+            e.`type`,
+            "schema",
+            row.getRecordNumber.toString,
+            column.columnOrdinal.toString,
+            e.content,
+            s"required => ${column.required}"
+          )
+        )
+        if (s.primaryKey.contains(column)) {
+          primaryKeyValues.addAll(newValue)
+        }
+
+        for (foreignKeyReferenceObject <- foreignKeyReferences) {
+          if (
+            foreignKeyReferenceObject.parentTableReferencedColumns.contains(
+              column
+            )
+          ) {
+            foreignKeyReferenceValues.addOne(
+              (foreignKeyReferenceObject, newValue)
+            )
+          }
+        }
+
+        for (foreignKeyWrapperObject <- s.foreignKeys) {
+          if (foreignKeyWrapperObject.localColumns.contains(column)) {
+            foreignKeyValues.addOne((foreignKeyWrapperObject, newValue))
+          }
+        }
+      }
+    })
 
     ValidateRowOutput(
       row.getRecordNumber,
@@ -646,21 +656,25 @@ case class Table private (
           ""
         )
       } else columnNames :+= columnName
-      if (columnIndex < columns.length) {
-        val column = columns(columnIndex)
-        val WarningsAndErrors(w, e) = column.validateHeader(columnName)
-        warnings = warnings.concat(w)
-        errors = errors.concat(e)
-      } else {
-        errors :+= ErrorWithCsvContext(
-          "Malformed header",
-          "Schema",
-          "1",
-          "",
-          "Unexpected column not defined in metadata",
-          ""
-        )
-      }
+      // Only validate columns are defined if a tableSchema has been defined.
+      schema.map(s => {
+        if (columnIndex < s.columns.length) {
+          val column = s.columns(columnIndex)
+          val WarningsAndErrors(w, e) = column.validateHeader(columnName)
+          warnings = warnings.concat(w)
+          errors = errors.concat(e)
+        } else {
+          errors :+= ErrorWithCsvContext(
+            "Malformed header",
+            "Schema",
+            "1",
+            "",
+            "Unexpected column not defined in metadata",
+            ""
+          )
+        }
+
+      })
       columnIndex += 1
     }
     models.WarningsAndErrors(warnings, errors)

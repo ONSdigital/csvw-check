@@ -194,7 +194,6 @@ Feature: CSVW Validation Tests
 	
 	# manifest-validation#test023
 	# If `true`, sets the `header row count` flag to 1, and if `false` to 0, unless `headerRowCount` is provided, in which case the value provided for the `header` property is ignored.
-  @ignore
   Scenario: manifest-validation#test023 dialect: header=false
     Given I have a CSV file called "csvw/tree-ops.csv"
     And it is stored at the url "https://w3c.github.io/csvw/tests/tree-ops.csv"
