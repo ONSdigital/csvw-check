@@ -36,7 +36,7 @@ object Schema {
   def fromCsvwMetadata(
       uri: String,
       json: ObjectNode
-  ): (TableGroup, WarningsAndErrors) = {
+  ): Either[MetadataError, ParsedResult[TableGroup]] = {
     TableGroup.fromJson(json, uri)
   }
 

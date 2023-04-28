@@ -11,7 +11,7 @@ import org.apache.commons.csv.CSVRecord
 
 import java.net.URL
 import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, Map}
+import scala.collection.mutable.ArrayBuffer
 import scala.util.matching.Regex
 
 object TableGroup {
@@ -22,22 +22,18 @@ object TableGroup {
   def fromJson(
       tableGroupNodeIn: ObjectNode,
       baseUri: String
-  ): (TableGroup, WarningsAndErrors) = {
+  ): Either[MetadataError, ParsedResult[TableGroup]] = {
     var baseUrl = baseUri.trim
     var errors = Array[ErrorWithCsvContext]()
     var warnings = Array[WarningWithCsvContext]()
-    val matcher = containsWhitespaces.pattern.matcher(baseUrl)
-    if (matcher.matches()) {
+    if (containsWhitespaces.matches(baseUrl)) {
       println(
         "Warning: The path/url has whitespaces in it, please ensure its correctness. Proceeding with received " +
           "path/url .."
       )
     }
-    val processContextResult =
-      processContextGetBaseUrlLang(tableGroupNodeIn, baseUrl, "und")
-    baseUrl = processContextResult._1
-    val lang = processContextResult._2
-    warnings = Array.concat(warnings, processContextResult._3)
+    val (baseUrl, lang, ws) = processContextGetBaseUrlLang(tableGroupNodeIn, baseUrl, "und")
+    warnings ++= ws
     val tableGroupNode = restructureIfNodeIsSingleTable(tableGroupNodeIn)
 
     val (annotations, commonProperties, inheritedProperties, w1) =
@@ -69,7 +65,8 @@ object TableGroup {
       commonProperties.get("notes"),
       annotations
     )
-    (tableGroup, models.WarningsAndErrors(warnings = warnings, errors = errors))
+
+    ParsedResult(tableGroup, models.WarningsAndErrors(warnings = warnings, errors = errors))
   }
 
   private def restructureIfNodeIsSingleTable(
@@ -91,17 +88,16 @@ object TableGroup {
       rootNode: ObjectNode,
       baseUrl: String,
       lang: String
-  ): (String, String, Array[WarningWithCsvContext]) = {
-    val context = rootNode.get("@context")
-
-    val (baseUrlNew, langNew, warnings) = context match {
+  ): Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = {
+    rootNode.get("@context") match {
       case a: ArrayNode => validateContextArrayNode(a, baseUrl, lang)
       case s: TextNode if s.asText == csvwContextUri =>
-        (baseUrl, lang, Array[WarningWithCsvContext]())
-      case _ => throw MetadataError("Invalid Context")
-    }
-    rootNode.remove("@context")
-    (baseUrlNew, langNew, warnings)
+        Right((baseUrl, lang, Array[WarningWithCsvContext]()))
+      case _ => Left(MetadataError("Invalid Context"))
+    }.map(results => {
+      rootNode.remove("@context")
+      results
+    })
   }
 
   // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#top-level-properties
@@ -109,41 +105,41 @@ object TableGroup {
       context: ArrayNode,
       baseUrl: String,
       lang: String
-  ): (String, String, Array[WarningWithCsvContext]) = {
-    def validateFirstItemInContext(): Unit = {
-      context.get(0) match {
-        case s: TextNode if s.asText == csvwContextUri =>
-        case _ =>
-          throw MetadataError(
+  ): Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = {
+    def validateFirstItemInContext(firstItem: JsonNode): Either[MetadataError, Unit] = {
+      firstItem match {
+        case s: TextNode if s.asText == csvwContextUri => Right()
+        case _ => Left(MetadataError(
             s"First item in @context must be string $csvwContextUri "
-          )
+          ))
       }
     }
 
-    context.size() match {
-      case 2 =>
+    context.elements().asScalaArray match {
+      case Array(firstItem, secondItem) =>
         // if @context contains 2 elements, the first element will be the namespace for csvw - http://www.w3.org/ns/csvw
         // The second element can be @language or @base - "@context": ["http://www.w3.org/ns/csvw", {"@language": "en"}]
-        validateFirstItemInContext()
-        context.get(1) match {
-          case contextBaseAndLangObject: ObjectNode =>
-            getAndValidateBaseAndLangFromContextObject(
-              contextBaseAndLangObject,
-              baseUrl,
-              lang
-            )
-          case _ =>
-            throw MetadataError(
-              "Second @context array value must be an object"
-            )
-        }
-      case 1 =>
+        validateFirstItemInContext(firstItem)
+          .flatMap(_ => {
+            secondItem match {
+              case contextBaseAndLangObject: ObjectNode =>
+                getAndValidateBaseAndLangFromContextObject(
+                  contextBaseAndLangObject,
+                  baseUrl,
+                  lang
+                )
+              case _ => Left(MetadataError(
+                  "Second @context array value must be an object"
+                )
+              )
+            }
+          })
+      case Array(firstItem) =>
         // If @context contains just one element, the namespace for csvw should always be http://www.w3.org/ns/csvw
         // "@context": "http://www.w3.org/ns/csvw"
-        validateFirstItemInContext()
-        (baseUrl, lang, Array[WarningWithCsvContext]())
-      case l =>
-        throw MetadataError(s"Unexpected @context array length $l")
+        validateFirstItemInContext(firstItem)
+          .map(_ => (baseUrl, lang, Array[WarningWithCsvContext]()))
+      case _ => Left(MetadataError(s"Unexpected @context array length ${context.size()}"))
     }
   }
 
@@ -159,45 +155,37 @@ object TableGroup {
       contextBaseAndLangObject: ObjectNode,
       baseUrl: String,
       lang: String
-  ): (String, String, Array[WarningWithCsvContext]) = {
-    var baseUrlNew = baseUrl
-    var langNew: String = lang
-    var warnings = Array[WarningWithCsvContext]()
-
-    for ((property, value) <- contextBaseAndLangObject.getKeysAndValues) {
-      val (newValue, w, csvwPropertyType) = PropertyChecker
-        .checkProperty(property, value, baseUrl, lang)
-      if (w.isEmpty) {
-        if (csvwPropertyType == PropertyType.Context) {
+  ): Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = {
+    val acc: Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = Right((baseUrl, lang, Array[WarningWithCsvContext]()))
+    contextBaseAndLangObject.getKeysAndValues
+      .foldLeft(acc)({
+        case (err@Left(_), _) => err
+        case (Right((baseUrl, lang, warnings)), (property, value)) =>
           property match {
-            case "@base"     => baseUrlNew = newValue.asText()
-            case "@language" => langNew = newValue.asText()
+            case "@base" | "@language" =>
+              PropertyChecker.checkProperty(property, value, baseUrl, lang) match {
+                case (propertyNode, Array(), _) =>
+                  val propertyTextValue = propertyNode.asText()
+                  property match {
+                    case "@base" => Right((propertyTextValue, lang, warnings) )
+                    case "@language" => Right((baseUrl, propertyTextValue, warnings) )
+                    case _ => Left(MetadataError(s"Unhandled context property '$property'"))
+                  }
+                case (_, ws, _) =>
+                  // There are warnings, don't update any properties.
+                  Right((baseUrl, lang, warnings ++ ws.map(WarningWithCsvContext(
+                    _,
+                    "metadata",
+                    "",
+                    "",
+                    s"$property: $value",
+                    ""
+                  ))))
+              }
+            case _ => Left(MetadataError(s"@context contains properties other than @base or @language $property)"))
           }
-        } else {
-          throw MetadataError(
-            s"@context contains properties other than @base or @language $property)"
-          )
-        }
-      } else {
-        if (!Array[String]("@base", "@language").contains(property)) {
-          throw MetadataError(
-            s"@context contains properties other than @base or @language $property)"
-          )
-        }
-        warnings = warnings.concat(w.map { w =>
-          WarningWithCsvContext(
-            w,
-            "metadata",
-            "",
-            "",
-            s"$property: $value",
-            ""
-          )
-        })
-      }
-    }
-    (baseUrlNew, langNew, warnings)
-  }
+      })
+ }
 
   private def findForeignKeysLinkToReferencedTables(
       baseUrl: String,

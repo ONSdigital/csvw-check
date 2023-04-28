@@ -5,7 +5,6 @@ import akka.stream.scaladsl.Sink
 import csvwcheck.Validator
 import csvwcheck.models.WarningsAndErrors
 import io.cucumber.scala.{EN, ScalaDsl}
-import org.slf4j.LoggerFactory
 import sttp.client3._
 import sttp.client3.testing._
 import sttp.model._
