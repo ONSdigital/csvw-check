@@ -1382,27 +1382,27 @@ object PropertyChecker {
   private def parseCommonPropertyValue(
                                         commonPropertyValueNode: JsonNode,
                                         baseUrl: String,
-                                        lang: String
+                                        defaultLang: String
   ): Either[MetadataError, (JsonNode, StringWarnings)] = {
     commonPropertyValueNode match {
-      case o: ObjectNode => parseCommonPropertyObject(o, baseUrl, lang)
+      case o: ObjectNode => parseCommonPropertyObject(o, baseUrl, defaultLang)
       case _: TextNode =>
-        lang match {
+        defaultLang match {
           case "und" => Right((commonPropertyValueNode, Array()))
           case _ =>
             val objectNodeToReturn = JsonNodeFactory.instance.objectNode()
             objectNodeToReturn.set("@value", commonPropertyValueNode)
-            objectNodeToReturn.set("@language", new TextNode(lang))
+            objectNodeToReturn.set("@language", new TextNode(defaultLang))
             Right((objectNodeToReturn, Array()))
         }
       case a: ArrayNode =>
         Array.from(a.elements().asScala)
-          .map(elementNode => parseCommonPropertyValue(elementNode, baseUrl, lang))
+          .map(elementNode => parseCommonPropertyValue(elementNode, baseUrl, defaultLang))
           .foldLeft[Either[MetadataError, (ArrayNode, StringWarnings)]](Right(JsonNodeFactory.instance.arrayNode(), Array()))({
             case (err@Left(_), _) => err
             case (_, Left(newError)) => Left(newError)
             case (Right((parsedArrayNode, warnings)), Right((parsedElementNode, ws))) =>
-              Right((parsedArrayNode.add(parsedElementNode), warnings ++ ws))
+              Right((parsedArrayNode.deepCopy().add(parsedElementNode), warnings ++ ws))
           })
       case _ =>
         throw new IllegalArgumentException(
@@ -1411,35 +1411,35 @@ object PropertyChecker {
     }
   }
 
-  private def parseCommonPropertyObject(o: ObjectNode, baseUrl: String, lang: String): Either[MetadataError, (ObjectNode, StringWarnings)] = {
-    Array.from(o.fields().asScala)
+  private def parseCommonPropertyObject(objectNode: ObjectNode, baseUrl: String, defaultLang: String): Either[MetadataError, (ObjectNode, StringWarnings)] = {
+    Array.from(objectNode.fields().asScala)
       .map(fieldAndValue => {
-        val p = fieldAndValue.getKey
-        val v = fieldAndValue.getValue
-        (p match {
-          case "@context" | "@list" | "@set" => Left(MetadataError(s"$p: common property has $p property"))
-          case "@type" => processCommonPropertyType(o, p, v).map(v => (v, Array[String]()))
-          case "@id" => checkAndExpandIdValueNode(baseUrl, v).map(v => (v, Array[String]()))
-          case "@value" => processCommonPropertyValue(o).map(v => (v, Array[String]()))
-          case "@language" => processCommonPropertyLanguage(o, v).map(v => (v, Array[String]()))
+        val propertyName = fieldAndValue.getKey
+        val propertyValueNode = fieldAndValue.getValue
+        (propertyName match {
+          case "@context" | "@list" | "@set" => Left(MetadataError(s"$propertyName: common property has $propertyName property"))
+          case "@type" => parseCommonPropertyObjectType(objectNode, propertyName, propertyValueNode).map(v => (v, Array[String]()))
+          case "@id" => parseCommonPropertyObjectId(baseUrl, propertyValueNode).map(v => (v, Array[String]()))
+          case "@value" => processCommonPropertyObjectValue(objectNode).map(v => (v, Array[String]()))
+          case "@language" => parseCommonPropertyObjectLanguage(objectNode, propertyValueNode).map(v => (v, Array[String]()))
           case _ =>
-            if (p(0).equals('@')) {
+            if (propertyName(0).equals('@')) {
               Left(MetadataError(
-                s"common property has property other than @id, @type, @value or @language beginning with @ ($p)"
+                s"common property has property other than @id, @type, @value or @language beginning with @ ($propertyName)"
               ))
             } else {
-              parseCommonPropertyValue(v, baseUrl, lang)
+              parseCommonPropertyValue(propertyValueNode, baseUrl, defaultLang)
             }
-        }).map({ case (valueNode, warnings) => (p, valueNode, warnings) })
+        }).map({ case (valueNode, warnings) => (propertyName, valueNode, warnings) })
       })
-      .foldLeft[Either[MetadataError, (ObjectNode, StringWarnings)]](Right(o, Array()))({
+      .foldLeft[Either[MetadataError, (ObjectNode, StringWarnings)]](Right(objectNode, Array()))({
         case (existingError@Left(_), _) => existingError
         case (_, Left(errorForProperty)) => Left(errorForProperty)
         case (Right((obj, warnings)), Right((propertyName, newValue, ws))) => Right((obj.deepCopy().set(propertyName, newValue), warnings ++ ws))
       })
   }
 
-  private def checkAndExpandIdValueNode(baseUrl: String, v: JsonNode): Either[MetadataError, JsonNode] = {
+  private def parseCommonPropertyObjectId(baseUrl: String, v: JsonNode): Either[MetadataError, JsonNode] = {
     if (baseUrl.isBlank) {
       Right(v)
     } else {
@@ -1544,7 +1544,7 @@ object PropertyChecker {
     notesPropertyInternal
   }
 
-  private def processCommonPropertyValue(value: ObjectNode): Either[MetadataError, JsonNode] = {
+  private def processCommonPropertyObjectValue(value: ObjectNode): Either[MetadataError, JsonNode] = {
     if (
       (!value.path("@type").isMissingNode) && (!value
         .path("@language")
@@ -1567,7 +1567,7 @@ object PropertyChecker {
     }
   }
 
-  private def processCommonPropertyLanguage(
+  private def parseCommonPropertyObjectLanguage(
       valueCopy: ObjectNode,
       v: JsonNode
   ): Either[MetadataError, JsonNode] = {
@@ -1586,7 +1586,7 @@ object PropertyChecker {
   }
 
   @tailrec
-  private def processCommonPropertyType(
+  private def parseCommonPropertyObjectType(
                                          objectNode: ObjectNode,
                                          p: String,
                                          v: JsonNode
@@ -1608,7 +1608,7 @@ object PropertyChecker {
         } else {
           val arr: ArrayNode = JsonNodeFactory.instance.arrayNode()
           arr.add(s)
-          processCommonPropertyType(objectNode, p, arr)
+          parseCommonPropertyObjectType(objectNode, p, arr)
         }
       case a: ArrayNode =>
         val typeArrayElements = Array.from(a.elements().asScala)
