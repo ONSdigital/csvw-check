@@ -1,9 +1,18 @@
 package csvwcheck.models
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
+import com.fasterxml.jackson.databind.node.{
+  ArrayNode,
+  JsonNodeFactory,
+  ObjectNode,
+  TextNode
+}
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
+import csvwcheck.errors.{
+  ErrorWithCsvContext,
+  MetadataError,
+  WarningWithCsvContext
+}
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import csvwcheck.{PropertyChecker, models}
@@ -32,7 +41,8 @@ object TableGroup {
           "path/url .."
       )
     }
-    val (baseUrl, lang, ws) = processContextGetBaseUrlLang(tableGroupNodeIn, baseUrl, "und")
+    val (baseUrl, lang, ws) =
+      processContextGetBaseUrlLang(tableGroupNodeIn, baseUrl, "und")
     warnings ++= ws
     val tableGroupNode = restructureIfNodeIsSingleTable(tableGroupNodeIn)
 
@@ -66,7 +76,10 @@ object TableGroup {
       annotations
     )
 
-    ParsedResult(tableGroup, models.WarningsAndErrors(warnings = warnings, errors = errors))
+    ParsedResult(
+      tableGroup,
+      models.WarningsAndErrors(warnings = warnings, errors = errors)
+    )
   }
 
   private def restructureIfNodeIsSingleTable(
@@ -89,12 +102,12 @@ object TableGroup {
       baseUrl: String,
       lang: String
   ): Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = {
-    rootNode.get("@context") match {
+    (rootNode.get("@context") match {
       case a: ArrayNode => validateContextArrayNode(a, baseUrl, lang)
       case s: TextNode if s.asText == csvwContextUri =>
         Right((baseUrl, lang, Array[WarningWithCsvContext]()))
       case _ => Left(MetadataError("Invalid Context"))
-    }.map(results => {
+    }).map(results => {
       rootNode.remove("@context")
       results
     })
@@ -106,12 +119,17 @@ object TableGroup {
       baseUrl: String,
       lang: String
   ): Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = {
-    def validateFirstItemInContext(firstItem: JsonNode): Either[MetadataError, Unit] = {
+    def validateFirstItemInContext(
+        firstItem: JsonNode
+    ): Either[MetadataError, Unit] = {
       firstItem match {
         case s: TextNode if s.asText == csvwContextUri => Right()
-        case _ => Left(MetadataError(
-            s"First item in @context must be string $csvwContextUri "
-          ))
+        case _ =>
+          Left(
+            MetadataError(
+              s"First item in @context must be string $csvwContextUri "
+            )
+          )
       }
     }
 
@@ -128,10 +146,12 @@ object TableGroup {
                   baseUrl,
                   lang
                 )
-              case _ => Left(MetadataError(
-                  "Second @context array value must be an object"
+              case _ =>
+                Left(
+                  MetadataError(
+                    "Second @context array value must be an object"
+                  )
                 )
-              )
             }
           })
       case Array(firstItem) =>
@@ -139,7 +159,10 @@ object TableGroup {
         // "@context": "http://www.w3.org/ns/csvw"
         validateFirstItemInContext(firstItem)
           .map(_ => (baseUrl, lang, Array[WarningWithCsvContext]()))
-      case _ => Left(MetadataError(s"Unexpected @context array length ${context.size()}"))
+      case _ =>
+        Left(
+          MetadataError(s"Unexpected @context array length ${context.size()}")
+        )
     }
   }
 
@@ -156,36 +179,57 @@ object TableGroup {
       baseUrl: String,
       lang: String
   ): Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = {
-    val acc: Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = Right((baseUrl, lang, Array[WarningWithCsvContext]()))
+    val acc: Either[
+      MetadataError,
+      (String, String, Array[WarningWithCsvContext])
+    ] = Right((baseUrl, lang, Array[WarningWithCsvContext]()))
     contextBaseAndLangObject.getKeysAndValues
       .foldLeft(acc)({
-        case (err@Left(_), _) => err
+        case (err @ Left(_), _) => err
         case (Right((baseUrl, lang, warnings)), (property, value)) =>
           property match {
             case "@base" | "@language" =>
-              PropertyChecker.checkProperty(property, value, baseUrl, lang) match {
+              PropertyChecker
+                .checkProperty(property, value, baseUrl, lang) match {
                 case (propertyNode, Array(), _) =>
                   val propertyTextValue = propertyNode.asText()
                   property match {
-                    case "@base" => Right((propertyTextValue, lang, warnings) )
-                    case "@language" => Right((baseUrl, propertyTextValue, warnings) )
-                    case _ => Left(MetadataError(s"Unhandled context property '$property'"))
+                    case "@base" => Right((propertyTextValue, lang, warnings))
+                    case "@language" =>
+                      Right((baseUrl, propertyTextValue, warnings))
+                    case _ =>
+                      Left(
+                        MetadataError(s"Unhandled context property '$property'")
+                      )
                   }
                 case (_, ws, _) =>
                   // There are warnings, don't update any properties.
-                  Right((baseUrl, lang, warnings ++ ws.map(WarningWithCsvContext(
-                    _,
-                    "metadata",
-                    "",
-                    "",
-                    s"$property: $value",
-                    ""
-                  ))))
+                  Right(
+                    (
+                      baseUrl,
+                      lang,
+                      warnings ++ ws.map(
+                        WarningWithCsvContext(
+                          _,
+                          "metadata",
+                          "",
+                          "",
+                          s"$property: $value",
+                          ""
+                        )
+                      )
+                    )
+                  )
               }
-            case _ => Left(MetadataError(s"@context contains properties other than @base or @language $property)"))
+            case _ =>
+              Left(
+                MetadataError(
+                  s"@context contains properties other than @base or @language $property)"
+                )
+              )
           }
       })
- }
+  }
 
   private def findForeignKeysLinkToReferencedTables(
       baseUrl: String,
@@ -206,7 +250,9 @@ object TableGroup {
           parentTable.schema.map(parentSchema => {
             for (column <- parentSchema.columns) {
               column.name
-                .foreach(columnName => mapNameToColumn += (columnName -> column))
+                .foreach(columnName =>
+                  mapNameToColumn += (columnName -> column)
+                )
             }
           })
 
@@ -219,7 +265,8 @@ object TableGroup {
                 case Some(column) => column
                 case None =>
                   throw MetadataError(
-                    s"column named ${columnReference.asText()} does not exist in ${parentTable.url}," +
+                    s"column named ${columnReference
+                      .asText()} does not exist in ${parentTable.url}," +
                       s" $$.tables[?(@.url = '$tableUrl')].tableSchema.foreign_keys[$i].reference.columnReference"
                   )
               }
@@ -240,11 +287,11 @@ object TableGroup {
   }
 
   private def setReferencedTableOrThrowException(
-                                                  baseUrl: String,
-                                                  tables: mutable.Map[String, Table],
-                                                  tableUrl: String,
-                                                  foreignKeyArrayIndex: Int,
-                                                  reference: JsonNode
+      baseUrl: String,
+      tables: mutable.Map[String, Table],
+      tableUrl: String,
+      foreignKeyArrayIndex: Int,
+      reference: JsonNode
   ): Table = {
     val resourceNode = reference.path("resource")
     if (resourceNode.isMissingNode) {
@@ -373,11 +420,11 @@ object TableGroup {
   }
 
   def extractTablesFromNode(
-                             tablesArrayNode: ArrayNode,
-                             baseUrl: String,
-                             lang: String,
-                             commonProperties: mutable.Map[String, JsonNode],
-                             inheritedProperties: mutable.Map[String, JsonNode]
+      tablesArrayNode: ArrayNode,
+      baseUrl: String,
+      lang: String,
+      commonProperties: mutable.Map[String, JsonNode],
+      inheritedProperties: mutable.Map[String, JsonNode]
   ): (mutable.Map[String, Table], WarningsAndErrors) = {
     val warnings = ArrayBuffer.empty[WarningWithCsvContext]
     val errors = ArrayBuffer.empty[ErrorWithCsvContext]
@@ -439,11 +486,11 @@ object TableGroup {
 
 }
 case class TableGroup private (
-                                baseUrl: String,
-                                id: Option[String],
-                                tables: mutable.Map[String, Table],
-                                notes: Option[JsonNode],
-                                annotations: mutable.Map[String, JsonNode]
+    baseUrl: String,
+    id: Option[String],
+    tables: mutable.Map[String, Table],
+    notes: Option[JsonNode],
+    annotations: mutable.Map[String, JsonNode]
 ) {
 
   def validateHeader(

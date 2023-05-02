@@ -1,7 +1,7 @@
 package csvwcheck
 import scala.collection.mutable
 
-object BuiltInDataTypes {
+object XsdDataTypes {
   val types: mutable.HashMap[String, String] = mutable.HashMap(
     "number" -> "http://www.w3.org/2001/XMLSchema#double",
     "binary" -> "http://www.w3.org/2001/XMLSchema#base64Binary",
