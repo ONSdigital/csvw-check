@@ -246,17 +246,17 @@ object PropertyChecker {
       .map({
         case (objectNode, stringWarnings) =>
           // Make sure that the `base` node is set.
-          val baseNode = objectNode.path("base")
-          if (baseNode.isMissingNode) {
-            (
-              objectNode
-                .deepCopy()
-                .set("base", new TextNode(XsdDataTypes.types("string"))),
-              stringWarnings
+          objectNode
+            .getMaybeNode("base")
+            .map(_ => (objectNode, stringWarnings))
+            .getOrElse(
+              (
+                objectNode
+                  .deepCopy()
+                  .set("base", new TextNode(XsdDataTypes.types("string"))),
+                stringWarnings
+              )
             )
-          } else {
-            (objectNode, stringWarnings)
-          }
       })
   }
 
@@ -266,12 +266,12 @@ object PropertyChecker {
     val (dataTypeNode, stringWarnings) = inputs
     val baseDataType = dataTypeNode.get("base").asText
 
-    val minimumNode = dataTypeNode.path("minimum")
-    val minInclusiveNode = dataTypeNode.path("minInclusive")
-    val minExclusiveNode = dataTypeNode.path("minExclusive")
-    val maximumNode = dataTypeNode.path("maximum")
-    val maxInclusiveNode = dataTypeNode.path("maxInclusive")
-    val maxExclusiveNode = dataTypeNode.path("maxExclusive")
+    val minimumNode = dataTypeNode.getMaybeNode("minimum")
+    val minInclusiveNode = dataTypeNode.getMaybeNode("minInclusive")
+    val minExclusiveNode = dataTypeNode.getMaybeNode("minExclusive")
+    val maximumNode = dataTypeNode.getMaybeNode("maximum")
+    val maxInclusiveNode = dataTypeNode.getMaybeNode("maxInclusive")
+    val maxExclusiveNode = dataTypeNode.getMaybeNode("maxExclusive")
 
     if (
       PropertyCheckerConstants.DateFormatDataTypes.contains(
@@ -302,7 +302,7 @@ object PropertyChecker {
         maximumNode,
         maxInclusiveNode,
         maxExclusiveNode
-      ).filter(node => !node.isMissingNode)
+      ).filter(node => node.isDefined)
       if (offendingNodes.nonEmpty) {
         Left(
           MetadataError(
@@ -317,21 +317,22 @@ object PropertyChecker {
   private def parseMinMaxRanges(
       dataTypeNode: ObjectNode,
       baseDataType: String,
-      minimumNode: JsonNode,
-      maximumNode: JsonNode,
-      minInclusiveNode: JsonNode,
-      minExclusiveNode: JsonNode,
-      maxInclusiveNode: JsonNode,
-      maxExclusiveNode: JsonNode,
+      minimumNode: Option[JsonNode],
+      maximumNode: Option[JsonNode],
+      minInclusiveNode: Option[JsonNode],
+      minExclusiveNode: Option[JsonNode],
+      maxInclusiveNode: Option[JsonNode],
+      maxExclusiveNode: Option[JsonNode],
       stringWarnings: StringWarnings
   ): Either[MetadataError, (ObjectNode, StringWarnings)] = {
-    if (!minimumNode.isMissingNode) {
-      dataTypeNode.put("minInclusive", minimumNode.asText())
+
+    if (minimumNode.isDefined) {
+      dataTypeNode.put("minInclusive", minimumNode.map(_.asText()).get)
       dataTypeNode.remove("minimum")
     }
 
-    if (!maximumNode.isMissingNode) {
-      dataTypeNode.put("maxInclusive", maximumNode.asText())
+    if (maximumNode.isDefined) {
+      dataTypeNode.put("maxInclusive", maximumNode.map(_.asText()).get)
       dataTypeNode.remove("maximum")
     }
 
@@ -587,9 +588,9 @@ object PropertyChecker {
 
     val baseDataType = dataTypeNode.get("base").asText()
 
-    val lengthNode = dataTypeNode.path("length")
-    val minLengthNode = dataTypeNode.path("minLength")
-    val maxLengthNode = dataTypeNode.path("maxLength")
+    val lengthNode = dataTypeNode.getMaybeNode("length")
+    val minLengthNode = dataTypeNode.getMaybeNode("minLength")
+    val maxLengthNode = dataTypeNode.getMaybeNode("maxLength")
 
     if (
       PropertyCheckerConstants.StringDataTypes.contains(
@@ -597,28 +598,32 @@ object PropertyChecker {
       ) || PropertyCheckerConstants.BinaryDataTypes.contains(baseDataType)
     ) {
       // String and Binary data types are permitted length/minLength/maxLength fields.
+
       if (
-        !lengthNode.isMissingNode && !minLengthNode.isMissingNode && lengthNode.asInt < minLengthNode.asInt
+        lengthNode.exists(l => minLengthNode.exists(ml => l.asInt < ml.asInt))
       ) {
         Left(
           MetadataError(
-            s"datatype length (${lengthNode.asInt}) cannot be less than minLength (${minLengthNode.asInt})"
+            s"datatype length (${lengthNode.map(_.asInt).get}) cannot be less than minLength (${minLengthNode.map(_.asInt).get})"
           )
         )
       } else if (
-        !lengthNode.isMissingNode && !maxLengthNode.isMissingNode && lengthNode.asInt > maxLengthNode.asInt
+        lengthNode.exists(l => maxLengthNode.exists(ml => l.asInt > ml.asInt))
       ) {
         Left(
           MetadataError(
-            s"datatype length (${lengthNode.asInt}) cannot be more than maxLength (${maxLengthNode.asInt})"
+            s"datatype length (${lengthNode.map(_.asInt)}) cannot be more than maxLength (${maxLengthNode
+              .map(_.asInt)})"
           )
         )
       } else if (
-        !minLengthNode.isMissingNode && !maxLengthNode.isMissingNode && minLengthNode.asInt > maxLengthNode.asInt
+        minLengthNode
+          .exists(min => maxLengthNode.exists(max => min.asInt > max.asInt))
       ) {
         Left(
           MetadataError(
-            s"datatype minLength (${minLengthNode.asInt}) cannot be more than maxLength (${maxLengthNode.asInt})"
+            s"datatype minLength (${minLengthNode.map(_.asInt)}) cannot be more than maxLength (${maxLengthNode
+              .map(_.asInt)})"
           )
         )
       } else {
@@ -626,19 +631,19 @@ object PropertyChecker {
       }
     } else {
       // length, minLength and maxLength are only permitted on String and Binary data types.
-      if (!lengthNode.isMissingNode) {
+      if (lengthNode.isDefined) {
         Left(
           MetadataError(
             s"Data types based on $baseDataType cannot have a length facet"
           )
         )
-      } else if (!minLengthNode.isMissingNode) {
+      } else if (minLengthNode.isDefined) {
         Left(
           MetadataError(
             s"Data types based on $baseDataType cannot have a minLength facet"
           )
         )
-      } else if (!maxLengthNode.isMissingNode) {
+      } else if (maxLengthNode.isDefined) {
         Left(
           MetadataError(
             s"Data types based on $baseDataType cannot have a maxLength facet"
@@ -741,22 +746,26 @@ object PropertyChecker {
   }
 
   private def getDataTypeRangeConstraint(
-      constraintNode: JsonNode
-  ): Option[String] =
-    constraintNode match {
-      case rangeConstraint: ObjectNode =>
-        rangeConstraint
-          .getMaybeNode("dateTime")
-          .map(rangeConstraint => rangeConstraint.asText())
-      case rangeConstraint: TextNode =>
-        Some(rangeConstraint.asText())
-      case rangeConstraint: IntNode =>
-        Some(rangeConstraint.asText())
-      case rangeConstraint: DecimalNode =>
-        Some(rangeConstraint.asText())
-      case rangeConstraint: LongNode =>
-        Some(rangeConstraint.asText())
-    }
+      maybeConstraintNode: Option[JsonNode]
+  ): Option[String] = {
+    maybeConstraintNode.flatMap(constraintNode =>
+      constraintNode match {
+        case rangeConstraint: ObjectNode =>
+          rangeConstraint
+            .getMaybeNode("dateTime")
+            .map(rangeConstraint => rangeConstraint.asText())
+        case rangeConstraint: TextNode =>
+          Some(rangeConstraint.asText())
+        case rangeConstraint: IntNode =>
+          Some(rangeConstraint.asText())
+        case rangeConstraint: DecimalNode =>
+          Some(rangeConstraint.asText())
+        case rangeConstraint: LongNode =>
+          Some(rangeConstraint.asText())
+      }
+    )
+
+  }
 
   def parseDataTypeFormatNumeric(
       formatNode: JsonNode
@@ -821,7 +830,7 @@ object PropertyChecker {
       if (value.isTextual) {
         val schemaUrl = new URL(new URL(baseUrl), value.asText())
         schemaJson = objectMapper.readTree(schemaUrl).asInstanceOf[ObjectNode]
-        if (!schemaJson.path("@id").isMissingNode) {
+        if (!schemaJson.path("@id").isMissingNode) { // todo stop using `isMissingNode`
           // Do something here as object node put method doesn't allow uri object
           val absoluteSchemaUrl =
             new URL(schemaUrl, schemaJson.get("@id").asText())
@@ -907,22 +916,24 @@ object PropertyChecker {
       schemaBaseUrl: URL,
       schemaLang: String
   ): (URL, String) = {
-    if (!schemaJson.path("@context").isMissingNode) {
+    if (!schemaJson.path("@context").isMissingNode) { // todo: Stop using missing node
       if (schemaJson.isArray && schemaJson.size > 1) {
         val secondContextElement =
           Array.from(schemaJson.get("@context").elements.asScala).apply(1)
         val maybeBaseNode = secondContextElement.path("@base")
-        val newSchemaBaseUrl = if (!maybeBaseNode.isMissingNode) {
-          new URL(schemaBaseUrl, maybeBaseNode.asText())
-        } else {
-          schemaBaseUrl
-        }
+        val newSchemaBaseUrl =
+          if (!maybeBaseNode.isMissingNode) { // todo: Stop using missing node
+            new URL(schemaBaseUrl, maybeBaseNode.asText())
+          } else {
+            schemaBaseUrl
+          }
         val languageNode = secondContextElement.path("@language")
-        val newSchemaLang = if (!languageNode.isMissingNode) {
-          languageNode.asText()
-        } else {
-          schemaLang
-        }
+        val newSchemaLang =
+          if (!languageNode.isMissingNode) { // todo: Stop using missing node
+            languageNode.asText()
+          } else {
+            schemaLang
+          }
         schemaJson.remove("@context")
         return (newSchemaBaseUrl, newSchemaLang)
       }
@@ -1033,7 +1044,7 @@ object PropertyChecker {
               warnings = warnings :+ PropertyChecker.invalidValueWarning
             }
           }
-          if (valueCopy.path("columnReference").isMissingNode) {
+          if (valueCopy.path("columnReference").isMissingNode) { // todo: Stop using missing node
             throw MetadataError(
               "foreignKey reference columnReference is missing"
             )
@@ -1041,7 +1052,9 @@ object PropertyChecker {
           if (
             valueCopy
               .path("resource")
-              .isMissingNode && valueCopy.path("schemaReference").isMissingNode
+              .isMissingNode && valueCopy
+              .path("schemaReference")
+              .isMissingNode // todo: Stop using missing node
           ) {
             throw MetadataError(
               "foreignKey reference does not have either resource or schemaReference"
@@ -1050,7 +1063,9 @@ object PropertyChecker {
           if (
             !valueCopy
               .path("resource")
-              .isMissingNode && !valueCopy.path("schemaReference").isMissingNode
+              .isMissingNode && !valueCopy
+              .path("schemaReference")
+              .isMissingNode // todo: Stop using missing node
           ) {
             throw MetadataError(
               "foreignKey reference has both resource and schemaReference"
@@ -1834,9 +1849,11 @@ object PropertyChecker {
       value: ObjectNode
   ): Either[MetadataError, JsonNode] = {
     if (
-      (!value.path("@type").isMissingNode) && (!value
+      (!value
+        .path("@type")
+        .isMissingNode) && (!value // todo: Stop using missing node
         .path("@language")
-        .isMissingNode)
+        .isMissingNode) // todo: Stop using missing node
     ) {
       Left(
         MetadataError(
@@ -1860,23 +1877,26 @@ object PropertyChecker {
   }
 
   private def parseCommonPropertyObjectLanguage(
-      valueCopy: ObjectNode,
-      v: JsonNode
+      parentObjectNode: ObjectNode,
+      languageValueNode: JsonNode
   ): Either[MetadataError, JsonNode] = {
-    if (valueCopy.path("@value").isMissingNode) {
-      Left(MetadataError("common property with @language lacks a @value"))
-    } else {
-      val language = v.asText()
-      if (language.isEmpty || !Bcp47Language.r.matches(language)) {
-        Left(
-          MetadataError(
-            s"common property has invalid @language (${language})"
+    parentObjectNode
+      .getMaybeNode("@value")
+      .map(_ => {
+        val language = languageValueNode.asText()
+        if (language.isEmpty || !Bcp47Language.r.matches(language)) {
+          Left(
+            MetadataError(
+              s"common property has invalid @language (${language})"
+            )
           )
-        )
-      } else {
-        Right(v)
-      }
-    }
+        } else {
+          Right(languageValueNode)
+        }
+      })
+      .getOrElse(
+        Left(MetadataError("common property with @language lacks a @value"))
+      )
   }
 
   @tailrec
@@ -1885,15 +1905,15 @@ object PropertyChecker {
       p: String,
       v: JsonNode
   ): Either[MetadataError, (JsonNode, StringWarnings)] = {
-    val valueNode = objectNode.path("@value")
+    val valueNode = objectNode.getMaybeNode("@value")
     v match {
       case s: TextNode =>
         val dataType = s.asText()
 
         val isCsvWDataType =
-          valueNode.isMissingNode && CsvWDataTypes.contains(dataType)
+          valueNode.isEmpty && CsvWDataTypes.contains(dataType)
         val isXsdDataType =
-          !valueNode.isMissingNode && XsdDataTypes.types.contains(dataType)
+          valueNode.isDefined && XsdDataTypes.types.contains(dataType)
         if (isCsvWDataType || isXsdDataType) {
           Right(s, Array.empty)
         } else {
