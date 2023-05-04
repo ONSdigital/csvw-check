@@ -10,7 +10,6 @@ import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import org.joda.time.DateTime
 
 import java.net.{URI, URL}
-import java.util.Map
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters._
 import scala.language.implicitConversions
@@ -57,125 +56,127 @@ object PropertyChecker {
 
   private val NameRegExp =
     "^([A-Za-z0-9]|(%[A-F0-9][A-F0-9]))([A-Za-z0-9_]|(%[A-F0-9][A-F0-9]))*$".r
-  private val Properties: Map[String, (JsonNode, String, String) => Either[
+  private type JsonNodeParseResult = Either[
     MetadataError,
-    (JsonNode, Array[String], PropertyType.Value)
-  ]] = Map(
+    (JsonNode, StringWarnings, PropertyType.Value)
+  ]
+
+  private type ObjectPropertyParseResult =
+    Either[MetadataError, (String, Option[JsonNode], StringWarnings)]
+  private type JsonNodeParser =
+    (JsonNode, String, String) => JsonNodeParseResult
+
+  private val PropertyParsers: Map[String, JsonNodeParser] = Map(
     // Context Properties
     "@language" -> parseLanguageProperty(PropertyType.Context),
-    "@base" -> parseLinkProperty(PropertyType.Context),
+    "@base" -> parseUrlLinkProperty(PropertyType.Context),
     // common properties
-    "@id" -> parseLinkProperty(PropertyType.Common),
+    "@id" -> parseUrlLinkProperty(PropertyType.Common),
     "dialect" -> parseDialectProperty(PropertyType.Common),
     "notes" -> parseNotesProperty(PropertyType.Common),
     "suppressOutput" -> parseBooleanProperty(PropertyType.Common),
     // Inherited properties
     "aboutUrl" -> parseUriTemplateProperty(PropertyType.Inherited),
     "datatype" -> parseDataTypeProperty(PropertyType.Inherited),
-    "default" -> stringProperty(PropertyType.Inherited),
+    "default" -> parseStringProperty(PropertyType.Inherited),
     "lang" -> parseLanguageProperty(PropertyType.Inherited),
-    "null" -> nullProperty(PropertyType.Inherited),
+    "null" -> parseNullProperty(PropertyType.Inherited),
     "ordered" -> parseBooleanProperty(PropertyType.Inherited),
     "propertyUrl" -> parseUriTemplateProperty(PropertyType.Inherited),
     "required" -> parseBooleanProperty(PropertyType.Inherited),
-    "separator" -> separatorProperty(PropertyType.Inherited),
-    "textDirection" -> textDirectionProperty(PropertyType.Inherited),
+    "separator" -> parseSeparatorProperty(PropertyType.Inherited),
+    "textDirection" -> parseTextDirectionProperty(PropertyType.Inherited),
     "valueUrl" -> parseUriTemplateProperty(PropertyType.Inherited),
     // Table properties
-    "tableSchema" -> tableSchemaProperty(PropertyType.Table),
-    "transformations" -> transformationsProperty(PropertyType.Table),
-    "url" -> parseLinkProperty(PropertyType.Table),
+    "tableSchema" -> parseTableSchemaProperty(PropertyType.Table),
+    "transformations" -> parseTransformationsProperty(PropertyType.Table),
+    "url" -> parseUrlLinkProperty(PropertyType.Table),
     // Schema Properties
-    "columns" -> columnsProperty(PropertyType.Schema),
-    "foreignKeys" -> foreignKeysProperty(PropertyType.Schema),
-    "primaryKey" -> columnReferenceProperty(PropertyType.Schema),
-    "rowTitles" -> columnReferenceProperty(PropertyType.Schema),
+    "columns" -> parseColumnsProperty(PropertyType.Schema),
+    "foreignKeys" -> parseForeignKeysProperty(PropertyType.Schema),
+    "primaryKey" -> parseColumnReferenceProperty(PropertyType.Schema),
+    "rowTitles" -> parseColumnReferenceProperty(PropertyType.Schema),
     // Column level properties
-    "name" -> nameProperty(PropertyType.Column),
-    "titles" -> naturalLanguageProperty(PropertyType.Column),
+    "name" -> parseNameProperty(PropertyType.Column),
+    "titles" -> parseNaturalLanguageProperty(PropertyType.Column),
     "virtual" -> parseBooleanProperty(PropertyType.Column),
     // Dialect Properties
-    "commentPrefix" -> stringProperty(PropertyType.Dialect),
-    "delimiter" -> stringProperty(PropertyType.Dialect),
+    "commentPrefix" -> parseStringProperty(PropertyType.Dialect),
+    "delimiter" -> parseStringProperty(PropertyType.Dialect),
     "doubleQuote" -> parseBooleanProperty(PropertyType.Dialect),
-    "encoding" -> encodingProperty(PropertyType.Dialect),
+    "encoding" -> parseEncodingProperty(PropertyType.Dialect),
     "header" -> parseBooleanProperty(PropertyType.Dialect),
-    "headerRowCount" -> numericProperty(PropertyType.Dialect),
-    "lineTerminators" -> arrayProperty(PropertyType.Dialect),
-    "quoteChar" -> stringProperty(PropertyType.Dialect),
+    "headerRowCount" -> parseNonNegativeIntegerProperty(PropertyType.Dialect),
+    "lineTerminators" -> parseArrayProperty(PropertyType.Dialect),
+    "quoteChar" -> parseStringProperty(PropertyType.Dialect),
     "skipBlankRows" -> parseBooleanProperty(PropertyType.Dialect),
-    "skipColumns" -> numericProperty(PropertyType.Dialect),
+    "skipColumns" -> parseNonNegativeIntegerProperty(PropertyType.Dialect),
     "skipInitialSpace" -> parseBooleanProperty(PropertyType.Dialect),
-    "skipRows" -> numericProperty(PropertyType.Dialect),
-    "trim" -> trimProperty(PropertyType.Dialect),
+    "skipRows" -> parseNonNegativeIntegerProperty(PropertyType.Dialect),
+    "trim" -> parseTrimProperty(PropertyType.Dialect),
     // Transformation properties
-    "scriptFormat" -> scriptFormatProperty(PropertyType.Transformation),
-    "source" -> sourceProperty(PropertyType.Transformation),
-    "targetFormat" -> targetFormatProperty(PropertyType.Transformation),
+    "scriptFormat" -> parseScriptFormatProperty(PropertyType.Transformation),
+    "source" -> parseSourceProperty(PropertyType.Transformation),
+    "targetFormat" -> parseTargetFormatProperty(PropertyType.Transformation),
     // Foreign Key Properties
-    "columnReference" -> columnReferenceProperty(PropertyType.ForeignKey),
-    "reference" -> referenceProperty(PropertyType.ForeignKey),
+    "columnReference" -> parseColumnReferenceProperty(PropertyType.ForeignKey),
+    "reference" -> parseForeignKeyReferenceProperty(PropertyType.ForeignKey),
     // foreignKey reference properties
-    "resource" -> resourceProperty(PropertyType.ForeignKeyReference),
-    "schemaReference" -> schemaReferenceProperty(
+    "resource" -> parseResourceProperty(PropertyType.ForeignKeyReference),
+    "schemaReference" -> parseSchemaReferenceProperty(
       PropertyType.ForeignKeyReference
     )
   )
 
-  def nullProperty(
+  private val validTrimValues = Array("true", "false", "start", "end")
+
+  def parseNullProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
+  ): JsonNodeParser = { (value, _, _) =>
     {
-      if (value.isTextual) {
-        (value, Array[String](), csvwPropertyType)
-      } else if (value.isArray) {
-        var values = Array[String]()
-        var warnings = Array[String]()
-        for (x <- value.elements().asScala) {
-          x match {
-            case xs: TextNode => values = values :+ xs.asText()
-            case _            => warnings = warnings :+ PropertyChecker.invalidValueWarning
-          }
-        }
-        val arrayNode: ArrayNode = objectMapper.valueToTree(values)
-        (arrayNode, warnings, csvwPropertyType)
-      } else {
-        val warnings = if (value.isNull) {
-          Array[String]()
-        } else {
-          Array[String](PropertyChecker.invalidValueWarning)
-        }
-        val arrayNodeToReturn = JsonNodeFactory.instance.arrayNode()
-        arrayNodeToReturn.add("")
-        (
-          arrayNodeToReturn,
-          warnings,
-          csvwPropertyType
-        )
+      value match {
+        case _: TextNode => Right((value, Array.empty, csvwPropertyType))
+        case arrayNode: ArrayNode =>
+          arrayNode
+            .elements()
+            .asScala
+            .map(_ match {
+              case element: TextNode => Right((Some(element), Array[String]()))
+              case _ =>
+                Right((None, Array(PropertyChecker.invalidValueWarning)))
+            })
+            .toArrayNodeAndStringWarnings
+            .map({
+              case (arrayNode, stringWarnings) =>
+                (arrayNode, stringWarnings, csvwPropertyType)
+            })
+        case _ =>
+          Right(
+            (
+              JsonNodeFactory.instance.arrayNode().add(""),
+              if (value.isNull) Array.empty
+              else Array(PropertyChecker.invalidValueWarning),
+              csvwPropertyType
+            )
+          )
       }
     }
   }
 
-  def separatorProperty(
+  def parseSeparatorProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
+  ): JsonNodeParser = { (value, _, _) =>
     {
       value match {
         case s if s.isTextual || s.isNull =>
-          (s, Array[String](), csvwPropertyType)
+          Right((s, Array.empty, csvwPropertyType))
         case _ =>
-          (
-            NullNode.getInstance(),
-            Array[String](PropertyChecker.invalidValueWarning),
-            csvwPropertyType
+          Right(
+            (
+              NullNode.getInstance(),
+              Array(PropertyChecker.invalidValueWarning),
+              csvwPropertyType
+            )
           )
       }
     }
@@ -183,14 +184,7 @@ object PropertyChecker {
 
   def parseLanguageProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => Either[
-    MetadataError,
-    (
-        JsonNode,
-        Array[String],
-        PropertyType.Value
-    )
-  ] = { (value, _, _) =>
+  ): JsonNodeParser = { (value, _, _) =>
     {
       value match {
         case s: TextNode
@@ -545,7 +539,7 @@ object PropertyChecker {
     MetadataError,
     (
         ObjectNode,
-        Array[String],
+        StringWarnings,
         PropertyType.Value
     )
   ] = { (value, baseUrl, lang) =>
@@ -600,7 +594,9 @@ object PropertyChecker {
       // String and Binary data types are permitted length/minLength/maxLength fields.
 
       if (
-        lengthNode.exists(l => minLengthNode.exists(ml => l.asInt < ml.asInt))
+        lengthNode.exists(len =>
+          minLengthNode.exists(minLen => len.asInt < minLen.asInt)
+        )
       ) {
         Left(
           MetadataError(
@@ -608,7 +604,9 @@ object PropertyChecker {
           )
         )
       } else if (
-        lengthNode.exists(l => maxLengthNode.exists(ml => l.asInt > ml.asInt))
+        lengthNode.exists(len =>
+          maxLengthNode.exists(maxLen => len.asInt > maxLen.asInt)
+        )
       ) {
         Left(
           MetadataError(
@@ -688,7 +686,7 @@ object PropertyChecker {
       baseUrl: String,
       lang: String,
       valueNode: JsonNode
-  ): Either[MetadataError, (Option[TextNode], StringWarnings)] = {
+  ): Either[MetadataError, (Option[JsonNode], StringWarnings)] = {
     val idValue = valueNode.asText()
     if (XsdDataTypes.types.values.toList.contains(idValue)) {
       Left(
@@ -697,7 +695,7 @@ object PropertyChecker {
         )
       )
     } else {
-      parseLinkProperty(PropertyType.Common)(
+      parseUrlLinkProperty(PropertyType.Common)(
         valueNode,
         baseUrl,
         lang
@@ -708,16 +706,9 @@ object PropertyChecker {
     }
   }
 
-  def parseLinkProperty(
+  def parseUrlLinkProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => Either[
-    MetadataError,
-    (
-        TextNode,
-        Array[String],
-        PropertyType.Value
-    )
-  ] = { (v, baseUrl, _) =>
+  ): JsonNodeParser = { (v, baseUrl, _) =>
     {
       v match {
         case urlNode: TextNode =>
@@ -811,283 +802,302 @@ object PropertyChecker {
     }
   }
 
-  def tableSchemaProperty(
+  def parseTableSchemaProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = {
+  ): JsonNodeParser = {
     def tableSchemaPropertyInternal(
         value: JsonNode,
-        baseUrl: String,
-        lang: String
-    ): (JsonNode, Array[String], PropertyType.Value) = {
-      var schemaBaseUrl = new URL(baseUrl)
-      var schemaLang = lang
+        inheritedBaseUrlStr: String,
+        inheritedLanguage: String
+    ): Either[MetadataError, (JsonNode, StringWarnings, PropertyType.Value)] = {
+      val inheritedBaseUrl = new URL(inheritedBaseUrlStr)
+      value match {
+        case textNode: TextNode =>
+          val schemaUrl = new URL(inheritedBaseUrl, textNode.asText())
+          // todo: Need to use injected HTTP-boi to download the schema here.
+          val schemaNode =
+            objectMapper.readTree(schemaUrl).asInstanceOf[ObjectNode]
 
-      var schemaJson: ObjectNode = null
-      if (value.isTextual) {
-        val schemaUrl = new URL(new URL(baseUrl), value.asText())
-        schemaJson = objectMapper.readTree(schemaUrl).asInstanceOf[ObjectNode]
-        if (!schemaJson.path("@id").isMissingNode) { // todo stop using `isMissingNode`
-          // Do something here as object node put method doesn't allow uri object
-          val absoluteSchemaUrl =
-            new URL(schemaUrl, schemaJson.get("@id").asText())
-          schemaJson.put("@id", absoluteSchemaUrl.toString)
-        } else {
-          schemaJson.put("@id", schemaUrl.toString)
-        }
-        val (newSchemaBaseUrl, newSchemaLang) =
-          fetchSchemaBaseUrlAndLangAndRemoveContext(
-            schemaJson,
+          val newIdValue = schemaNode
+            .getMaybeNode("@id")
+            .map(idNode => new URL(schemaUrl, idNode.asText))
+            .orElse(Some(schemaUrl))
+            .map(_.toString)
+
+          parseTableSchemaContextBaseUrlAndLang(
+            schemaNode,
             schemaUrl,
-            schemaLang
+            inheritedLanguage
+          ).flatMap({
+            case (newBaseUrl, newLang) =>
+              schemaNode.fields.asScala
+                .map(fieldAndValue =>
+                  parseTableSchemaObjectProperty(
+                    fieldAndValue.getKey,
+                    fieldAndValue.getValue,
+                    newBaseUrl,
+                    newLang,
+                    newIdValue
+                  )
+                )
+                .toObjectNodeAndStringWarnings
+                .map({
+                  case (objectNode, stringWarnings) =>
+                    (objectNode, stringWarnings, csvwPropertyType)
+                })
+          })
+        case schemaNode: ObjectNode =>
+          schemaNode.fields.asScala
+            .map(fieldAndValue =>
+              parseTableSchemaObjectProperty(
+                fieldAndValue.getKey,
+                fieldAndValue.getValue,
+                inheritedBaseUrl,
+                inheritedLanguage,
+                None
+              )
+            )
+            .toObjectNodeAndStringWarnings
+            .map({
+              case (objectNode, stringWarnings) =>
+                (objectNode, stringWarnings, csvwPropertyType)
+            })
+        case _ =>
+          Right(
+            (
+              NullNode.getInstance(),
+              Array(PropertyChecker.invalidValueWarning),
+              csvwPropertyType
+            )
           )
-        schemaBaseUrl = newSchemaBaseUrl
-        schemaLang = newSchemaLang
-      } else if (value.isObject) {
-        schemaJson = value.deepCopy()
-      } else {
-        return (
-          NullNode.getInstance(),
-          Array[String](PropertyChecker.invalidValueWarning),
-          csvwPropertyType
-        )
       }
-
-      var warnings = Array[String]()
-      val fieldsAndValues = Array.from(schemaJson.fields.asScala)
-      for (fieldAndValue <- fieldsAndValues) {
-        warnings ++= validateObjectAndUpdateSchemaJson(
-          schemaJson,
-          schemaBaseUrl,
-          schemaLang,
-          fieldAndValue.getKey,
-          fieldAndValue.getValue
-        )
-      }
-      (schemaJson, warnings, PropertyType.Table)
     }
-
     tableSchemaPropertyInternal
   }
 
-  def validateObjectAndUpdateSchemaJson(
-      schemaJson: ObjectNode,
-      schemaBaseUrl: URL,
-      schemaLang: String,
-      property: String,
-      value: JsonNode
-  ): Array[String] = {
-    var warnings = Array[String]()
-    if (property == "@id") {
-      val matcher =
-        PropertyChecker.startsWithUnderscore.pattern.matcher(value.asText())
-      if (matcher.matches) {
-        throw MetadataError(s"@id ${value.asText} starts with _:")
-      }
-    } else if (property == "@type") {
-      if (value.asText() != "Schema") {
-        throw MetadataError("@type of schema is not 'Schema'")
-      }
-    } else {
-      val (validatedV, warningsForP, propertyType) =
-        checkProperty(property, value, schemaBaseUrl.toString, schemaLang)
-      warnings ++= warningsForP
-      if (
-        (propertyType == PropertyType.Schema || propertyType == PropertyType.Inherited) && warningsForP.isEmpty
-      ) {
-        schemaJson.set(property, validatedV)
-      } else {
-        schemaJson.remove(property)
-        if (
-          propertyType != PropertyType.Schema && propertyType != PropertyType.Inherited
-        ) {
-          warnings :+= "invalid_property"
+  def parseTableSchemaObjectProperty(
+      propertyName: String,
+      value: JsonNode,
+      baseUrl: URL,
+      language: String,
+      newIdValue: Option[String]
+  ): ObjectPropertyParseResult = {
+    propertyName match {
+      case "@context" =>
+        Right(
+          (propertyName, None, Array.empty)
+        ) // Need to remove context from the parsed object.
+      case "@id" =>
+        if (PropertyChecker.startsWithUnderscore.matches(value.asText())) {
+          Left(MetadataError(s"@id ${value.asText} starts with _:"))
+        } else {
+          val idNode = newIdValue
+            .map(new TextNode(_))
+            .orElse(Some(value))
+          Right((propertyName, idNode, Array.empty))
         }
-      }
+      case "@type" =>
+        val declaredType = value.asText
+        if (declaredType == "Schema") {
+          Right((propertyName, Some(value), Array.empty))
+        } else {
+          Left(
+            MetadataError(s"@type of schema is not 'Schema' ($value.asText)")
+          )
+        }
+      case _ =>
+        parseJsonProperty(propertyName, value, baseUrl.toString, language)
+          .map(_ match {
+            case (parsedValue, stringWarnings @ Array(), propType)
+                if propType == PropertyType.Schema || propType == PropertyType.Inherited =>
+              (propertyName, Some(parsedValue), stringWarnings)
+            case (_, stringWarnings, propType)
+                if propType == PropertyType.Schema || propType == PropertyType.Inherited =>
+              (propertyName, None, stringWarnings)
+            case (_, stringWarnings, _) =>
+              (propertyName, None, stringWarnings :+ "invalid_property")
+          })
     }
-    warnings
   }
 
-  def fetchSchemaBaseUrlAndLangAndRemoveContext(
-      schemaJson: ObjectNode,
-      schemaBaseUrl: URL,
-      schemaLang: String
-  ): (URL, String) = {
-    if (!schemaJson.path("@context").isMissingNode) { // todo: Stop using missing node
-      if (schemaJson.isArray && schemaJson.size > 1) {
-        val secondContextElement =
-          Array.from(schemaJson.get("@context").elements.asScala).apply(1)
-        val maybeBaseNode = secondContextElement.path("@base")
-        val newSchemaBaseUrl =
-          if (!maybeBaseNode.isMissingNode) { // todo: Stop using missing node
-            new URL(schemaBaseUrl, maybeBaseNode.asText())
-          } else {
-            schemaBaseUrl
+  def parseTableSchemaContextBaseUrlAndLang(
+      schemaJsonNode: ObjectNode,
+      inheritedBaseUrl: URL,
+      inheritedLang: String
+  ): Either[MetadataError, (URL, String)] = {
+    schemaJsonNode
+      .getMaybeNode("@context")
+      .map(_ match {
+        case contextArrayNode: ArrayNode if contextArrayNode.size == 2 =>
+          val contextElements = Array.from(contextArrayNode.elements().asScala)
+          contextElements.apply(1) match {
+            case contextObjectNode: ObjectNode =>
+              val baseUrl = contextObjectNode
+                .getMaybeNode("@base")
+                .map(baseNode => new URL(inheritedBaseUrl, baseNode.asText))
+                .getOrElse(inheritedBaseUrl)
+              val lang = contextObjectNode
+                .getMaybeNode("@language")
+                .map(_.asText)
+                .getOrElse(inheritedLang)
+              Right((baseUrl, lang))
+            case unexpectedContextNode =>
+              Left(
+                MetadataError(
+                  s"Unexpected context object $unexpectedContextNode"
+                )
+              )
           }
-        val languageNode = secondContextElement.path("@language")
-        val newSchemaLang =
-          if (!languageNode.isMissingNode) { // todo: Stop using missing node
-            languageNode.asText()
-          } else {
-            schemaLang
-          }
-        schemaJson.remove("@context")
-        return (newSchemaBaseUrl, newSchemaLang)
-      }
-      schemaJson.remove("@context")
-    }
-    (schemaBaseUrl, schemaLang)
+        case _ => Right((inheritedBaseUrl, inheritedLang))
+      })
+      .getOrElse((inheritedBaseUrl, inheritedLang))
   }
 
-  def foreignKeysProperty(
+  def parseForeignKeysProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, baseUrl, lang) =>
+  ): JsonNodeParser = { (value, baseUrl, lang) =>
     {
-      var foreignKeys = Array[JsonNode]()
-      var warnings = Array[String]()
       value match {
-        case xs: ArrayNode =>
-          val arrayNodes = Array.from(xs.elements().asScala)
-          for (foreignKey <- arrayNodes) {
-            val (fk, warn) = foreignKeyCheckIfValid(foreignKey, baseUrl, lang)
-            foreignKeys = foreignKeys :+ fk
-            warnings = Array.concat(warnings, warn)
-          }
-        case _ => warnings = warnings :+ PropertyChecker.invalidValueWarning
+        case arrayNode: ArrayNode =>
+          arrayNode
+            .elements()
+            .asScala
+            .map(parseForeignKeyValue(_, baseUrl, lang))
+            .toArrayNodeAndStringWarnings
+            .map({
+              case (foreignKeysArray, stringWarnings) =>
+                (foreignKeysArray, stringWarnings, csvwPropertyType)
+            })
+        case _ =>
+          Right(
+            value,
+            Array(PropertyChecker.invalidValueWarning),
+            csvwPropertyType
+          )
       }
-      val arrayNode: ArrayNode = objectMapper.valueToTree(foreignKeys)
-      (arrayNode, warnings, csvwPropertyType)
     }
   }
 
-  def foreignKeyCheckIfValid(
+  def parseForeignKeyValue(
       foreignKey: JsonNode,
       baseUrl: String,
       lang: String
-  ): (JsonNode, Array[String]) = {
-    var warnings = Array[String]()
+  ): Either[MetadataError, (Option[JsonNode], Array[String])] = {
     foreignKey match {
-      case _: ObjectNode =>
-        val foreignKeyCopy = foreignKey
-          .deepCopy()
-          .asInstanceOf[ObjectNode]
-        val foreignKeysElements = Array.from(foreignKeyCopy.fields().asScala)
-        for (f <- foreignKeysElements) {
-          val p = f.getKey
-          val matcher = PropertyChecker.containsColon.pattern.matcher(p)
-          if (matcher.matches()) {
-            throw MetadataError(
-              "foreignKey includes a prefixed (common) property"
-            )
-          }
-          val (value, w, typeString) =
-            checkProperty(p, f.getValue, baseUrl, lang)
-          if (typeString == PropertyType.ForeignKey && w.isEmpty) {
-            foreignKeyCopy.set(p, value)
-          } else {
-            foreignKeyCopy.remove(p)
-            warnings = warnings :+ PropertyChecker.invalidValueWarning
-            warnings = Array.concat(warnings, w)
-          }
-        }
-        (foreignKeyCopy, warnings)
-      case _ =>
-        val foreignKeyCopy = JsonNodeFactory.instance.objectNode()
-        warnings = warnings :+ "invalid_foreign_key"
-        (foreignKeyCopy, warnings)
+      case foreignKeyObjectNode: ObjectNode =>
+        foreignKeyObjectNode.fields.asScala
+          .map(f => {
+            val propertyName = f.getKey
+            if (PropertyChecker.containsColon.matches(propertyName)) {
+              Left(
+                MetadataError(
+                  "foreignKey includes a prefixed (common) property"
+                )
+              )
+            } else {
+              parseJsonProperty(propertyName, f.getValue, baseUrl, lang)
+                .map({
+                  case (parsedNode, Array(), PropertyType.ForeignKey) =>
+                    (propertyName, Some(parsedNode), Array[String]())
+                  case (_, warnings, _) =>
+                    (
+                      propertyName,
+                      None,
+                      warnings :+ PropertyChecker.invalidValueWarning
+                    )
+                })
+            }
+          })
+          .toObjectNodeAndStringWarnings
+          .map({
+            case (parsedNode, warningStrings) =>
+              (Some(parsedNode), warningStrings)
+          })
+      case _ => Right(None, Array("invalid_foreign_key"))
     }
   }
 
-  def referenceProperty(
+  def parseForeignKeyReferenceProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, baseUrl, lang) =>
-    {
-      value match {
-        case obj: ObjectNode =>
-          val valueCopy = obj.deepCopy()
-          var warnings = Array[String]()
-          val valueCopyElements = Array.from(valueCopy.fields().asScala)
-          for (e <- valueCopyElements) {
-            val p = e.getKey
-            val v = e.getValue
-            val matcher = PropertyChecker.containsColon.pattern.matcher(p)
+  ): JsonNodeParser = { (value, baseUrl, language) =>
+    value match {
+      case referenceObjectNode: ObjectNode =>
+        parseForeignKeyReferenceObjectNode(
+          referenceObjectNode,
+          baseUrl,
+          language
+        ).map({
+            case (parsedObject, stringWarnings) =>
+              (parsedObject, stringWarnings, csvwPropertyType)
+          })
+      case _ => Left(MetadataError("foreignKey reference is not an object"))
+    }
+  }
+
+  private def parseForeignKeyReferenceObjectNode(
+      foreignKeyObjectNode: ObjectNode,
+      baseUrl: String,
+      language: String
+  ): Either[MetadataError, (ObjectNode, StringWarnings)] = {
+    val columnReferenceProperty =
+      foreignKeyObjectNode.getMaybeNode("columnReference")
+    val resourceProperty = foreignKeyObjectNode.getMaybeNode("resource")
+    val schemaReferenceProperty =
+      foreignKeyObjectNode.getMaybeNode("schemaReference")
+
+    (columnReferenceProperty, resourceProperty, schemaReferenceProperty) match {
+      case (None, _, _) =>
+        Left(MetadataError("foreignKey reference columnReference is missing"))
+      case (_, None, None) =>
+        Left(
+          MetadataError(
+            "foreignKey reference does not have either resource or schemaReference"
+          )
+        )
+      case (_, Some(_), Some(_)) =>
+        Left(
+          MetadataError(
+            "foreignKey reference has both resource and schemaReference"
+          )
+        )
+      case _ =>
+        foreignKeyObjectNode
+          .fields()
+          .asScala
+          .map(keyValuePair => {
+            val propertyName = keyValuePair.getKey
+            val propertyValue = keyValuePair.getValue
             // Check if property is included in the valid properties for a foreign key object
             if (
               Array[String]("resource", "schemaReference", "columnReference")
-                .contains(p)
+                .contains(propertyName)
             ) {
-              val (newValue, warning, _) =
-                checkProperty(p, v, baseUrl, lang)
-              if (warning.isEmpty) {
-                valueCopy.set(p, newValue)
-              } else {
-                valueCopy.remove(p)
-                warnings = Array.concat(warnings, warning)
-              }
-            } else if (matcher.matches()) {
-              throw MetadataError(
-                s"foreignKey reference ($p) includes a prefixed (common) property"
+              parseJsonProperty(propertyName, propertyValue, baseUrl, language)
+                .map({
+                  case (newValue, Array(), _) =>
+                    (propertyName, Some(newValue), Array[String]())
+                  case (_, stringWarnings, _) =>
+                    (propertyName, None, stringWarnings)
+                })
+            } else if (PropertyChecker.containsColon.matches(propertyName)) {
+              Left(
+                MetadataError(
+                  s"foreignKey reference ($propertyName) includes a prefixed (common) property"
+                )
               )
             } else {
-              valueCopy.remove(p)
-              warnings = warnings :+ PropertyChecker.invalidValueWarning
+              Right(
+                (propertyName, None, Array(PropertyChecker.invalidValueWarning))
+              )
             }
-          }
-          if (valueCopy.path("columnReference").isMissingNode) { // todo: Stop using missing node
-            throw MetadataError(
-              "foreignKey reference columnReference is missing"
-            )
-          }
-          if (
-            valueCopy
-              .path("resource")
-              .isMissingNode && valueCopy
-              .path("schemaReference")
-              .isMissingNode // todo: Stop using missing node
-          ) {
-            throw MetadataError(
-              "foreignKey reference does not have either resource or schemaReference"
-            ) // Should have at least one of them, else it is an error
-          }
-          if (
-            !valueCopy
-              .path("resource")
-              .isMissingNode && !valueCopy
-              .path("schemaReference")
-              .isMissingNode // todo: Stop using missing node
-          ) {
-            throw MetadataError(
-              "foreignKey reference has both resource and schemaReference"
-            )
-          }
-          (valueCopy, warnings, csvwPropertyType)
-        case _ =>
-          throw MetadataError("foreignKey reference is not an object")
-      }
+          })
+          .toObjectNodeAndStringWarnings
     }
   }
 
   def parseUriTemplateProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => Either[
-    MetadataError,
-    (
-        JsonNode,
-        Array[String],
-        PropertyType.Value
-    )
-  ] = { (value, _, _) =>
+  ): JsonNodeParser = { (value, _, _) =>
     {
       value match {
         case s: TextNode => Right((s, Array[String](), csvwPropertyType))
@@ -1103,80 +1113,72 @@ object PropertyChecker {
     }
   }
 
-  def textDirectionProperty(
+  def parseTextDirectionProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
+  ): JsonNodeParser = { (value, _, _) =>
     {
       value match {
         case s: TextNode
             if Array[String]("ltr", "rtl", "inherit").contains(s.asText()) =>
-          (value, Array[String](), PropertyType.Inherited)
+          Right((s, Array.empty, csvwPropertyType))
         case _ =>
-          (
-            new TextNode(PropertyType.Inherited.toString),
-            Array[String](PropertyChecker.invalidValueWarning),
-            csvwPropertyType
+          Right(
+            (
+              new TextNode("inherit"),
+              Array(PropertyChecker.invalidValueWarning),
+              csvwPropertyType
+            )
           )
       }
     }
   }
 
-  def getValidTitlesWithWarnings(
+  def getValidTextualElementsFromArray(
       a: ArrayNode
-  ): (Array[String], Array[String]) = {
-    var validTitles = List[String]()
-    var warnings = List[String]()
-
-    val arrayNodeElements = Array.from(a.elements().asScala)
-    for (element <- arrayNodeElements) {
-      element match {
-        case s: TextNode => validTitles :+= s.asText()
+  ): (Array[String], StringWarnings) =
+    a.elements()
+      .asScala
+      .map({
+        case s: TextNode => Right(s.asText())
         case _ =>
-          warnings =
-            warnings :+ a.toPrettyString + " is invalid, textual elements expected"
-          warnings = warnings :+ PropertyChecker.invalidValueWarning
-      }
-    }
-    (validTitles.toArray, warnings.toArray)
-  }
+          Left(a.toPrettyString + " is invalid, textual elements expected")
+      })
+      .foldLeft((Array[String](), Array[String]()))({
+        case ((validColumnNames, stringWarnings), Right(validColumnName)) =>
+          (validColumnNames :+ validColumnName, stringWarnings)
+        case ((validColumnNames, stringWarnings), Left(stringWarning)) =>
+          (validColumnNames, stringWarnings :+ stringWarning)
+      })
 
-  def naturalLanguageProperty(
+  def parseNaturalLanguageProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, lang) =>
+  ): JsonNodeParser = { (value, _, lang) =>
     {
-      var warnings = Array[String]()
       value match {
         case s: TextNode =>
-          val returnObject = JsonNodeFactory.instance.objectNode()
-          val arrayNode = JsonNodeFactory.instance.arrayNode()
-          arrayNode.add(s.asText())
-          returnObject.set(lang, arrayNode)
-          (returnObject, Array[String](), csvwPropertyType)
+          val languageMap = JsonNodeFactory.instance
+            .objectNode()
+            .set(lang, JsonNodeFactory.instance.arrayNode().add(s.asText()))
+          Right((languageMap, Array[String](), csvwPropertyType))
         case a: ArrayNode =>
-          val (validTitles, titleWarnings) = getValidTitlesWithWarnings(a)
-          warnings = warnings ++ titleWarnings
-          val returnObject = JsonNodeFactory.instance.objectNode()
-          val arrayNode: ArrayNode =
-            objectMapper.valueToTree(validTitles)
-          returnObject.set(lang, arrayNode)
-          (returnObject, warnings, csvwPropertyType)
-        case o: ObjectNode =>
-          val (valueCopy, w) = processNaturalLanguagePropertyObject(o)
-          warnings = Array.concat(warnings, w)
-          (valueCopy, warnings, csvwPropertyType)
+          val (validStrings, warnings) = getValidTextualElementsFromArray(a)
+          val arrayNode: ArrayNode = objectMapper.valueToTree(validStrings)
+          val languageMap =
+            JsonNodeFactory.instance.objectNode().set(lang, arrayNode)
+          Right((languageMap, warnings, csvwPropertyType))
+        case languageMapObject: ObjectNode =>
+          processNaturalLanguagePropertyObject(languageMapObject)
+            .map({
+              case (parsedLanguageMap, stringWarnings) =>
+                (parsedLanguageMap, stringWarnings, csvwPropertyType)
+            })
         case _ =>
-          (
-            NullNode.getInstance(),
-            Array[String](PropertyChecker.invalidValueWarning),
-            csvwPropertyType
+          Right(
+            (
+              NullNode.getInstance(),
+              Array(PropertyChecker.invalidValueWarning),
+              csvwPropertyType
+            )
           )
       }
     }
@@ -1184,245 +1186,188 @@ object PropertyChecker {
 
   def processNaturalLanguagePropertyObject(
       value: ObjectNode
-  ): (ObjectNode, Array[String]) = {
-    val valueCopy = value.deepCopy()
-    var warnings = Array[String]()
-    val fieldsAndValues = Array.from(valueCopy.fields.asScala)
-    for (fieldAndValue <- fieldsAndValues) {
-      val elementKey = fieldAndValue.getKey
-      val matcher =
-        PropertyChecker.Bcp47LanguagetagRegExp.pattern.matcher(elementKey)
-      if (matcher.matches()) {
-        var validTitles = Array[String]()
-        fieldAndValue.getValue match {
-          case s: TextNode => validTitles :+= s.asText()
-          case a: ArrayNode =>
-            val (titles, titleWarnings) = getValidTitlesWithWarnings(a)
-            validTitles ++= titles
-            warnings ++= titleWarnings
-          case _ =>
-            warnings =
-              warnings :+ fieldAndValue.getValue.toPrettyString + " is invalid, array or textual elements expected"
-            warnings = warnings :+ PropertyChecker.invalidValueWarning
+  ): Either[MetadataError, (ObjectNode, StringWarnings)] =
+    value.fields.asScala
+      .map(fieldAndValue => {
+        val elementKey = fieldAndValue.getKey
+        if (PropertyChecker.Bcp47LanguagetagRegExp.matches(elementKey)) {
+          val (validStrings, warnings) = fieldAndValue.getValue match {
+            case s: TextNode  => (Array(s.asText()), Array[String]())
+            case a: ArrayNode => getValidTextualElementsFromArray(a)
+            case _ =>
+              (
+                Array.empty,
+                Array(
+                  fieldAndValue.getValue.toPrettyString + " is invalid, array or textual elements expected",
+                  PropertyChecker.invalidValueWarning
+                )
+              )
+          }
+          val validStringsArrayNode: ArrayNode =
+            objectMapper.valueToTree(validStrings)
+          Right((elementKey, Some(validStringsArrayNode), warnings))
+        } else {
+          Right((elementKey, None, Array("invalid_language")))
         }
-        val validTitlesArrayNode: ArrayNode =
-          objectMapper.valueToTree(validTitles)
-        valueCopy.set(elementKey, validTitlesArrayNode)
-      } else {
-        valueCopy.remove(elementKey)
-        warnings = warnings :+ "invalid_language"
-      }
-    }
-    (valueCopy, warnings)
-  }
+      })
+      .toObjectNodeAndStringWarnings
 
-  def nameProperty(
+  def parseNameProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
+  ): JsonNodeParser = { (value, _, _) =>
     {
       value match {
         case s: TextNode =>
-          val matcher = PropertyChecker.NameRegExp.pattern.matcher(s.asText())
-          if (matcher.matches()) {
-            (s, Array[String](), PropertyType.Column)
+          if (PropertyChecker.NameRegExp.matches(s.asText())) {
+            Right((s, Array.empty, csvwPropertyType))
           } else {
+            Right(
+              (
+                NullNode.instance,
+                Array(PropertyChecker.invalidValueWarning),
+                csvwPropertyType
+              )
+            )
+          }
+        case _ =>
+          Right(
+            (
+              NullNode.instance,
+              Array(PropertyChecker.invalidValueWarning),
+              csvwPropertyType
+            )
+          )
+      }
+    }
+  }
+
+  def parseEncodingProperty(
+      csvwPropertyType: PropertyType.Value
+  ): JsonNodeParser = { (value, _, _) =>
+    {
+      value match {
+        case s: TextNode
+            if PropertyCheckerConstants.ValidEncodings.contains(s.asText()) =>
+          Right((s, Array[String](), csvwPropertyType))
+        case _ =>
+          Right(
             (
               NullNode.instance,
               Array[String](PropertyChecker.invalidValueWarning),
               csvwPropertyType
             )
-          }
-        case _ =>
-          (
-            NullNode.instance,
-            Array[String](PropertyChecker.invalidValueWarning),
-            csvwPropertyType
           )
       }
     }
   }
 
-  def encodingProperty(
+  def parseArrayProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
-    {
-      value match {
-        case s: TextNode
-            if PropertyCheckerConstants.ValidEncodings.contains(s.asText()) =>
-          (s, Array[String](), csvwPropertyType)
-        case _ =>
-          (
-            NullNode.instance,
-            Array[String](PropertyChecker.invalidValueWarning),
-            csvwPropertyType
-          )
-      }
-    }
-  }
-
-  def arrayProperty(
-      csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
-    {
-      value match {
-        case a: ArrayNode => (a, Array[String](), csvwPropertyType)
-        case _ =>
+  ): JsonNodeParser = { (value, _, _) =>
+    value match {
+      case a: ArrayNode => Right((a, Array[String](), csvwPropertyType))
+      case _ =>
+        Right(
           (
             BooleanNode.getFalse,
-            Array[String](PropertyChecker.invalidValueWarning),
+            Array(PropertyChecker.invalidValueWarning),
             csvwPropertyType
           )
-      }
-    }
-  }
-
-  def trimProperty(
-      csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
-    {
-      var valueCopy: JsonNode = value.deepCopy()
-      valueCopy match {
-        case b: BooleanNode =>
-          if (b.booleanValue) {
-            valueCopy = new TextNode("true")
-          } else {
-            valueCopy = new TextNode("false")
-          }
-        case _ =>
-      }
-      if (
-        Array[String]("true", "false", "start", "end")
-          .contains(valueCopy.asText())
-      ) {
-        (valueCopy, Array[String](), csvwPropertyType)
-      } else {
-        (
-          new TextNode("false"),
-          Array[String](PropertyChecker.invalidValueWarning),
-          csvwPropertyType
         )
-      }
     }
   }
 
-  def columnsProperty(
+  def parseTrimProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
+  ): JsonNodeParser = { (value, _, _) =>
+    value match {
+      case boolNode: BooleanNode =>
+        if (boolNode.booleanValue) {
+          Right((new TextNode("true"), Array.empty, csvwPropertyType))
+        } else {
+          Right((new TextNode("false"), Array.empty, csvwPropertyType))
+        }
+      case textNode: TextNode if validTrimValues.contains(textNode.asText) =>
+        Right((value, Array[String](), csvwPropertyType))
+      case _ =>
+        Right(
+          (
+            new TextNode("false"),
+            Array(PropertyChecker.invalidValueWarning),
+            csvwPropertyType
+          )
+        )
+    }
+  }
+
+  def parseColumnsProperty(
+      csvwPropertyType: PropertyType.Value
+  ): JsonNodeParser = { (value, _, _) =>
     {
-      (value, Array[String](), csvwPropertyType)
+      Right((value, Array[String](), csvwPropertyType))
     }
   }
 
-  def columnReferenceProperty(
+  def parseColumnReferenceProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
+  ): JsonNodeParser = { (value, _, _) =>
     {
       value match {
-        case s: TextNode =>
-          val arrayNode = JsonNodeFactory.instance.arrayNode()
-          arrayNode.add(s)
-          (arrayNode, Array[String](), csvwPropertyType)
-        case a: ArrayNode => (a, Array[String](), csvwPropertyType)
+        case textNode: TextNode =>
+          Right(
+            (
+              JsonNodeFactory.instance.arrayNode().add(textNode),
+              Array.empty,
+              csvwPropertyType
+            )
+          )
+        case arrayNode: ArrayNode =>
+          Right((arrayNode, Array.empty, csvwPropertyType))
+        case _ =>
+          Left(MetadataError(s"Unexpected column reference value $value"))
       }
     }
   }
 
-  def targetFormatProperty(
+  def parseTargetFormatProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
-    {
-      (value, Array[String](), csvwPropertyType)
-    }
+  ): JsonNodeParser = { (value, _, _) =>
+    Right((value, Array[String](), csvwPropertyType))
   }
 
-  def scriptFormatProperty(
+  def parseScriptFormatProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
-    {
-      (value, Array[String](), csvwPropertyType)
-    }
+  ): JsonNodeParser = { (value, _, _) =>
+    Right((value, Array[String](), csvwPropertyType))
   }
 
-  def sourceProperty(
+  def parseSourceProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
-    {
-      (value, Array[String](), csvwPropertyType)
-    }
+  ): JsonNodeParser = { (value, _, _) =>
+    Right((value, Array[String](), csvwPropertyType))
   }
 
-  def resourceProperty(
+  def parseResourceProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
-    {
-      (value, Array[String](), csvwPropertyType)
-    }
+  ): JsonNodeParser = { (value, _, _) =>
+    Right((value, Array[String](), csvwPropertyType))
   }
 
-  def schemaReferenceProperty(
+  def parseSchemaReferenceProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, baseUrl, _) =>
-    {
-      val url = new URL(new URL(baseUrl), value.asText()).toString
-      // Don't know how to place a URI object in JsonNode, keeping the text value as of now
-      (new TextNode(url), Array[String](), csvwPropertyType)
+  ): JsonNodeParser = { (value, baseUrl, _) =>
+    value match {
+      case textNode: TextNode =>
+        val url = new URL(new URL(baseUrl), textNode.asText())
+        Right((new TextNode(url.toString), Array[String](), csvwPropertyType))
+      case _ =>
+        Right((NullNode.instance, Array(invalidValueWarning), csvwPropertyType))
     }
   }
 
   def parseDialectProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => Either[
-    MetadataError,
-    (
-        JsonNode,
-        Array[String],
-        PropertyType.Value
-    )
-  ] = { (value, baseUrl, lang) =>
+  ): JsonNodeParser = { (value, baseUrl, lang) =>
     {
       value match {
         case objectNode: ObjectNode =>
@@ -1448,7 +1393,7 @@ object PropertyChecker {
           Right(
             (
               NullNode.instance,
-              Array[String](PropertyChecker.invalidValueWarning),
+              Array(PropertyChecker.invalidValueWarning),
               csvwPropertyType
             )
           )
@@ -1461,7 +1406,7 @@ object PropertyChecker {
       lang: String,
       key: String,
       valueNode: JsonNode
-  ): Either[MetadataError, (String, Option[JsonNode], StringWarnings)] = {
+  ): ObjectPropertyParseResult = {
     key match {
       case "@id" =>
         if (PropertyChecker.startsWithUnderscore.matches(valueNode.asText())) {
@@ -1476,7 +1421,7 @@ object PropertyChecker {
           Left(MetadataError("@type of dialect is not 'Dialect'"))
         }
       case _ =>
-        checkProperty(key, valueNode, baseUrl, lang)
+        parseJsonProperty(key, valueNode, baseUrl, lang)
           .map({
             case (parsedValueNode, propertyWarnings, propertyType) =>
               if (
@@ -1494,98 +1439,117 @@ object PropertyChecker {
     }
   }
 
-  def transformationsProperty(
+  def parseTransformationsProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, baseUrl, lang) =>
+  ): JsonNodeParser = { (value, baseUrl, lang) =>
     {
-      var warnings = Array[String]()
-      val transformationsToReturn = JsonNodeFactory.instance.arrayNode()
       value match {
-        case a: ArrayNode =>
-          val transformationsArr = Array.from(a.elements().asScala)
-          for ((transformation, index) <- transformationsArr.zipWithIndex) {
-            transformation match {
-              case o: ObjectNode =>
-                val w = processTransformationObjectAndReturnWarnings(
-                  transformationsToReturn,
-                  o,
-                  index,
-                  baseUrl,
-                  lang
-                )
-                warnings = Array.concat(warnings, w)
-              case _ => warnings = warnings :+ "invalid_transformation"
-            }
-          }
-        case _ => warnings = warnings :+ PropertyChecker.invalidValueWarning
+        case arrayNode: ArrayNode =>
+          arrayNode
+            .elements()
+            .asScala
+            .zipWithIndex
+            .map({
+              case (transformation, index) =>
+                transformation match {
+                  case o: ObjectNode =>
+                    parseTransformationElement(o, index, baseUrl, lang)
+                  case _ =>
+                    Right(
+                      (None, Array(s"invalid_transformation $transformation"))
+                    )
+                }
+            })
+            .toArrayNodeAndStringWarnings
+            .map({
+              case (parsedNode, stringWarnings) =>
+                (parsedNode, stringWarnings, csvwPropertyType)
+            })
+        case _ =>
+          Right(
+            (
+              JsonNodeFactory.instance.arrayNode(0),
+              Array(PropertyChecker.invalidValueWarning),
+              csvwPropertyType
+            )
+          )
       }
-      (transformationsToReturn, warnings, csvwPropertyType)
     }
   }
 
-  def processTransformationObjectAndReturnWarnings(
-      transformationsToReturn: ArrayNode,
-      transformationsMainObject: ObjectNode,
+  def parseTransformationElement(
+      transformationElement: ObjectNode,
       index: Int,
       baseUrl: String,
       lang: String
-  ): Array[String] = {
-    val transformationObjects =
-      Array.from(transformationsMainObject.fields().asScala)
-    var warnings = Array[String]()
-    for (elem <- transformationObjects) {
-      val property = elem.getKey
-      val value = elem.getValue
-      property match {
-        case "@id" =>
-          val matcher =
-            PropertyChecker.startsWithUnderscore.pattern.matcher(value.asText())
-          if (matcher.matches) {
-            throw MetadataError(
-              s"transformations[$index].@id starts with _:"
-            )
-          }
-        case "@type" if value.asText() != "Template" =>
-          throw MetadataError(
-            s"transformations[$index].@type  @type of transformation is not 'Template'"
-          )
-
-        case "url"    =>
-        case "titles" =>
-        case _ =>
-          val (_, w, newType) = checkProperty(property, value, baseUrl, lang)
-          if (newType != PropertyType.Transformation || !w.isEmpty) {
-            transformationsMainObject.remove(property)
-            if (newType != PropertyType.Transformation)
-              warnings = warnings :+ "invalid_property"
-            warnings = Array.concat(warnings, w)
-          }
-      }
-    }
-    transformationsToReturn.add(transformationsMainObject)
-    warnings
+  ): Either[MetadataError, (Option[JsonNode], StringWarnings)] = {
+    transformationElement
+      .fields()
+      .asScala
+      .map(keyValuePair => {
+        val propertyName = keyValuePair.getKey
+        val valueNode = keyValuePair.getValue
+        propertyName match {
+          case "@id" =>
+            if (
+              PropertyChecker.startsWithUnderscore.matches(valueNode.asText())
+            ) {
+              Left(MetadataError(s"transformations[$index].@id starts with _:"))
+            } else {
+              Right((propertyName, Some(valueNode), Array[String]()))
+            }
+          case "@type" =>
+            if (valueNode.asText() == "Template") {
+              Right((propertyName, Some(valueNode), Array[String]()))
+            } else {
+              Left(
+                MetadataError(
+                  s"transformations[$index].@type  @type of transformation is not 'Template'"
+                )
+              )
+            }
+          case _ =>
+            parseJsonProperty(propertyName, valueNode, baseUrl, lang)
+              .map(_ match {
+                case (
+                      parsedTransformation,
+                      Array(),
+                      PropertyType.Transformation
+                    ) =>
+                  (propertyName, Some(parsedTransformation), Array[String]())
+                case (_, stringWarnings, PropertyType.Transformation) =>
+                  (propertyName, None, stringWarnings)
+                case (_, stringWarnings, propertyType) =>
+                  (
+                    propertyName,
+                    None,
+                    stringWarnings :+ s"invalid_property with type $propertyType"
+                  )
+              })
+        }
+      })
+      .toObjectNodeAndStringWarnings
+      .map({
+        case (objectNode, stringWarnings) => (Some(objectNode), stringWarnings)
+      })
   }
 
-  def checkProperty(
+  def parseJsonProperty(
       property: String,
       value: JsonNode,
       baseUrl: String,
       lang: String
-  ): Either[MetadataError, (JsonNode, Array[String], PropertyType.Value)] = {
-    if (Properties.contains(property)) {
-      Properties(property)(value, baseUrl, lang)
+  ): Either[MetadataError, (JsonNode, StringWarnings, PropertyType.Value)] = {
+    if (PropertyParsers.contains(property)) {
+      PropertyParsers(property)(value, baseUrl, lang)
     } else if (
       prefixedPropertyPattern
         .matches(property) && NameSpaces.values.contains(property.split(":")(0))
     ) {
       parseCommonPropertyValue(value, baseUrl, lang)
         .map({
-          case (newValue, warnings) =>
-            (newValue, warnings, PropertyType.Annotation)
+          case (parsedNode, warnings) =>
+            (parsedNode, warnings, PropertyType.Annotation)
         })
     } else {
       // property name must be an absolute URI
@@ -1627,14 +1591,7 @@ object PropertyChecker {
 
   private def parseBooleanProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => Either[
-    MetadataError,
-    (
-        JsonNode,
-        Array[String],
-        PropertyType.Value
-    )
-  ] =
+  ): JsonNodeParser =
     (value, _, _) => {
       if (value.isBoolean) {
         Right((value, Array[String](), csvwPropertyType))
@@ -1670,6 +1627,10 @@ object PropertyChecker {
           .asScala
           .map(elementNode =>
             parseCommonPropertyValue(elementNode, baseUrl, defaultLang)
+              .map({
+                case (parsedElementNode, warnings) =>
+                  (Some(parsedElementNode), warnings)
+              })
           )
           .toArrayNodeAndStringWarnings
       case _ =>
@@ -1759,62 +1720,42 @@ object PropertyChecker {
     }
   }
 
-  private def stringProperty(
+  private def parseStringProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
+  ): JsonNodeParser = { (value, _, _) =>
     {
-      if (value.isTextual) {
-        (value, Array[String](), csvwPropertyType)
-      } else {
-        (
-          new TextNode(""),
-          Array[String](PropertyChecker.invalidValueWarning),
-          csvwPropertyType
-        )
+      value match {
+        case _: TextNode => Right((value, Array.empty, csvwPropertyType))
+        case _ =>
+          Right(
+            new TextNode(""),
+            Array(PropertyChecker.invalidValueWarning),
+            csvwPropertyType
+          )
       }
     }
   }
 
-  private def numericProperty(
+  private def parseNonNegativeIntegerProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => (
-      JsonNode,
-      Array[String],
-      PropertyType.Value
-  ) = { (value, _, _) =>
-    {
-      if (value.isInt && value.asInt >= 0) {
-        (value, Array[String](), csvwPropertyType)
-      } else if (value.isInt && value.asInt < 0) {
-        (
-          NullNode.getInstance(),
-          Array[String](PropertyChecker.invalidValueWarning),
-          csvwPropertyType
+  ): JsonNodeParser = { (value, _, _) =>
+    value match {
+      case value: IntNode if value.asInt() >= 0 =>
+        Right(value, Array[String](), csvwPropertyType)
+      case _ =>
+        Right(
+          (
+            NullNode.getInstance(),
+            Array(PropertyChecker.invalidValueWarning),
+            csvwPropertyType
+          )
         )
-      } else {
-        (
-          NullNode.getInstance(),
-          Array[String](PropertyChecker.invalidValueWarning),
-          csvwPropertyType
-        )
-      }
     }
   }
 
   private def parseNotesProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => Either[
-    MetadataError,
-    (
-        JsonNode,
-        Array[String],
-        PropertyType.Value
-    )
-  ] = {
+  ): JsonNodeParser = {
     def parseNotesPropertyInternal(
         value: JsonNode,
         baseUrl: String,
@@ -1825,7 +1766,12 @@ object PropertyChecker {
           arrayNode
             .elements()
             .asScala
-            .map(element => parseCommonPropertyValue(element, baseUrl, lang))
+            .map(element =>
+              parseCommonPropertyValue(element, baseUrl, lang)
+                .map({
+                  case (elementNode, warnings) => (Some(elementNode), warnings)
+                })
+            )
             .toArrayNodeAndStringWarnings
             .map({
               case (arrayNode, warnings) =>
@@ -1930,12 +1876,12 @@ object PropertyChecker {
               prefixedPropertyPattern.matches(dataType) && NameSpaces.values
                 .contains(dataType.split(":")(0))
             ) {
-              Right(a, Array[String]())
+              Right(Some(a), Array[String]())
             } else {
               // typeElement Must be an absolute URI
               try {
                 asUri(dataType)
-                  .map(_ => Right(a, Array[String]()))
+                  .map(_ => Right(Some(a), Array[String]()))
                   .getOrElse(
                     Left(
                       MetadataError(
@@ -1958,7 +1904,9 @@ object PropertyChecker {
   }
 
   implicit class MetadataErrorsOrArrayElements(
-      iterator: Iterator[Either[MetadataError, (JsonNode, StringWarnings)]]
+      iterator: Iterator[
+        Either[MetadataError, (Option[JsonNode], StringWarnings)]
+      ]
   ) {
     def toArrayNodeAndStringWarnings
         : Either[MetadataError, (ArrayNode, StringWarnings)] = {
@@ -1971,12 +1919,16 @@ object PropertyChecker {
               Right((parsedArrayNode, warnings)),
               Right((parsedElementNode, newWarnings))
             ) =>
-          Right(
-            (
-              parsedArrayNode.deepCopy().add(parsedElementNode),
-              warnings ++ newWarnings
-            )
-          )
+          parsedElementNode match {
+            case Some(arrayElement) =>
+              Right(
+                (
+                  parsedArrayNode.deepCopy().add(arrayElement),
+                  warnings ++ newWarnings
+                )
+              )
+            case None => Right(parsedArrayNode, warnings ++ newWarnings)
+          }
       })
 
     }

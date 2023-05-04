@@ -307,7 +307,7 @@ object Column {
           )
         case _ =>
           val (v, w, csvwPropertyType) =
-            PropertyChecker.checkProperty(property, value, baseUrl, lang)
+            PropertyChecker.parseJsonProperty(property, value, baseUrl, lang)
           warnings.addAll(
             w.map(warningString =>
               ErrorWithoutContext(

@@ -87,7 +87,7 @@ object Table {
           )
         case _ =>
           val (newValue, w, csvwPropertyType) =
-            PropertyChecker.checkProperty(property, value, baseUrl, lang)
+            PropertyChecker.parseJsonProperty(property, value, baseUrl, lang)
           warnings.addAll(
             w.map(x =>
               WarningWithCsvContext(

@@ -190,7 +190,7 @@ object TableGroup {
           property match {
             case "@base" | "@language" =>
               PropertyChecker
-                .checkProperty(property, value, baseUrl, lang) match {
+                .parseJsonProperty(property, value, baseUrl, lang) match {
                 case (propertyNode, Array(), _) =>
                   val propertyTextValue = propertyNode.asText()
                   property match {
@@ -360,7 +360,7 @@ object TableGroup {
     for ((property, value) <- tableGroupNode.getKeysAndValues) {
       if (!validProperties.contains(property)) {
         val (newValue, w, csvwPropertyType) =
-          PropertyChecker.checkProperty(property, value, baseUrl, lang)
+          PropertyChecker.parseJsonProperty(property, value, baseUrl, lang)
         warnings.addAll(
           w.map(x =>
             WarningWithCsvContext(
