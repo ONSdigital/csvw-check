@@ -7,6 +7,7 @@ import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, ErrorWithoutContext, MetadataError}
 import csvwcheck.helpers.MapHelpers
 import csvwcheck.models.Column.{rdfSyntaxNs, unsignedLongMaxValue, validDoubleDatatypeRegex, xmlSchema}
+import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.NumberParser
@@ -56,83 +57,82 @@ object Column {
       baseUrl: String,
       lang: String,
       inheritedProperties: mutable.Map[String, JsonNode]
-  ): (Column, Array[ErrorWithoutContext]) = {
-
-    val inheritedPropertiesCopy =
-      MapHelpers.deepCloneJsonPropertiesMap(inheritedProperties)
-
-    val (annotations, columnProperties, warnings) =
+  ): ParseResult[(Column, Array[ErrorWithoutContext])] = {
       partitionAndValidateColumnPropertiesByType(
         columnDesc,
         columnOrdinal,
         baseUrl,
         lang,
-        inheritedPropertiesCopy
+        inheritedProperties
       )
-    val datatype = getDatatypeOrDefault(inheritedPropertiesCopy)
-    val minLength: Option[Int] =
-      if (datatype.path("minLength").isMissingNode) None
-      else Some(datatype.get("minLength").asText().toInt)
-    val maxLength: Option[Int] =
-      if (datatype.path("maxLength").isMissingNode) None
-      else Some(datatype.get("maxLength").asText().toInt)
-    val length: Option[Int] =
-      if (datatype.path("length").isMissingNode) None
-      else Some(datatype.get("length").asText().toInt)
+        .map(parsedColumnProperties => {
+          val datatype = getDatatypeOrDefault(inheritedProperties)
+          val minLength: Option[Int] =
+            if (datatype.path("minLength").isMissingNode) None
+            else Some(datatype.get("minLength").asText().toInt)
+          val maxLength: Option[Int] =
+            if (datatype.path("maxLength").isMissingNode) None
+            else Some(datatype.get("maxLength").asText().toInt)
+          val length: Option[Int] =
+            if (datatype.path("length").isMissingNode) None
+            else Some(datatype.get("length").asText().toInt)
 
-    val minInclusive: Option[String] =
-      if (datatype.path("minInclusive").isMissingNode) None
-      else Some(datatype.get("minInclusive").asText)
-    val maxInclusive: Option[String] =
-      if (datatype.path("maxInclusive").isMissingNode) None
-      else Some(datatype.get("maxInclusive").asText)
-    val minExclusive: Option[String] =
-      if (datatype.path("minExclusive").isMissingNode) None
-      else Some(datatype.get("minExclusive").asText)
-    val maxExclusive: Option[String] =
-      if (datatype.path("maxExclusive").isMissingNode) None
-      else Some(datatype.get("maxExclusive").asText)
+          val minInclusive: Option[String] =
+            if (datatype.path("minInclusive").isMissingNode) None
+            else Some(datatype.get("minInclusive").asText)
+          val maxInclusive: Option[String] =
+            if (datatype.path("maxInclusive").isMissingNode) None
+            else Some(datatype.get("maxInclusive").asText)
+          val minExclusive: Option[String] =
+            if (datatype.path("minExclusive").isMissingNode) None
+            else Some(datatype.get("minExclusive").asText)
+          val maxExclusive: Option[String] =
+            if (datatype.path("maxExclusive").isMissingNode) None
+            else Some(datatype.get("maxExclusive").asText)
 
-    val newLang = getLangOrDefault(inheritedPropertiesCopy)
+          val newLang = getLangOrDefault(inheritedProperties)
 
-    val name = getName(columnProperties, lang)
-    val formatNode = datatype.path("format")
+          val name = getName(parsedColumnProperties.column, lang)
+          val formatNode = datatype.path("format")
 
-    val titles = columnProperties.get("titles")
+          val titles = parsedColumnProperties.column.get("titles")
 
-    val column = new Column(
-      columnOrdinal = columnOrdinal,
-      name = name,
-      id = getId(columnProperties),
-      minLength = minLength,
-      maxLength = maxLength,
-      length = length,
-      minInclusive = minInclusive,
-      maxInclusive = maxInclusive,
-      minExclusive = minExclusive,
-      maxExclusive = maxExclusive,
-      baseDataType = getBaseDataType(datatype),
-      lang = newLang,
-      nullParam = getNullParam(inheritedPropertiesCopy),
-      default = getDefault(inheritedPropertiesCopy),
-      required = getRequired(inheritedPropertiesCopy),
-      aboutUrl = getAboutUrl(inheritedPropertiesCopy),
-      propertyUrl = getPropertyUrl(inheritedPropertiesCopy),
-      valueUrl = getValueUrl(inheritedPropertiesCopy),
-      separator = getSeparator(inheritedPropertiesCopy),
-      ordered = getOrdered(inheritedPropertiesCopy),
-      titleValues = getTitleValues(titles),
-      suppressOutput = getSuppressOutput(columnProperties),
-      virtual = getVirtual(columnProperties),
-      format = getMaybeFormatForColumn(formatNode),
-      textDirection = getTextDirection(inheritedPropertiesCopy),
-      annotations = annotations
-    )
+          val column = new Column(
+            columnOrdinal = columnOrdinal,
+            name = name,
+            id = getId(parsedColumnProperties.column),
+            minLength = minLength,
+            maxLength = maxLength,
+            length = length,
+            minInclusive = minInclusive,
+            maxInclusive = maxInclusive,
+            minExclusive = minExclusive,
+            maxExclusive = maxExclusive,
+            baseDataType = getBaseDataType(datatype),
+            lang = newLang,
+            nullParam = getNullParam(inheritedProperties),
+            default = getDefault(inheritedProperties),
+            required = getRequired(inheritedProperties),
+            aboutUrl = getAboutUrl(inheritedProperties),
+            propertyUrl = getPropertyUrl(inheritedProperties),
+            valueUrl = getValueUrl(inheritedProperties),
+            separator = getSeparator(inheritedProperties),
+            ordered = getOrdered(inheritedProperties),
+            titleValues = getTitleValues(titles),
+            suppressOutput = getSuppressOutput(parsedColumnProperties.column),
+            virtual = getVirtual(parsedColumnProperties.column),
+            format = getMaybeFormatForColumn(formatNode),
+            textDirection = getTextDirection(inheritedProperties),
+            annotations = parsedColumnProperties.annotation
+          )
 
-    (column, warnings)
+          (column, parsedColumnProperties.warnings)
+        })
   }
 
-  def getOrdered(inheritedProperties: mutable.Map[String, JsonNode]): Boolean = {
+  def getOrdered(
+      inheritedProperties: mutable.Map[String, JsonNode]
+  ): Boolean = {
     val inheritedPropertiesNode = inheritedProperties.get("ordered")
     inheritedPropertiesNode match {
       case Some(value) => value.asBoolean()
@@ -140,7 +140,9 @@ object Column {
     }
   }
 
-  def getTextDirection(inheritedProperties: mutable.Map[String, JsonNode]): String = {
+  def getTextDirection(
+      inheritedProperties: mutable.Map[String, JsonNode]
+  ): String = {
     val textDirectionNode = inheritedProperties.get("textDirection")
     textDirectionNode match {
       case Some(value) => value.asText()
@@ -148,7 +150,9 @@ object Column {
     }
   }
 
-  def getSuppressOutput(columnProperties: mutable.Map[String, JsonNode]): Boolean = {
+  def getSuppressOutput(
+      columnProperties: mutable.Map[String, JsonNode]
+  ): Boolean = {
     val suppressOutputNode = columnProperties.get("suppressOutput")
     suppressOutputNode match {
       case Some(value) => value.asBoolean()
@@ -164,7 +168,9 @@ object Column {
     }
   }
 
-  def getRequired(inheritedProperties: mutable.Map[String, JsonNode]): Boolean = {
+  def getRequired(
+      inheritedProperties: mutable.Map[String, JsonNode]
+  ): Boolean = {
     inheritedProperties.get("required") match {
       case Some(value) => value.asBoolean()
       case _           => false
@@ -184,8 +190,8 @@ object Column {
   }
 
   def getName(
-               columnProperties: mutable.Map[String, JsonNode],
-               lang: String
+      columnProperties: mutable.Map[String, JsonNode],
+      lang: String
   ): Option[String] = {
     val name = columnProperties.get("name")
     val titles = columnProperties.get("titles")
@@ -285,55 +291,106 @@ object Column {
     }
   }
 
+  case class ParsedColumnProperties(
+      inherited: Map[String, JsonNode] = Map(),
+      annotation: Map[String, JsonNode] = Map(),
+      column: Map[String, JsonNode] = Map(),
+      warnings: Array[ErrorWithoutContext] = Array()
+  ) {
+    def withInheritedProperty(keyValuePair: (String, JsonNode)) =
+      ParsedColumnProperties(
+        inherited = inherited + keyValuePair,
+        annotation = annotation,
+        column = column,
+        warnings = warnings
+      )
+
+    def withAnnotationProperty(keyValuePair: (String, JsonNode)) =
+      ParsedColumnProperties(
+        inherited = inherited,
+        annotation = annotation + keyValuePair,
+        column = column,
+        warnings = warnings
+      )
+
+    def withColumnProperty(keyValuePair: (String, JsonNode)) =
+      ParsedColumnProperties(
+        inherited = inherited,
+        annotation = annotation,
+        column = column + keyValuePair,
+        warnings = warnings
+      )
+
+    def withWarning(warning: ErrorWithoutContext) =
+      ParsedColumnProperties(
+        inherited = inherited,
+        annotation = annotation,
+        column = column,
+        warnings = warnings :+ warning
+      )
+
+    def withWarnings(warnings: Array[ErrorWithoutContext]) =
+      ParsedColumnProperties(
+        inherited = inherited,
+        annotation = annotation,
+        column = column,
+        warnings = warnings ++ warnings
+      )
+  }
+
   def partitionAndValidateColumnPropertiesByType(
       columnDesc: ObjectNode,
       columnOrdinal: Int,
       baseUrl: String,
       lang: String,
-      inheritedProperties: mutable.Map[String, JsonNode]
-  ): (
-      mutable.Map[String, JsonNode],
-      mutable.Map[String, JsonNode],
-      Array[ErrorWithoutContext]
-  ) = {
-    val warnings = ArrayBuffer.empty[ErrorWithoutContext]
-    val annotations = mutable.Map[String, JsonNode]()
-    val columnProperties = mutable.Map[String, JsonNode]()
-    for ((property, value) <- columnDesc.getKeysAndValues) {
-      (property, value) match {
-        case ("@type", v: TextNode) if v.asText != "Column" =>
-          throw MetadataError(
-            s"columns[$columnOrdinal].@type, @type of column is not 'Column'"
-          )
-        case _ =>
-          val (v, w, csvwPropertyType) =
-            PropertyChecker.parseJsonProperty(property, value, baseUrl, lang)
-          warnings.addAll(
-            w.map(warningString =>
-              ErrorWithoutContext(
-                warningString,
-                s"$property: ${value.toPrettyString}"
-              )
-            )
-          )
-          csvwPropertyType match {
+      inheritedProperties: Map[String, JsonNode]
+  ): ParsedResult[ParsedColumnProperties] = {
+    val initialAccumulator: ParsedResult[ParsedColumnProperties] = Right(
+      ParsedColumnProperties(inherited = inheritedProperties)
+    )
+
+    columnDesc.getKeysAndValues
+      .map({
+        case ("@type", textNode: TextNode) if textNode.asText != "Column" =>
+          Left(MetadataError(s"columns[$columnOrdinal].@type, @type of column is not 'Column'"))
+        case (propertyName, value) =>
+          PropertyChecker
+            .parseJsonProperty(propertyName, value, baseUrl, lang)
+            .map({ case (v, ws, pt) => (propertyName, v, ws, pt) })
+      })
+      .foldLeft(initialAccumulator)({
+        case (err @ Left(_), _) => err
+        case (_, Left(newErr))  => Left(newErr)
+        case (
+              Right(parsedProperties),
+              Right((propertyName, parsedValue, stringWarnings, propertyType))
+            ) =>
+          val partitionedProperties = (propertyType match {
             case PropertyType.Inherited =>
-              inheritedProperties += (property -> v)
-            case PropertyType.Common | PropertyType.Column =>
-              columnProperties += (property -> v)
+              parsedProperties
+                .withInheritedProperty(propertyName -> parsedValue)
             case PropertyType.Annotation =>
-              annotations += (property -> v)
+              parsedProperties
+                .withAnnotationProperty(propertyName -> parsedValue)
+            case PropertyType.Common | PropertyType.Column =>
+              parsedProperties.withColumnProperty(propertyName -> parsedValue)
             case _ =>
-              warnings.addOne(
+              parsedProperties.withWarning(
                 ErrorWithoutContext(
                   s"invalid_property",
-                  s"column: $property"
+                  s"column: $propertyName"
                 )
               )
-          }
-      }
-    }
-    (annotations, columnProperties, warnings.toArray)
+          }).withWarnings(
+              stringWarnings.map(
+                ErrorWithoutContext(
+                  _,
+                  s"$propertyName: ${parsedValue.toPrettyString}"
+                )
+              )
+            )
+          Right(partitionedProperties)
+      })
   }
 
   private def getMaybeFormatForColumn(formatNode: JsonNode): Option[Format] = {
@@ -510,7 +567,8 @@ case class Column private (
 
   val noAdditionalValidation: Function[String, Boolean] = (_: String) => true
 
-  private val datatypeFormatValidation: mutable.Map[String, Function[String, Boolean]] = mutable.Map(
+  private val datatypeFormatValidation
+      : mutable.Map[String, Function[String, Boolean]] = mutable.Map(
     s"${rdfSyntaxNs}XMLLiteral" -> regexpValidation,
     s"${rdfSyntaxNs}HTML" -> regexpValidation,
     "http://www.w3.org/ns/csvw#JSON" -> regexpValidation,
@@ -562,7 +620,6 @@ case class Column private (
     val regEx = regExPattern.r
     regEx.pattern.matcher(value).matches()
   }
-
 
   def trimValue(
       value: String

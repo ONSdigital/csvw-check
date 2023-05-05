@@ -6,5 +6,5 @@ package csvwcheck.models
   * @param warningsAndErrors
   * @tparam T
   */
-case class ParsedResult[T](component: T, warningsAndErrors: WarningsAndErrors)
+case class WithWarningsAndErrors[T](component: T, warningsAndErrors: WarningsAndErrors)
 

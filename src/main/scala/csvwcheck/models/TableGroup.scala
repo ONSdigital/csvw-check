@@ -1,18 +1,10 @@
 package csvwcheck.models
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{
-  ArrayNode,
-  JsonNodeFactory,
-  ObjectNode,
-  TextNode
-}
+import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{
-  ErrorWithCsvContext,
-  MetadataError,
-  WarningWithCsvContext
-}
+import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
+import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import csvwcheck.{PropertyChecker, models}
@@ -31,7 +23,7 @@ object TableGroup {
   def fromJson(
       tableGroupNodeIn: ObjectNode,
       baseUri: String
-  ): Either[MetadataError, ParsedResult[TableGroup]] = {
+  ): ParseResult[WithWarningsAndErrors[TableGroup]] = {
     var baseUrl = baseUri.trim
     var errors = Array[ErrorWithCsvContext]()
     var warnings = Array[WarningWithCsvContext]()
@@ -76,7 +68,7 @@ object TableGroup {
       annotations
     )
 
-    ParsedResult(
+    WithWarningsAndErrors(
       tableGroup,
       models.WarningsAndErrors(warnings = warnings, errors = errors)
     )
@@ -101,7 +93,7 @@ object TableGroup {
       rootNode: ObjectNode,
       baseUrl: String,
       lang: String
-  ): Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = {
+  ): ParseResult[(String, String, Array[WarningWithCsvContext])] = {
     (rootNode.get("@context") match {
       case a: ArrayNode => validateContextArrayNode(a, baseUrl, lang)
       case s: TextNode if s.asText == csvwContextUri =>
@@ -118,10 +110,10 @@ object TableGroup {
       context: ArrayNode,
       baseUrl: String,
       lang: String
-  ): Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = {
+  ): ParseResult[(String, String, Array[WarningWithCsvContext])] = {
     def validateFirstItemInContext(
         firstItem: JsonNode
-    ): Either[MetadataError, Unit] = {
+    ): ParseResult[Unit] = {
       firstItem match {
         case s: TextNode if s.asText == csvwContextUri => Right()
         case _ =>
@@ -178,7 +170,7 @@ object TableGroup {
       contextBaseAndLangObject: ObjectNode,
       baseUrl: String,
       lang: String
-  ): Either[MetadataError, (String, String, Array[WarningWithCsvContext])] = {
+  ): ParseResult[(String, String, Array[WarningWithCsvContext])] = {
     val acc: Either[
       MetadataError,
       (String, String, Array[WarningWithCsvContext])
@@ -402,7 +394,7 @@ object TableGroup {
       lang: String,
       commonProperties: mutable.Map[String, JsonNode],
       inheritedProperties: mutable.Map[String, JsonNode]
-  ): (mutable.Map[String, Table], WarningsAndErrors) = {
+  ): ParseResult[WithWarningsAndErrors[Map[String, Table]]] = {
     tableGroupNode.path("tables") match {
       case t: ArrayNode if t.isEmpty() =>
         throw MetadataError("Empty tables property")
@@ -425,7 +417,7 @@ object TableGroup {
       lang: String,
       commonProperties: mutable.Map[String, JsonNode],
       inheritedProperties: mutable.Map[String, JsonNode]
-  ): (mutable.Map[String, Table], WarningsAndErrors) = {
+  ): ParseResult[WithWarningsAndErrors[Map[String, Table]]] = {
     val warnings = ArrayBuffer.empty[WarningWithCsvContext]
     val errors = ArrayBuffer.empty[ErrorWithCsvContext]
     val tables = mutable.Map[String, Table]()

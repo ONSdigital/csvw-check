@@ -1,26 +1,42 @@
 package csvwcheck.models
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
+import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode, TextNode}
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
+import csvwcheck.errors.{
+  ErrorWithCsvContext,
+  MetadataError,
+  WarningWithCsvContext
+}
 import csvwcheck.helpers.MapHelpers
+import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
-import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
+import csvwcheck.traits.ObjectNodeExtentions.{
+  IteratorHasGetKeysAndValues,
+  ObjectNodeGetMaybeNode
+}
 import csvwcheck.{PropertyChecker, models}
 import org.apache.commons.csv.CSVRecord
 
+import scala.collection.JavaConverters.asScalaIteratorConverter
 import scala.collection.mutable
 import scala.collection.mutable.{ArrayBuffer, Map}
 object Table {
 
+  private val tablePermittedProperties = Array[String](
+    "columns",
+    "primaryKey",
+    "foreignKeys",
+    "rowTitles"
+  )
+
   def fromJson(
-                tableDesc: ObjectNode,
-                baseUrl: String,
-                lang: String,
-                commonProperties: mutable.Map[String, JsonNode],
-                inheritedPropertiesIn: mutable.Map[String, JsonNode]
-  ): (Table, Array[WarningWithCsvContext]) = {
+      tableDesc: ObjectNode,
+      baseUrl: String,
+      lang: String,
+      commonProperties: mutable.Map[String, JsonNode],
+      inheritedPropertiesIn: mutable.Map[String, JsonNode]
+  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
     val (annotations, tableProperties, inheritedProperties, warnings) =
       partitionAndValidateTablePropertiesByType(
         commonProperties,
@@ -37,7 +53,7 @@ object Table {
 
     maybeTableSchema match {
       case Some(tableSchema) =>
-        createTableForExistingSchema(
+        parseTableSchema(
           tableSchema,
           inheritedProperties,
           baseUrl,
@@ -57,17 +73,19 @@ object Table {
   }
 
   private def partitionAndValidateTablePropertiesByType(
-                                                         commonProperties: mutable.Map[String, JsonNode],
-                                                         inheritedProperties: mutable.Map[String, JsonNode],
-                                                         tableDesc: ObjectNode,
-                                                         baseUrl: String,
-                                                         lang: String
-  ): (
-      mutable.Map[String, JsonNode],
-      mutable.Map[String, JsonNode],
-      mutable.Map[String, JsonNode],
-      Array[WarningWithCsvContext]
-  ) = {
+      commonProperties: mutable.Map[String, JsonNode],
+      inheritedProperties: mutable.Map[String, JsonNode],
+      tableDesc: ObjectNode,
+      baseUrl: String,
+      lang: String
+  ): ParseResult[
+    (
+        mutable.Map[String, JsonNode],
+        mutable.Map[String, JsonNode],
+        mutable.Map[String, JsonNode],
+        Array[WarningWithCsvContext]
+    )
+  ] = {
     val warnings = ArrayBuffer.empty[WarningWithCsvContext]
     val annotations = mutable.Map[String, JsonNode]()
     val tableProperties: mutable.Map[String, JsonNode] =
@@ -132,276 +150,464 @@ object Table {
   }
 
   private def extractTableSchema(
-                                  tableProperties: mutable.Map[String, JsonNode],
-                                  inheritedPropertiesCopy: mutable.Map[String, JsonNode]
+      tableProperties: mutable.Map[String, JsonNode],
+      inheritedPropertiesCopy: mutable.Map[String, JsonNode]
   ): Option[JsonNode] = {
     tableProperties
       .get("tableSchema")
       .orElse(inheritedPropertiesCopy.get("tableSchema"))
   }
 
-  private def createTableForExistingSchema(
-                                            tableSchema: JsonNode,
-                                            inheritedProperties: mutable.Map[String, JsonNode],
-                                            baseUrl: String,
-                                            lang: String,
-                                            url: String,
-                                            tableProperties: mutable.Map[String, JsonNode],
-                                            annotations: mutable.Map[String, JsonNode],
-                                            existingWarnings: Array[WarningWithCsvContext]
-  ): (Table, Array[WarningWithCsvContext]) = {
-
+  private def parseTableSchema(
+      tableSchema: JsonNode,
+      inheritedProperties: mutable.Map[String, JsonNode],
+      baseUrl: String,
+      lang: String,
+      tableUrl: String,
+      tableProperties: mutable.Map[String, JsonNode],
+      annotations: mutable.Map[String, JsonNode],
+      existingWarnings: Array[WarningWithCsvContext]
+  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
     tableSchema match {
       case tableSchemaObject: ObjectNode =>
-        var warnings = Array[WarningWithCsvContext]()
-        warnings = warnings.concat(existingWarnings)
-
-        ensureColumnsNodeIsArray(tableSchemaObject, url)
-          .foreach(w => warnings :+= w)
-
-        setTableSchemaInheritedProperties(
-          inheritedProperties,
-          tableSchemaObject
-        )
-
-        val (columns, columnWarnings) =
-          validateAndExtractColumnsFromSchema(
-            baseUrl,
-            lang,
+        val tablePropertiesIncludingInherited =
+          getTableSchemaInheritedProperties(
             inheritedProperties,
             tableSchemaObject
           )
-        warnings = warnings.concat(columnWarnings)
 
-        // Collect primary keys in primaryKeyColumns
-        val (primaryKeyToReturn, primaryKeyWarnings) =
-          collectPrimaryKeyColumns(tableSchemaObject, columns)
-        warnings = warnings.concat(primaryKeyWarnings)
-
-        // Collect foreign Keys in foreignKeyColumns
-        val foreignKeyMappings =
-          collectForeignKeyColumns(tableSchemaObject, columns)
-
-        // Collect row titles column
-        val rowTitlesColumns =
-          collectRowTitlesColumns(tableSchemaObject, columns)
-
-        val table = new Table(
-          url = url,
-          id = getId(tableProperties),
-          schema = Some(
-            TableSchema(
-              columns = columns,
-              foreignKeys = foreignKeyMappings, // a new type here?
-              primaryKey = primaryKeyToReturn,
-              rowTitleColumns = rowTitlesColumns,
-              schemaId = getMaybeSchemaIdFromTableSchema(tableSchemaObject),
-            )
-          ),
-          dialect = getDialect(tableProperties),
-          notes = getNotes(tableProperties),
-          suppressOutput = getSuppressOutput(tableProperties),
+        val partiallyParsedTable = new Table(
+          url = tableUrl,
+          id = tableProperties.get("@id").map(_.asText()),
+          suppressOutput = tableProperties
+            .get("suppressOutput")
+            .map(_.asBoolean)
+            .getOrElse(false),
           annotations = annotations
         )
-        (table, warnings)
-      // tableSchemas defined in other files have been updated to inline representations by this point already.
-      // See propertyChecker function for tableSchema.
+
+        parseTableSchema(
+          partiallyParsedTable,
+          tableSchemaObject,
+          tablePropertiesIncludingInherited,
+          baseUrl,
+          lang
+        ).flatMap(parseDialect(_, tablePropertiesIncludingInherited))
+          .flatMap(parseNotes(_, tablePropertiesIncludingInherited))
+          .map({
+            case (table, warnings) => (table, warnings ++ existingWarnings)
+          })
       case _ =>
-        throw MetadataError(
-          s"Table schema must be object for table $url "
+        Left(
+          MetadataError(
+            s"Table schema must be object for table $tableUrl "
+          )
         )
     }
   }
 
-  private def getDialect(
-      tableProperties: mutable.Map[String, JsonNode]
-  ): Option[Dialect] = {
+  private def parseTableSchema(
+      table: Table,
+      tableSchemaObject: ObjectNode,
+      tablePropertiesIncludingInherited: Map[String, JsonNode],
+      baseUrl: String,
+      lang: String
+  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
+    parseAndValidateColumns(
+      table.url,
+      baseUrl,
+      lang,
+      tablePropertiesIncludingInherited,
+      tableSchemaObject
+    ).flatMap({
+      case (columns, columnWarnings) =>
+        parseTableSchemaGivenColumns(
+          table,
+          tableSchemaObject,
+          columns,
+          columnWarnings
+        )
+    })
+  }
+
+  private def parseTableSchemaGivenColumns(
+      table: Table,
+      tableSchemaObject: ObjectNode,
+      columns: Array[Column],
+      warnings: Array[WarningWithCsvContext]
+  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
+    parseRowTitles(tableSchemaObject, columns)
+      .flatMap(rowTitleColumns =>
+        collectForeignKeyColumns(tableSchemaObject, columns)
+          .map(foreignKeyMappings => (rowTitleColumns, foreignKeyMappings))
+      )
+      .flatMap({
+        case (rowTitleColumns, foreignKeyMappings) =>
+          collectPrimaryKeyColumns(tableSchemaObject, columns)
+            .map({
+              case (pkColumns, pkWarnings) =>
+                (rowTitleColumns, foreignKeyMappings, pkColumns, pkWarnings)
+            })
+      })
+      .map({
+        case (rowTitleColumns, foreignKeyMappings, pkColumns, pkWarnings) =>
+          // tableSchemas defined in other files have been updated to inline representations by this point already.
+          // See propertyChecker function for tableSchema.
+          val tableSchema = TableSchema(
+            columns = columns,
+            foreignKeys = foreignKeyMappings,
+            primaryKey = pkColumns,
+            rowTitleColumns = rowTitleColumns,
+            schemaId = tableSchemaObject.getMaybeNode("@id").map(_.asText)
+          )
+
+          (
+            table.copy(schema = Some(tableSchema)),
+            warnings ++ pkWarnings
+          )
+      })
+  }
+
+  private def parseDialect(
+      tableAndWarnings: (Table, Array[WarningWithCsvContext]),
+      tableProperties: Map[String, JsonNode]
+  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
+    val (table, warnings) = tableAndWarnings
     tableProperties
       .get("dialect")
-      .flatMap {
-        case d: ObjectNode => Some(Dialect.fromJson(d))
-        case d if d.isNull => None
+      .map({
+        case d: ObjectNode =>
+          Dialect
+            .fromJson(d)
+            .map(dialect => (table.copy(dialect = Some(dialect)), warnings))
+        case d if d.isMissingNode || d.isNull => Right(tableAndWarnings)
         case d =>
-          throw MetadataError(
-            s"Unexpected JsonNode type ${d.getClass.getName}"
+          Left(
+            MetadataError(
+              s"Unexpected JsonNode type ${d.getClass.getName}"
+            )
           )
-      }
+      })
+      .getOrElse(Right(tableAndWarnings))
+
   }
 
-  private def ensureColumnsNodeIsArray(
+  private def parseAndValidateColumns(
+      tableUrl: String,
+      baseUrl: String,
+      lang: String,
+      inheritedProperties: Map[String, JsonNode],
+      tableSchemaObject: ObjectNode
+  ): ParseResult[(Array[Column], Array[WarningWithCsvContext])] =
+    parseColumnDefinitions(
+      tableUrl,
+      tableSchemaObject,
+      baseUrl,
+      lang,
+      inheritedProperties
+    ).flatMap(ensureNoDuplicateColumnNames)
+      .flatMap(ensureVirtualColumnsAfterColumns)
+
+  private def parseColumnDefinitions(
+      tableUrl: String,
       tableSchemaObject: ObjectNode,
-      url: String
-  ): Option[WarningWithCsvContext] = {
-    val columnsNode = tableSchemaObject.path("columns")
-    if (!columnsNode.isMissingNode && columnsNode.isArray) {
-      None
-    } else {
-      tableSchemaObject.set("columns", JsonNodeFactory.instance.arrayNode())
-      Some(
-        WarningWithCsvContext(
-          "invalid_value",
-          "metadata",
-          "",
-          "",
-          s"columns is not array for table: $url",
-          ""
-        )
-      )
-    }
+      baseUrl: String,
+      lang: String,
+      inheritedProperties: Map[String, JsonNode]
+  ): ParseResult[(Array[Column], Array[WarningWithCsvContext])] = {
+    tableSchemaObject
+      .getMaybeNode("columns")
+      .map({
+        case arrayNode: ArrayNode =>
+          arrayNode
+            .elements()
+            .asScalaArray
+            .zipWithIndex
+            .map(parseColumnDefinition(_, baseUrl, lang, inheritedProperties))
+            .foldLeft[ParseResult[
+              (Array[Column], Array[WarningWithCsvContext])
+            ]](Right(Array(), Array()))({
+              case (err @ Left(_), _)  => err
+              case (_, Left(newError)) => Left(newError)
+              case (
+                    Right((columns, warnings)),
+                    Right((Some(column), newWarnings))
+                  ) =>
+                Right(columns :+ column, warnings ++ newWarnings)
+              case (Right((columns, warnings)), Right((None, newWarnings))) =>
+                Right(columns, warnings ++ newWarnings)
+            })
+        case _ =>
+          Right(
+            (
+              Array[Column](),
+              Array(
+                WarningWithCsvContext(
+                  "invalid_value",
+                  "metadata",
+                  "",
+                  "",
+                  s"columns is not array for table: $tableUrl",
+                  ""
+                )
+              )
+            )
+          )
+      })
+      .getOrElse(Right((Array.empty, Array.empty)))
   }
 
-  private def validateAndExtractColumnsFromSchema(
-                                                   baseUrl: String,
-                                                   lang: String,
-                                                   inheritedProperties: mutable.Map[String, JsonNode],
-                                                   tableSchemaObject: ObjectNode
-  ): (Array[Column], Array[WarningWithCsvContext]) = {
-    val warnings = ArrayBuffer.empty[WarningWithCsvContext]
-
-    val columnObjects = tableSchemaObject
-      .get("columns")
-      .elements()
-      .asScalaArray
-
-    val columns = columnObjects.zipWithIndex
-      .flatMap {
-        case (col, i) =>
-          col match {
-            case colObj: ObjectNode =>
-              val colNum = i + 1
-              val (colDef, w) = Column.fromJson(
+  def parseColumnDefinition(
+      colWithIndex: (JsonNode, Int),
+      baseUrl: String,
+      lang: String,
+      inheritedProperties: Map[String, JsonNode]
+  ): ParseResult[(Option[Column], Array[WarningWithCsvContext])] =
+    colWithIndex match {
+      case (col, index) =>
+        col match {
+          case colObj: ObjectNode =>
+            val colNum = index + 1
+            Column
+              .fromJson(
                 colNum,
                 colObj,
                 baseUrl,
                 lang,
                 inheritedProperties
               )
-              warnings.addAll(
-                w.map(e =>
+              .map({
+                case (colDef, warningsWithoutContext) =>
+                  (
+                    Some(colDef),
+                    warningsWithoutContext.map(warningWithoutContext =>
+                      WarningWithCsvContext(
+                        warningWithoutContext.`type`,
+                        "metadata",
+                        "",
+                        colNum.toString,
+                        warningWithoutContext.content,
+                        ""
+                      )
+                    )
+                  )
+              })
+          case _ =>
+            Right(
+              (
+                None,
+                Array(
                   WarningWithCsvContext(
-                    e.`type`,
+                    "invalid_column_description",
                     "metadata",
                     "",
-                    colNum.toString,
-                    e.content,
+                    "",
+                    col.toString,
                     ""
                   )
                 )
               )
-              Some(colDef)
-            case _ =>
-              warnings.addOne(
-                WarningWithCsvContext(
-                  "invalid_column_description",
-                  "metadata",
-                  "",
-                  "",
-                  col.toString,
-                  ""
-                )
-              )
-              None
-          }
-      }
+            )
+        }
+    }
 
+  private def ensureNoDuplicateColumnNames(
+      columnsAndWarnings: (Array[Column], Array[WarningWithCsvContext])
+  ): ParseResult[(Array[Column], Array[WarningWithCsvContext])] = {
+    val (columns, _) = columnsAndWarnings
     val columnNames = columns.flatMap(c => c.name)
 
-    ensureNoDuplicateColumnNames(columnNames)
-    ensureVirtualColumnsAfterColumns(columns)
-    (columns, warnings.toArray)
-  }
-
-  private def ensureNoDuplicateColumnNames(columnNames: Array[String]): Unit = {
     val duplicateColumnNames = columnNames
       .groupBy(identity)
       .filter { case (_, elements) => elements.length > 1 }
       .keys
 
     if (duplicateColumnNames.nonEmpty) {
-      throw MetadataError(
-        s"Multiple columns named ${duplicateColumnNames.mkString(", ")}"
+      Left(
+        MetadataError(
+          s"Multiple columns named ${duplicateColumnNames.mkString(", ")}"
+        )
       )
+    } else {
+      Right(columnsAndWarnings)
     }
   }
 
-  private def ensureVirtualColumnsAfterColumns(columns: Array[Column]): Unit = {
+  private def ensureVirtualColumnsAfterColumns(
+      columnsAndWarnings: (Array[Column], Array[WarningWithCsvContext])
+  ): ParseResult[(Array[Column], Array[WarningWithCsvContext])] = {
+    val (columns, _) = columnsAndWarnings
     var virtualColumns = false
     for (column <- columns) {
       if (virtualColumns && !column.virtual) {
-        throw MetadataError(
-          s"virtual columns before non-virtual column ${column.name.get} (${column.columnOrdinal})"
+        return Left(
+          MetadataError(
+            s"virtual columns before non-virtual column ${column.name.get} (${column.columnOrdinal})"
+          )
         )
       }
       virtualColumns = virtualColumns || column.virtual
     }
+    Right(columnsAndWarnings)
   }
 
-  private def collectRowTitlesColumns(
+  private def parseRowTitles(
       tableSchemaObject: ObjectNode,
       columns: Array[Column]
-  ): Array[Column] = {
-    if (!tableSchemaObject.path("rowTitles").isMissingNode) {
-      val rowTitlesColumns = ArrayBuffer.empty[Column]
-      val rowTitles = tableSchemaObject.get("rowTitles")
-      for (rowTitle <- rowTitles.elements().asScalaArray) {
-        val maybeCol = columns.find(col =>
-          col.name.isDefined && col.name.get == rowTitle.asText()
-        )
-        maybeCol match {
-          case Some(col) => rowTitlesColumns.addOne(col)
-          case None =>
-            throw MetadataError(
-              s"rowTitles references non-existant column - ${rowTitle.asText()}"
+  ): ParseResult[Array[Column]] = {
+    tableSchemaObject
+      .getMaybeNode("rowTitles")
+      .map({
+        case arrayNode: ArrayNode =>
+          arrayNode
+            .elements()
+            .asScala
+            .map({
+              case rowTitleElement: TextNode =>
+                val rowTitle = rowTitleElement.asText
+                columns
+                  .find(col => col.name.exists(_ == rowTitle))
+                  .map(Right(_))
+                  .getOrElse(
+                    Left(
+                      MetadataError(
+                        s"rowTitles references non-existent column - '$rowTitle''"
+                      )
+                    )
+                  )
+              case rowTitleElement =>
+                Left(
+                  MetadataError(
+                    s"Unhandled rowTitle value '${rowTitleElement.toPrettyString}'"
+                  )
+                )
+            })
+            .foldLeft[ParseResult[Array[Column]]](Right(Array()))({
+              case (err @ Left(_), _) => err
+              case (_, Left(newErr))  => Left(newErr)
+              case (Right(rowTitleColumns), Right(newRowTitleColumn)) =>
+                Right(rowTitleColumns :+ newRowTitleColumn)
+            })
+        case rowTitlesNode =>
+          Left(
+            MetadataError(
+              s"Unsupported rowTitles value ${rowTitlesNode.toPrettyString}"
             )
-        }
-      }
-      rowTitlesColumns.toArray
-    } else {
-      Array[Column]()
-    }
+          )
+      })
+      .getOrElse(Right(Array[Column]()))
   }
 
   private def collectForeignKeyColumns(
       tableSchemaObject: ObjectNode,
       columns: Array[Column]
-  ): Array[ChildTableForeignKey] = {
-    if (tableSchemaObject.path("foreignKeys").isMissingNode) {
-      Array()
-    } else {
-      val foreignKeys = ArrayBuffer.empty[ChildTableForeignKey]
-      val foreignKeysNode =
-        tableSchemaObject.get("foreignKeys").asInstanceOf[ArrayNode]
-      for (foreignKey <- foreignKeysNode.elements().asScalaArray) {
-        val foreignKeyColumns = ArrayBuffer.empty[Column]
-        for (
-          reference <- foreignKey.get("columnReference").elements().asScalaArray
-        ) {
-          val maybeCol = columns.find(col =>
-            col.name.isDefined && col.name.get == reference.asText()
+  ): ParseResult[Array[ChildTableForeignKey]] = {
+    tableSchemaObject
+      .getMaybeNode("foreignKeys")
+      .map({
+        case foreignKeysNode: ArrayNode =>
+          foreignKeysNode
+            .elements()
+            .asScala
+            .map({
+              case foreignKeyObjectNode: ObjectNode =>
+                parseForeignKeyObjectNode(foreignKeyObjectNode, columns)
+              case foreignKeyNode =>
+                Left(
+                  MetadataError(
+                    s"Unexpected foreign key value ${foreignKeyNode.toPrettyString}"
+                  )
+                )
+            })
+            .foldLeft[ParseResult[Array[ChildTableForeignKey]]](Right(Array()))({
+              case (err @ Left(_), _) => err
+              case (_, Left(newErr))  => Left(newErr)
+              case (Right(foreignKeys), Right(newForeignKey)) =>
+                Right(foreignKeys :+ newForeignKey)
+            })
+        case foreignKeysNode =>
+          Left(
+            MetadataError(
+              s"Unexpected foreign keys node ${foreignKeysNode.toPrettyString}"
+            )
           )
-          maybeCol match {
-            case Some(col) => foreignKeyColumns.addOne(col)
-            case None =>
-              throw MetadataError(
-                s"foreignKey references non-existent column - ${reference.asText()}"
-              )
-          }
-        }
-        foreignKeys.addOne(
-          ChildTableForeignKey(
-            foreignKey.asInstanceOf[ObjectNode],
-            foreignKeyColumns.toArray
+      })
+      .getOrElse(Right(Array()))
+  }
+
+  private def parseForeignKeyObjectNode(
+      foreignKeyObjectNode: ObjectNode,
+      columns: Array[Column]
+  ): ParseResult[ChildTableForeignKey] = {
+    foreignKeyObjectNode
+      .getMaybeNode("columnReference")
+      .map({
+        case columnReferenceArrayNode: ArrayNode =>
+          parseForeignKeyReferencesForColumnReferenceArrayNode(
+            foreignKeyObjectNode,
+            columnReferenceArrayNode,
+            columns
+          )
+        case columnReferenceNode =>
+          Left(
+            MetadataError(
+              s"columnReference property set to unexpected value ${columnReferenceNode.toPrettyString}"
+            )
+          )
+      })
+      .getOrElse(
+        Left(
+          MetadataError(
+            s"columnReference property unset on foreignKey ${foreignKeyObjectNode.toPrettyString}"
           )
         )
-      }
-      foreignKeys.toArray
-    }
+      )
+  }
+
+  private def parseForeignKeyReferencesForColumnReferenceArrayNode(
+      foreignKeyObjectNode: ObjectNode,
+      columnReferenceArrayNode: ArrayNode,
+      columns: Array[Column]
+  ): ParseResult[ChildTableForeignKey] = {
+    columnReferenceArrayNode
+      .elements()
+      .asScala
+      .map({
+        case columnReferenceElementTextNode: TextNode =>
+          val columnReference = columnReferenceElementTextNode.asText
+          columns
+            .find(col => col.name.exists(_ == columnReference))
+            .map(Right(_))
+            .getOrElse(
+              Left(
+                MetadataError(
+                  s"foreignKey references non-existent column - $columnReference"
+                )
+              )
+            )
+        case columnReferenceElement =>
+          Left(
+            MetadataError(
+              s"columnReference element set to unexpected value ${columnReferenceElement.toPrettyString}"
+            )
+          )
+      })
+      .foldLeft[ParseResult[Array[Column]]](Right(Array()))({
+        case (err @ Left(_), _) => err
+        case (_, Left(newErr))  => Left(newErr)
+        case (Right(foreignKeyColumns), Right(newForeignKeyColumn)) =>
+          Right(foreignKeyColumns :+ newForeignKeyColumn)
+      })
+      .map(foreignKeyColumns =>
+        ChildTableForeignKey(foreignKeyObjectNode, foreignKeyColumns)
+      )
   }
 
   private def collectPrimaryKeyColumns(
       tableSchemaObject: ObjectNode,
       columns: Array[Column]
-  ): (Array[Column], Array[WarningWithCsvContext]) = {
+  ): ParseResult[(Array[Column], Array[WarningWithCsvContext])] = {
+    // todo: This needs to be altered to return a ParseResult (and return Left(MetadataError) in the right places.
     val warnings = ArrayBuffer.empty[WarningWithCsvContext]
     if (!tableSchemaObject.path("primaryKey").isMissingNode) {
       var primaryKeyColumns = Array[Column]()
@@ -434,72 +640,38 @@ object Table {
     (Array[Column](), warnings.toArray)
   }
 
-  private def setTableSchemaInheritedProperties(
-                                                 inheritedProperties: mutable.Map[String, JsonNode],
-                                                 tableSchemaObject: ObjectNode
-  ): Unit = {
-    for ((property, value) <- tableSchemaObject.getKeysAndValues) {
-      if (
-        Array[String](
-          "columns",
-          "primaryKey",
-          "foreignKeys",
-          "rowTitles"
-        ).contains(property)
-      ) {
-        inheritedProperties += (property -> value)
-      }
-      () // Ensure return type of for loop is consistent.
-    }
+  private def getTableSchemaInheritedProperties(
+      inheritedProperties: mutable.Map[String, JsonNode],
+      tableSchemaObject: ObjectNode
+  ): Map[String, JsonNode] = {
+    inheritedProperties ++ tableSchemaObject.getKeysAndValues
+      .filter({
+        case (propertyName, _) =>
+          tablePermittedProperties.contains(propertyName)
+      })
+      .toMap
   }
 
-  private def getMaybeSchemaIdFromTableSchema(
-      schema: ObjectNode
-  ): Option[String] = {
-    val idNode = schema.path("@id")
-    if (idNode.isMissingNode) {
-      None
-    } else {
-      Some(idNode.asText())
-    }
-  }
-
-  private def getId(tableProperties: mutable.Map[String, JsonNode]): Option[String] = {
-    val idNode = tableProperties.get("@id")
-    idNode match {
-      case Some(value) => Some(value.asText())
-      case _           => None
-    }
-  }
-
-  private def getNotes(
+  private def parseNotes(
+      tableAndWarnings: (Table, Array[WarningWithCsvContext]),
       tableProperties: mutable.Map[String, JsonNode]
-  ): Option[ArrayNode] = {
-    val notesNode = tableProperties.get("notes")
-    notesNode match {
-      case Some(value) =>
-        value match {
-          case a: ArrayNode => Some(a)
-          case _            => throw MetadataError("Notes property should be an array")
-        }
-      case _ => None
-    }
-  }
+  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
+    val (table, warnings) = tableAndWarnings
 
-  private def getSuppressOutput(
-      tableProperties: mutable.Map[String, JsonNode]
-  ): Boolean = {
-    val suppressOutputNode = tableProperties.get("suppressOutput")
-    suppressOutputNode match {
-      case Some(value) => value.asBoolean()
-      case _           => false
-    }
+    tableProperties
+      .get("notes")
+      .map({
+        case notesNode: ArrayNode =>
+          Right(table.copy(notes = Some(notesNode)), warnings)
+        case _ => Right(tableAndWarnings)
+      })
+      .getOrElse(Left(MetadataError("Notes property should be an array")))
   }
 
   private def initializeTableWithDefaults(
-                                           annotations: mutable.Map[String, JsonNode],
-                                           warnings: Array[WarningWithCsvContext],
-                                           url: String
+      annotations: mutable.Map[String, JsonNode],
+      warnings: Array[WarningWithCsvContext],
+      url: String
   ): (Table, Array[WarningWithCsvContext]) = {
     val table = new Table(
       url = url,
@@ -514,22 +686,22 @@ object Table {
   }
 }
 
-case class TableSchema (
-  columns: Array[Column],
-  primaryKey: Array[Column],
-  rowTitleColumns: Array[Column],
-  foreignKeys: Array[ChildTableForeignKey],
-  schemaId: Option[String],
+case class TableSchema(
+    columns: Array[Column],
+    primaryKey: Array[Column],
+    rowTitleColumns: Array[Column],
+    foreignKeys: Array[ChildTableForeignKey],
+    schemaId: Option[String]
 )
 
 case class Table private (
     url: String,
-    id: Option[String],
-    schema: Option[TableSchema],
-    dialect: Option[Dialect],
-    notes: Option[ArrayNode],
     suppressOutput: Boolean,
-    annotations: mutable.Map[String, JsonNode]
+    annotations: mutable.Map[String, JsonNode],
+    id: Option[String] = None,
+    schema: Option[TableSchema] = None,
+    dialect: Option[Dialect] = None,
+    notes: Option[ArrayNode] = None
 ) {
 
   /**

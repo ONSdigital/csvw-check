@@ -321,7 +321,7 @@ class Validator(
   private def attemptToFindMatchingTableGroup(
       maybeCsvUri: Option[URI],
       possibleSchemaUri: URI
-  ): Either[CsvwLoadError, ParsedResult[TableGroup]] = {
+  ): Either[CsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
     try {
       fileUriToJson[ObjectNode](possibleSchemaUri)
         .flatMap(objectNode => {

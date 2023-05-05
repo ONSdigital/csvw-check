@@ -5,6 +5,7 @@ import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{DateFormatError, MetadataError, NumberFormatError}
 import csvwcheck.models.DateFormat
+import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import org.joda.time.DateTime
@@ -61,10 +62,12 @@ object PropertyChecker {
     (JsonNode, StringWarnings, PropertyType.Value)
   ]
 
-  private type ObjectPropertyParseResult =
-    Either[MetadataError, (String, Option[JsonNode], StringWarnings)]
   private type JsonNodeParser =
     (JsonNode, String, String) => JsonNodeParseResult
+
+  private type ObjectPropertyParseResult =
+    ParseResult[(String, Option[JsonNode], StringWarnings)]
+  private type ArrayElementParseResult = ParseResult[(Option[JsonNode], StringWarnings)]
 
   private val PropertyParsers: Map[String, JsonNodeParser] = Map(
     // Context Properties
@@ -129,6 +132,57 @@ object PropertyChecker {
   )
 
   private val validTrimValues = Array("true", "false", "start", "end")
+
+  def parseJsonProperty(
+                         property: String,
+                         value: JsonNode,
+                         baseUrl: String,
+                         lang: String
+                       ): ParseResult[(JsonNode, StringWarnings, PropertyType.Value)] = {
+    if (PropertyParsers.contains(property)) {
+      PropertyParsers(property)(value, baseUrl, lang)
+    } else if (
+      prefixedPropertyPattern
+        .matches(property) && NameSpaces.values.contains(property.split(":")(0))
+    ) {
+      parseCommonPropertyValue(value, baseUrl, lang)
+        .map({
+          case (parsedNode, warnings) =>
+            (parsedNode, warnings, PropertyType.Annotation)
+        })
+    } else {
+      // property name must be an absolute URI
+      asUri(property)
+        .map(_ => {
+          try {
+            parseCommonPropertyValue(value, baseUrl, lang)
+              .map({
+                case (newValue, warnings) =>
+                  (newValue, warnings, PropertyType.Annotation)
+              })
+          } catch {
+            case e: Exception =>
+              Right(
+                (
+                  value,
+                  Array[String](s"invalid_property ${e.getMessage}"),
+                  PropertyType.Undefined
+                )
+              )
+          }
+        })
+        .getOrElse(
+          // Not a valid URI, but it isn't as bad as a MetadataError
+          Right(
+            (
+              value,
+              Array[String]("invalid_property"),
+              PropertyType.Undefined
+            )
+          )
+        )
+    }
+  }
 
   def parseNullProperty(
       csvwPropertyType: PropertyType.Value
@@ -206,7 +260,7 @@ object PropertyChecker {
       objectNode: ObjectNode,
       baseUrl: String,
       lang: String
-  ): Either[MetadataError, (ObjectNode, StringWarnings)] = {
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
     objectNode.fields.asScala
       .map(keyAndValue => {
         val key = keyAndValue.getKey
@@ -256,7 +310,7 @@ object PropertyChecker {
 
   def parseDataTypeMinMaxValues(
       inputs: (ObjectNode, StringWarnings)
-  ): Either[MetadataError, (ObjectNode, StringWarnings)] = {
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
     val (dataTypeNode, stringWarnings) = inputs
     val baseDataType = dataTypeNode.get("base").asText
 
@@ -318,7 +372,7 @@ object PropertyChecker {
       maxInclusiveNode: Option[JsonNode],
       maxExclusiveNode: Option[JsonNode],
       stringWarnings: StringWarnings
-  ): Either[MetadataError, (ObjectNode, StringWarnings)] = {
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
 
     if (minimumNode.isDefined) {
       dataTypeNode.put("minInclusive", minimumNode.map(_.asText()).get)
@@ -577,7 +631,7 @@ object PropertyChecker {
 
   private def parseDataTypeLengths(
       inputs: (ObjectNode, StringWarnings)
-  ): Either[MetadataError, (ObjectNode, StringWarnings)] = {
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
     val (dataTypeNode: ObjectNode, _) = inputs
 
     val baseDataType = dataTypeNode.get("base").asText()
@@ -657,7 +711,7 @@ object PropertyChecker {
       value: JsonNode,
       baseUrl: String,
       lang: String
-  ): Either[MetadataError, (ObjectNode, StringWarnings)] = {
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
     value match {
       case dataTypeObjectNode: ObjectNode =>
         parseDataTypeObject(dataTypeObjectNode, baseUrl, lang)
@@ -686,7 +740,7 @@ object PropertyChecker {
       baseUrl: String,
       lang: String,
       valueNode: JsonNode
-  ): Either[MetadataError, (Option[JsonNode], StringWarnings)] = {
+  ): ParseResult[(Option[JsonNode], StringWarnings)] = {
     val idValue = valueNode.asText()
     if (XsdDataTypes.types.values.toList.contains(idValue)) {
       Left(
@@ -809,7 +863,7 @@ object PropertyChecker {
         value: JsonNode,
         inheritedBaseUrlStr: String,
         inheritedLanguage: String
-    ): Either[MetadataError, (JsonNode, StringWarnings, PropertyType.Value)] = {
+    ): ParseResult[(JsonNode, StringWarnings, PropertyType.Value)] = {
       val inheritedBaseUrl = new URL(inheritedBaseUrlStr)
       value match {
         case textNode: TextNode =>
@@ -924,7 +978,7 @@ object PropertyChecker {
       schemaJsonNode: ObjectNode,
       inheritedBaseUrl: URL,
       inheritedLang: String
-  ): Either[MetadataError, (URL, String)] = {
+  ): ParseResult[(URL, String)] = {
     schemaJsonNode
       .getMaybeNode("@context")
       .map(_ match {
@@ -982,7 +1036,7 @@ object PropertyChecker {
       foreignKey: JsonNode,
       baseUrl: String,
       lang: String
-  ): Either[MetadataError, (Option[JsonNode], Array[String])] = {
+  ): ParseResult[(Option[JsonNode], Array[String])] = {
     foreignKey match {
       case foreignKeyObjectNode: ObjectNode =>
         foreignKeyObjectNode.fields.asScala
@@ -1038,7 +1092,7 @@ object PropertyChecker {
       foreignKeyObjectNode: ObjectNode,
       baseUrl: String,
       language: String
-  ): Either[MetadataError, (ObjectNode, StringWarnings)] = {
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
     val columnReferenceProperty =
       foreignKeyObjectNode.getMaybeNode("columnReference")
     val resourceProperty = foreignKeyObjectNode.getMaybeNode("resource")
@@ -1186,7 +1240,7 @@ object PropertyChecker {
 
   def processNaturalLanguagePropertyObject(
       value: ObjectNode
-  ): Either[MetadataError, (ObjectNode, StringWarnings)] =
+  ): ParseResult[(ObjectNode, StringWarnings)] =
     value.fields.asScala
       .map(fieldAndValue => {
         val elementKey = fieldAndValue.getKey
@@ -1482,7 +1536,7 @@ object PropertyChecker {
       index: Int,
       baseUrl: String,
       lang: String
-  ): Either[MetadataError, (Option[JsonNode], StringWarnings)] = {
+  ): ParseResult[(Option[JsonNode], StringWarnings)] = {
     transformationElement
       .fields()
       .asScala
@@ -1534,57 +1588,6 @@ object PropertyChecker {
       })
   }
 
-  def parseJsonProperty(
-      property: String,
-      value: JsonNode,
-      baseUrl: String,
-      lang: String
-  ): Either[MetadataError, (JsonNode, StringWarnings, PropertyType.Value)] = {
-    if (PropertyParsers.contains(property)) {
-      PropertyParsers(property)(value, baseUrl, lang)
-    } else if (
-      prefixedPropertyPattern
-        .matches(property) && NameSpaces.values.contains(property.split(":")(0))
-    ) {
-      parseCommonPropertyValue(value, baseUrl, lang)
-        .map({
-          case (parsedNode, warnings) =>
-            (parsedNode, warnings, PropertyType.Annotation)
-        })
-    } else {
-      // property name must be an absolute URI
-      asUri(property)
-        .map(_ => {
-          try {
-            parseCommonPropertyValue(value, baseUrl, lang)
-              .map({
-                case (newValue, warnings) =>
-                  (newValue, warnings, PropertyType.Annotation)
-              })
-          } catch {
-            case e: Exception =>
-              Right(
-                (
-                  value,
-                  Array[String](s"invalid_property ${e.getMessage}"),
-                  PropertyType.Undefined
-                )
-              )
-          }
-        })
-        .getOrElse(
-          // Not a valid URI, but it isn't as bad as a MetadataError
-          Right(
-            (
-              value,
-              Array[String]("invalid_property"),
-              PropertyType.Undefined
-            )
-          )
-        )
-    }
-  }
-
   private def asUri(property: String): Option[URI] =
     Option(new URI(property))
       .filter(!_.getScheme.isEmpty)
@@ -1610,7 +1613,7 @@ object PropertyChecker {
       commonPropertyValueNode: JsonNode,
       baseUrl: String,
       defaultLang: String
-  ): Either[MetadataError, (JsonNode, StringWarnings)] = {
+  ): ParseResult[(JsonNode, StringWarnings)] = {
     commonPropertyValueNode match {
       case o: ObjectNode => parseCommonPropertyObject(o, baseUrl, defaultLang)
       case _: TextNode =>
@@ -1644,7 +1647,7 @@ object PropertyChecker {
       objectNode: ObjectNode,
       baseUrl: String,
       defaultLang: String
-  ): Either[MetadataError, (ObjectNode, StringWarnings)] = {
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
     objectNode
       .fields()
       .asScala
@@ -1694,7 +1697,7 @@ object PropertyChecker {
   private def parseCommonPropertyObjectId(
       baseUrl: String,
       v: JsonNode
-  ): Either[MetadataError, JsonNode] = {
+  ): ParseResult[JsonNode] = {
     if (baseUrl.isBlank) {
       Right(v)
     } else {
@@ -1760,7 +1763,7 @@ object PropertyChecker {
         value: JsonNode,
         baseUrl: String,
         lang: String
-    ): Either[MetadataError, (JsonNode, Array[String], PropertyType.Value)] = {
+    ): ParseResult[(JsonNode, Array[String], PropertyType.Value)] = {
       value match {
         case arrayNode: ArrayNode =>
           arrayNode
@@ -1793,7 +1796,7 @@ object PropertyChecker {
 
   private def processCommonPropertyObjectValue(
       value: ObjectNode
-  ): Either[MetadataError, JsonNode] = {
+  ): ParseResult[JsonNode] = {
     if (
       (!value
         .path("@type")
@@ -1825,7 +1828,7 @@ object PropertyChecker {
   private def parseCommonPropertyObjectLanguage(
       parentObjectNode: ObjectNode,
       languageValueNode: JsonNode
-  ): Either[MetadataError, JsonNode] = {
+  ): ParseResult[JsonNode] = {
     parentObjectNode
       .getMaybeNode("@value")
       .map(_ => {
@@ -1850,7 +1853,7 @@ object PropertyChecker {
       objectNode: ObjectNode,
       p: String,
       v: JsonNode
-  ): Either[MetadataError, (JsonNode, StringWarnings)] = {
+  ): ParseResult[(JsonNode, StringWarnings)] = {
     val valueNode = objectNode.getMaybeNode("@value")
     v match {
       case s: TextNode =>
@@ -1902,15 +1905,12 @@ object PropertyChecker {
           .toArrayNodeAndStringWarnings
     }
   }
-
-  implicit class MetadataErrorsOrArrayElements(
-      iterator: Iterator[
-        Either[MetadataError, (Option[JsonNode], StringWarnings)]
-      ]
+  implicit class MetadataErrorsOrParsedArrayElements(
+      iterator: Iterator[ArrayElementParseResult]
   ) {
     def toArrayNodeAndStringWarnings
-        : Either[MetadataError, (ArrayNode, StringWarnings)] = {
-      iterator.foldLeft[Either[MetadataError, (ArrayNode, StringWarnings)]](
+        : ParseResult[(ArrayNode, StringWarnings)] = {
+      iterator.foldLeft[ParseResult[(ArrayNode, StringWarnings)]](
         Right(JsonNodeFactory.instance.arrayNode(), Array())
       )({
         case (err @ Left(_), _)  => err
@@ -1935,14 +1935,12 @@ object PropertyChecker {
 
   }
 
-  implicit class MetadataErrorsOrObjectProperties(
-      iterator: Iterator[
-        Either[MetadataError, (String, Option[JsonNode], StringWarnings)]
-      ]
+  implicit class MetadataErrorsOrParsedObjectProperties(
+      iterator: Iterator[ObjectPropertyParseResult]
   ) {
     def toObjectNodeAndStringWarnings
-        : Either[MetadataError, (ObjectNode, StringWarnings)] = {
-      val accumulator: Either[MetadataError, (ObjectNode, StringWarnings)] =
+        : ParseResult[(ObjectNode, StringWarnings)] = {
+      val accumulator: ParseResult[(ObjectNode, StringWarnings)] =
         Right(JsonNodeFactory.instance.objectNode(), Array())
       iterator.foldLeft(accumulator)({
         case (err @ Left(_), _)  => err

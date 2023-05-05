@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors.MetadataError
+import csvwcheck.models.ParseResult.ParseResult
 
 import java.io.{File, PrintWriter, StringWriter}
 import java.net.URI
@@ -11,7 +12,7 @@ import java.net.URI
 object Schema {
   def loadMetadataAndValidate(
       schemaUri: URI
-  ): Either[String, (TableGroup, WarningsAndErrors)] = {
+  ): Either[String, WithWarningsAndErrors[TableGroup]] = {
     try {
       val jsonNode = if (schemaUri.getScheme == "file") {
         objectMapper.readTree(new File(schemaUri))
@@ -36,7 +37,7 @@ object Schema {
   def fromCsvwMetadata(
       uri: String,
       json: ObjectNode
-  ): Either[MetadataError, ParsedResult[TableGroup]] = {
+  ): ParseResult[WithWarningsAndErrors[TableGroup]] = {
     TableGroup.fromJson(json, uri)
   }
 
