@@ -344,8 +344,8 @@ object Column {
       baseUrl: String,
       lang: String,
       inheritedProperties: Map[String, JsonNode]
-  ): ParsedResult[ParsedColumnProperties] = {
-    val initialAccumulator: ParsedResult[ParsedColumnProperties] = Right(
+  ): ParseResult[ParsedColumnProperties] = {
+    val initialAccumulator: ParseResult[ParsedColumnProperties] = Right(
       ParsedColumnProperties(inherited = inheritedProperties)
     )
 

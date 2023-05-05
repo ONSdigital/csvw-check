@@ -238,7 +238,7 @@ object Table {
   ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
     parseRowTitles(tableSchemaObject, columns)
       .flatMap(rowTitleColumns =>
-        collectForeignKeyColumns(tableSchemaObject, columns)
+        parseForeignKeyColumns(tableSchemaObject, columns)
           .map(foreignKeyMappings => (rowTitleColumns, foreignKeyMappings))
       )
       .flatMap({
@@ -498,7 +498,7 @@ object Table {
       .getOrElse(Right(Array[Column]()))
   }
 
-  private def collectForeignKeyColumns(
+  private def parseForeignKeyColumns(
       tableSchemaObject: ObjectNode,
       columns: Array[Column]
   ): ParseResult[Array[ChildTableForeignKey]] = {
