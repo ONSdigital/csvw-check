@@ -324,21 +324,13 @@ class Validator(
   ): Either[CsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
     try {
       fileUriToJson[ObjectNode](possibleSchemaUri)
-        .flatMap(objectNode => {
-          try {
-            Right(
-              Schema.fromCsvwMetadata(
-                possibleSchemaUri.toString,
-                objectNode
-              )
-            )
-          } catch {
-            case metadataError: MetadataError =>
-              Left(GeneralCsvwLoadError(metadataError))
+        .flatMap(objectNode =>
+          Schema.fromCsvwMetadata(possibleSchemaUri.toString, objectNode) match {
+            case Right(tableGroup) => Right(tableGroup)
+            case Left(metadataError) => Left(GeneralCsvwLoadError(metadataError))
           }
-        })
-        .flatMap({
-          case parsedTableGroup =>
+        )
+        .flatMap(parsedTableGroup =>
             maybeCsvUri
               .map(csvUri => {
                 val workingWithUserSpecifiedMetadata = schemaUri.isDefined && possibleSchemaUri.toString == schemaUri.get
@@ -355,7 +347,7 @@ class Validator(
                 }
               })
               .getOrElse(Right(parsedTableGroup))
-        })
+        )
     } catch {
       case e: Throwable =>
         logger.debug(e)

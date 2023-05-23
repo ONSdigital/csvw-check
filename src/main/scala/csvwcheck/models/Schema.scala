@@ -19,14 +19,15 @@ object Schema {
       } else {
         objectMapper.readTree(schemaUri.toURL)
       }
-      Right(
-        Schema.fromCsvwMetadata(
-          schemaUri.toString,
-          jsonNode.asInstanceOf[ObjectNode]
-        )
-      )
+
+      Schema.fromCsvwMetadata(
+        schemaUri.toString,
+        jsonNode.asInstanceOf[ObjectNode]
+      ) match {
+        case Right(tableGroup) => Right(tableGroup)
+        case Left(metadataError) => Left(metadataError.getMessage)
+      }
     } catch {
-      case metadataError: MetadataError => Left(metadataError.getMessage)
       case e: Throwable =>
         val sw = new StringWriter
         e.printStackTrace(new PrintWriter(sw))

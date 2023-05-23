@@ -547,8 +547,8 @@ object PropertyChecker {
     } else if (
       PropertyCheckerConstants.NumericFormatDataTypes.contains(baseDataType)
     ) {
-      val (formatNode, stringWarnings) = parseDataTypeFormatNumeric(formatNode)
-      (Some(formatNode), stringWarnings)
+      val (parsedNode, stringWarnings) = parseDataTypeFormatNumeric(formatNode)
+      (Some(parsedNode), stringWarnings)
     } else if (baseDataType == "http://www.w3.org/2001/XMLSchema#boolean") {
       formatNode match {
         case formatTextNode: TextNode =>
@@ -589,14 +589,11 @@ object PropertyChecker {
 
   def parseDataTypeProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => Either[
-    MetadataError,
-    (
+  ): (JsonNode, String, String) => ParseResult[(
         ObjectNode,
         StringWarnings,
         PropertyType.Value
-    )
-  ] = { (value, baseUrl, lang) =>
+    )] = { (value, baseUrl, lang) =>
     {
       initialDataTypePropertyParse(value, baseUrl, lang)
         .flatMap(parseDataTypeLengths)
@@ -620,10 +617,10 @@ object PropertyChecker {
                 }
                 (parsedDataTypeNode, stringWarnings)
               })
-              .getOrElse((dataTypeNode, Array.empty))
+              .getOrElse((dataTypeNode, Array[String]()))
         })
         .map({
-          case (dataTypeNode: Any, stringWarnings) =>
+          case (dataTypeNode, stringWarnings) =>
             (dataTypeNode, stringWarnings, csvwPropertyType)
         })
     }
@@ -1004,7 +1001,7 @@ object PropertyChecker {
           }
         case _ => Right((inheritedBaseUrl, inheritedLang))
       })
-      .getOrElse((inheritedBaseUrl, inheritedLang))
+      .getOrElse(Right((inheritedBaseUrl, inheritedLang)))
   }
 
   def parseForeignKeysProperty(
