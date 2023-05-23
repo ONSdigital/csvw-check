@@ -53,7 +53,7 @@ object Table {
         getUrl(tableProperties).flatMap(url =>
           extractTableSchema(tableProperties, inheritedProperties) match {
             case Some(tableSchema) =>
-              parseTableSchema(
+              parseTable(
                 tableSchema,
                 inheritedProperties,
                 baseUrl,
@@ -205,7 +205,7 @@ object Table {
       .orElse(inheritedPropertiesCopy.get("tableSchema"))
   }
 
-  private def parseTableSchema(
+  private def parseTable(
       tableSchema: JsonNode,
       inheritedProperties: mutable.Map[String, JsonNode],
       baseUrl: String,
