@@ -5,8 +5,8 @@ case class ValidateRowOutput(
     warningsAndErrors: WarningsAndErrors = WarningsAndErrors(),
     primaryKeyValues: List[Any] = List(),
     parentTableForeignKeyReferences: Map[
-      ParentTableForeignKeyReference,
+      ReferencedTableForeignKeyReference,
       KeyWithContext
     ] = Map(),
-    childTableForeignKeys: Map[ChildTableForeignKey, KeyWithContext] = Map()
+    childTableForeignKeys: Map[ForeignKeyDefinition, KeyWithContext] = Map()
 )

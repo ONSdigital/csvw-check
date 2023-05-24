@@ -365,7 +365,7 @@ object Table {
   private def parseForeignKeyColumns(
       tableSchemaObject: ObjectNode,
       columns: Array[Column]
-  ): ParseResult[Array[ChildTableForeignKey]] = {
+  ): ParseResult[Array[ForeignKeyDefinition]] = {
     tableSchemaObject
       .getMaybeNode("foreignKeys")
       .map({
@@ -383,7 +383,7 @@ object Table {
                   )
                 )
             })
-            .foldLeft[ParseResult[Array[ChildTableForeignKey]]](Right(Array()))({
+            .foldLeft[ParseResult[Array[ForeignKeyDefinition]]](Right(Array()))({
               case (err @ Left(_), _) => err
               case (_, Left(newErr))  => Left(newErr)
               case (Right(foreignKeys), Right(newForeignKey)) =>
@@ -402,7 +402,7 @@ object Table {
   private def parseForeignKeyObjectNode(
       foreignKeyObjectNode: ObjectNode,
       columns: Array[Column]
-  ): ParseResult[ChildTableForeignKey] = {
+  ): ParseResult[ForeignKeyDefinition] = {
     foreignKeyObjectNode
       .getMaybeNode("columnReference")
       .map({
@@ -432,7 +432,7 @@ object Table {
       foreignKeyObjectNode: ObjectNode,
       columnReferenceArrayNode: ArrayNode,
       columns: Array[Column]
-  ): ParseResult[ChildTableForeignKey] = {
+  ): ParseResult[ForeignKeyDefinition] = {
     columnReferenceArrayNode
       .elements()
       .asScala
@@ -463,7 +463,7 @@ object Table {
           Right(foreignKeyColumns :+ newForeignKeyColumn)
       })
       .map(foreignKeyColumns =>
-        ChildTableForeignKey(foreignKeyObjectNode, foreignKeyColumns)
+        ForeignKeyDefinition(foreignKeyObjectNode, foreignKeyColumns)
       )
   }
 
@@ -787,11 +787,11 @@ object Table {
 }
 
 case class TableSchema(
-    columns: Array[Column],
-    primaryKey: Array[Column],
-    rowTitleColumns: Array[Column],
-    foreignKeys: Array[ChildTableForeignKey],
-    schemaId: Option[String]
+                        columns: Array[Column],
+                        primaryKey: Array[Column],
+                        rowTitleColumns: Array[Column],
+                        foreignKeys: Array[ForeignKeyDefinition],
+                        schemaId: Option[String]
 )
 
 case class Table private (
@@ -801,24 +801,22 @@ case class Table private (
     id: Option[String] = None,
     schema: Option[TableSchema] = None,
     dialect: Option[Dialect] = None,
-    notes: Option[ArrayNode] = None
+    notes: Option[ArrayNode] = None,
+    // This array contains the foreign keys defined in other tables' schemas which reference data inside this table.
+    foreignKeyReferences: Array[ReferencedTableForeignKeyReference] = Array()
 ) {
 
-  /**
-    * This array contains the foreign keys defined in other tables' schemas which reference data inside this table.
-    */
-  var foreignKeyReferences: Array[ParentTableForeignKeyReference] = Array()
 
   def validateRow(row: CSVRecord): ValidateRowOutput = {
     var errors = Array[ErrorWithCsvContext]()
     val primaryKeyValues = ArrayBuffer.empty[Any]
     val foreignKeyReferenceValues =
       ArrayBuffer.empty[
-        (ParentTableForeignKeyReference, List[Any])
+        (ReferencedTableForeignKeyReference, List[Any])
       ] // to store the validated referenced Table Columns values in each row
     val foreignKeyValues = {
       ArrayBuffer.empty[
-        (ChildTableForeignKey, List[Any])
+        (ForeignKeyDefinition, List[Any])
       ] // to store the validated foreign key values in each row
     }
 
@@ -842,7 +840,7 @@ case class Table private (
 
         for (foreignKeyReferenceObject <- foreignKeyReferences) {
           if (
-            foreignKeyReferenceObject.parentTableReferencedColumns.contains(
+            foreignKeyReferenceObject.referencedTableReferencedColumns.contains(
               column
             )
           ) {
@@ -870,9 +868,9 @@ case class Table private (
   }
 
   private def getChildForeignKeys(
-      foreignKeyValues: List[(ChildTableForeignKey, List[Any])],
-      row: CSVRecord
-  ): Predef.Map[ChildTableForeignKey, KeyWithContext] = {
+                                   foreignKeyValues: List[(ForeignKeyDefinition, List[Any])],
+                                   row: CSVRecord
+  ): Predef.Map[ForeignKeyDefinition, KeyWithContext] = {
     foreignKeyValues
       .groupBy {
         case (k, _) => k
@@ -885,10 +883,10 @@ case class Table private (
 
   private def getParentTableForeignKeys(
       foreignKeyReferenceValues: List[
-        (ParentTableForeignKeyReference, List[Any])
+        (ReferencedTableForeignKeyReference, List[Any])
       ],
       row: CSVRecord
-  ): Predef.Map[ParentTableForeignKeyReference, KeyWithContext] = {
+  ): Predef.Map[ReferencedTableForeignKeyReference, KeyWithContext] = {
     foreignKeyReferenceValues
       .groupBy {
         case (k, _) => k

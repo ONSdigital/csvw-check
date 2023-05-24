@@ -32,9 +32,9 @@ class Validator(
     httpClient: SttpBackend[Identity, Any] = HttpClientSyncBackend()
 ) {
   type ForeignKeys =
-    mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]]
+    mutable.Map[ForeignKeyDefinition, mutable.Set[KeyWithContext]]
   type ForeignKeyReferences =
-    mutable.Map[ParentTableForeignKeyReference, mutable.Set[KeyWithContext]]
+    mutable.Map[ReferencedTableForeignKeyReference, mutable.Set[KeyWithContext]]
   type MapTableToForeignKeys = mutable.Map[Table, ForeignKeys]
   type MapTableToForeignKeyReferences = mutable.Map[Table, ForeignKeyReferences]
   type TableState =
@@ -42,10 +42,10 @@ class Validator(
   type TableStateWithPrimaryKeyHashes = (
       ArrayBuffer[WarningWithCsvContext], // Collection of warnings
       ArrayBuffer[ErrorWithCsvContext], // Collection of errors
-      mutable.Map[ChildTableForeignKey, mutable.Set[
+      mutable.Map[ForeignKeyDefinition, mutable.Set[
         KeyWithContext
       ]], // Map of childTableForeignKey to Set[KeyWithContext]
-      mutable.Map[ParentTableForeignKeyReference, mutable.Set[
+      mutable.Map[ReferencedTableForeignKeyReference, mutable.Set[
         KeyWithContext
       ]], // Map of parentTableForeignKey reference
       // to Set[KeyWithContext]
@@ -299,8 +299,8 @@ class Validator(
         val collection = List(
           (
             warningsAndErrors,
-            mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]](),
-            mutable.Map[ParentTableForeignKeyReference, mutable.Set[
+            mutable.Map[ForeignKeyDefinition, mutable.Set[KeyWithContext]](),
+            mutable.Map[ReferencedTableForeignKeyReference, mutable.Set[
               KeyWithContext
             ]]()
           )
@@ -485,8 +485,8 @@ class Validator(
   ): Source[
     (
         WarningsAndErrors,
-        mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]],
-        mutable.Map[ParentTableForeignKeyReference, mutable.Set[
+        mutable.Map[ForeignKeyDefinition, mutable.Set[KeyWithContext]],
+        mutable.Map[ReferencedTableForeignKeyReference, mutable.Set[
           KeyWithContext
         ]]
     ),
@@ -586,11 +586,11 @@ class Validator(
   private def extractInformationFromValidateRowOutputs(
       warnings: ArrayBuffer[WarningWithCsvContext],
       errors: ArrayBuffer[ErrorWithCsvContext],
-      childTableForeignKeys: mutable.Map[ChildTableForeignKey, mutable.Set[
+      childTableForeignKeys: mutable.Map[ForeignKeyDefinition, mutable.Set[
         KeyWithContext
       ]],
       parentTableForeignKeys: mutable.Map[
-        ParentTableForeignKeyReference,
+        ReferencedTableForeignKeyReference,
         mutable.Set[KeyWithContext]
       ],
       mapPrimaryKeyHashToRowNumbers: mutable.Map[Int, ArrayBuffer[Long]],
@@ -631,8 +631,8 @@ class Validator(
   ): Source[
     (
         WarningsAndErrors,
-        mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]],
-        mutable.Map[ParentTableForeignKeyReference, mutable.Set[
+        mutable.Map[ForeignKeyDefinition, mutable.Set[KeyWithContext]],
+        mutable.Map[ReferencedTableForeignKeyReference, mutable.Set[
           KeyWithContext
         ]]
     ),
@@ -817,7 +817,7 @@ class Validator(
   private def setParentTableForeignKeyReferences(
       validateRowOutput: ValidateRowOutput,
       parentTableForeignKeyReferences: mutable.Map[
-        ParentTableForeignKeyReference,
+        ReferencedTableForeignKeyReference,
         mutable.Set[
           KeyWithContext
         ]
@@ -842,7 +842,7 @@ class Validator(
 
   private def setChildTableForeignKeys(
       validateRowOutput: ValidateRowOutput,
-      childTableForeignKeys: mutable.Map[ChildTableForeignKey, mutable.Set[
+      childTableForeignKeys: mutable.Map[ForeignKeyDefinition, mutable.Set[
         KeyWithContext
       ]]
   ): Unit = {
@@ -861,11 +861,11 @@ class Validator(
   private def validateForeignKeyReferences(
       childTableForeignKeysByTable: mutable.Map[
         Table,
-        mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]]
+        mutable.Map[ForeignKeyDefinition, mutable.Set[KeyWithContext]]
       ],
       parentTableForeignKeyReferencesByTable: mutable.Map[
         Table,
-        mutable.Map[ParentTableForeignKeyReference, mutable.Set[KeyWithContext]]
+        mutable.Map[ReferencedTableForeignKeyReference, mutable.Set[KeyWithContext]]
       ]
   ): Errors = {
     // Child Table : Parent Table
@@ -882,12 +882,12 @@ class Validator(
           mapParentTableForeignKeyReferenceToAllPossibleValues
       ) {
         val childTableForeignKeys
-            : mutable.Map[ChildTableForeignKey, mutable.Set[KeyWithContext]] =
+            : mutable.Map[ForeignKeyDefinition, mutable.Set[KeyWithContext]] =
           childTableForeignKeysByTable
             .getOrElse(
-              parentTableForeignKeyReference.childTable,
+              parentTableForeignKeyReference.definitionTable,
               throw new Exception(
-                s"Could not find corresponding child table(${parentTableForeignKeyReference.childTable.url}) for parent table ${parentTable.url}"
+                s"Could not find corresponding child table(${parentTableForeignKeyReference.definitionTable.url}) for parent table ${parentTable.url}"
               )
             )
 
