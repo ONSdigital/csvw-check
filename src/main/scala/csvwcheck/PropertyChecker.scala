@@ -17,6 +17,18 @@ import scala.language.implicitConversions
 import scala.util.matching.Regex
 
 object PropertyChecker {
+
+  type StringWarnings = Array[String]
+  private type JsonNodeParseResult = Either[
+    MetadataError,
+    (JsonNode, StringWarnings, PropertyType.Value)
+  ]
+  private type JsonNodeParser =
+    (JsonNode, String, String) => JsonNodeParseResult
+  private type ObjectPropertyParseResult =
+    ParseResult[(String, Option[JsonNode], StringWarnings)]
+  private type ArrayElementParseResult =
+    ParseResult[(Option[JsonNode], StringWarnings)]
   private val startsWithUnderscore = "^_:.*$".r
   private val containsColon = ".*:.*".r
   private val invalidValueWarning = "invalid_value"
@@ -40,11 +52,7 @@ object PropertyChecker {
     "(" + Bcp47Language + "(-" + Bcp47Script + ")?" + "(-" + Bcp47Region + ")?" + "(-" + Bcp47Variant + ")*" + "(-" + Bcp47Extension + ")*" + "(-" + Bcp47PrivateUse + ")?" + ")"
   private val Bcp47LanguagetagRegExp: Regex =
     ("^(" + Bcp47Grandfathered + "|" + Bcp47Langtag + "|" + Bcp47PrivateUse + ")").r
-
   private val prefixedPropertyPattern = "^[a-z]+:.*$".r
-
-  type StringWarnings = Array[String]
-
   private val CsvWDataTypes = Array[String](
     "TableGroup",
     "Table",
@@ -54,21 +62,8 @@ object PropertyChecker {
     "Template",
     "Datatype"
   )
-
   private val NameRegExp =
     "^([A-Za-z0-9]|(%[A-F0-9][A-F0-9]))([A-Za-z0-9_]|(%[A-F0-9][A-F0-9]))*$".r
-  private type JsonNodeParseResult = Either[
-    MetadataError,
-    (JsonNode, StringWarnings, PropertyType.Value)
-  ]
-
-  private type JsonNodeParser =
-    (JsonNode, String, String) => JsonNodeParseResult
-
-  private type ObjectPropertyParseResult =
-    ParseResult[(String, Option[JsonNode], StringWarnings)]
-  private type ArrayElementParseResult = ParseResult[(Option[JsonNode], StringWarnings)]
-
   private val PropertyParsers: Map[String, JsonNodeParser] = Map(
     // Context Properties
     "@language" -> parseLanguageProperty(PropertyType.Context),
@@ -134,11 +129,11 @@ object PropertyChecker {
   private val validTrimValues = Array("true", "false", "start", "end")
 
   def parseJsonProperty(
-                         property: String,
-                         value: JsonNode,
-                         baseUrl: String,
-                         lang: String
-                       ): ParseResult[(JsonNode, StringWarnings, PropertyType.Value)] = {
+      property: String,
+      value: JsonNode,
+      baseUrl: String,
+      lang: String
+  ): ParseResult[(JsonNode, StringWarnings, PropertyType.Value)] = {
     if (PropertyParsers.contains(property)) {
       PropertyParsers(property)(value, baseUrl, lang)
     } else if (
@@ -274,7 +269,13 @@ object PropertyChecker {
           case "base" =>
             val baseValue = valueNode.asText()
             if (XsdDataTypes.types.contains(baseValue)) {
-              Right(("base", Some(new TextNode(baseValue)), Array[String]()))
+              Right(
+                (
+                  "base",
+                  Some(new TextNode(XsdDataTypes.types(baseValue))),
+                  Array[String]()
+                )
+              )
             } else {
               Right(
                 (
@@ -312,8 +313,15 @@ object PropertyChecker {
       inputs: (ObjectNode, StringWarnings)
   ): ParseResult[(ObjectNode, StringWarnings)] = {
     val (dataTypeNode, stringWarnings) = inputs
-    val baseDataType = dataTypeNode.get("base").asText
+    dataTypeNode.getMaybeNode("base")
+      .map({
+        case baseDataTypeNode: TextNode => parseDataTypeMinMaxValuesForBaseType(dataTypeNode, stringWarnings, baseDataTypeNode.asText)
+        case baseNode => Left(MetadataError(s"Unexpected base data type value: ${baseNode.toPrettyString}"))
+      })
+      .getOrElse(Right(inputs))
+  }
 
+  private def parseDataTypeMinMaxValuesForBaseType(dataTypeNode: ObjectNode, existingStringWarnings: StringWarnings, baseDataType: String): ParseResult[(ObjectNode, StringWarnings)] = {
     val minimumNode = dataTypeNode.getMaybeNode("minimum")
     val minInclusiveNode = dataTypeNode.getMaybeNode("minInclusive")
     val minExclusiveNode = dataTypeNode.getMaybeNode("minExclusive")
@@ -338,7 +346,7 @@ object PropertyChecker {
         minExclusiveNode,
         maxInclusiveNode,
         maxExclusiveNode,
-        stringWarnings
+        existingStringWarnings
       )
     } else {
       // Only date and numeric types as permitted min/max/etc. values
@@ -358,169 +366,7 @@ object PropertyChecker {
           )
         )
       }
-      Right(inputs)
-    }
-  }
-
-  private def parseMinMaxRanges(
-      dataTypeNode: ObjectNode,
-      baseDataType: String,
-      minimumNode: Option[JsonNode],
-      maximumNode: Option[JsonNode],
-      minInclusiveNode: Option[JsonNode],
-      minExclusiveNode: Option[JsonNode],
-      maxInclusiveNode: Option[JsonNode],
-      maxExclusiveNode: Option[JsonNode],
-      stringWarnings: StringWarnings
-  ): ParseResult[(ObjectNode, StringWarnings)] = {
-
-    if (minimumNode.isDefined) {
-      dataTypeNode.put("minInclusive", minimumNode.map(_.asText()).get)
-      dataTypeNode.remove("minimum")
-    }
-
-    if (maximumNode.isDefined) {
-      dataTypeNode.put("maxInclusive", maximumNode.map(_.asText()).get)
-      dataTypeNode.remove("maximum")
-    }
-
-    val minInclusive: Option[String] = getDataTypeRangeConstraint(
-      minInclusiveNode
-    )
-    val maxInclusive: Option[String] = getDataTypeRangeConstraint(
-      maxInclusiveNode
-    )
-    val minExclusive: Option[String] = getDataTypeRangeConstraint(
-      minExclusiveNode
-    )
-    val maxExclusive: Option[String] = getDataTypeRangeConstraint(
-      maxExclusiveNode
-    )
-
-    (minInclusive, minExclusive, maxInclusive, maxExclusive) match {
-      case (Some(minI), Some(minE), _, _) =>
-        Left(
-          MetadataError(
-            s"datatype cannot specify both minimum/minInclusive ($minI) and minExclusive ($minE)"
-          )
-        )
-      case (_, _, Some(maxI), Some(maxE)) =>
-        Left(
-          MetadataError(
-            s"datatype cannot specify both maximum/maxInclusive ($maxI) and maxExclusive ($maxE)"
-          )
-        )
-      case _ =>
-        if (
-          PropertyCheckerConstants.NumericFormatDataTypes.contains(baseDataType)
-        ) {
-          parseMinMaxNumericRanges(
-            dataTypeNode,
-            stringWarnings,
-            minInclusive,
-            maxInclusive,
-            minExclusive,
-            maxExclusive
-          )
-        } else if (
-          PropertyCheckerConstants.DateFormatDataTypes.contains(baseDataType)
-        ) {
-          parseMinMaxDateTimeRanges(
-            dataTypeNode,
-            stringWarnings,
-            minInclusive,
-            maxInclusive,
-            minExclusive,
-            maxExclusive
-          )
-        }
-        throw new IllegalArgumentException(
-          s"Base data type was neither numeric note date/time - $baseDataType"
-        )
-    }
-  }
-
-  private def parseMinMaxDateTimeRanges(
-      dataTypeNode: ObjectNode,
-      stringWarnings: StringWarnings,
-      minInclusive: Option[String],
-      maxInclusive: Option[String],
-      minExclusive: Option[String],
-      maxExclusive: Option[String]
-  ) = {
-    (
-      minInclusive.map(DateTime.parse),
-      minExclusive.map(DateTime.parse),
-      maxInclusive.map(DateTime.parse),
-      maxExclusive.map(DateTime.parse)
-    ) match {
-      case (Some(minI), _, Some(maxI), _) if minI.getMillis > maxI.getMillis =>
-        Left(
-          MetadataError(
-            s"datatype minInclusive ($minI) cannot be greater than maxInclusive ($maxI)"
-          )
-        )
-      case (Some(minI), _, _, Some(maxE)) if minI.getMillis >= maxE.getMillis =>
-        Left(
-          MetadataError(
-            s"datatype minInclusive ($minI) cannot be greater than or equal to maxExclusive ($maxE)"
-          )
-        )
-      case (_, Some(minE), _, Some(maxE)) if minE.getMillis > maxE.getMillis =>
-        Left(
-          MetadataError(
-            s"datatype minExclusive ($minE) cannot be greater than or equal to maxExclusive ($maxE)"
-          )
-        )
-      case (_, Some(minE), Some(maxI), _) if minE.getMillis >= maxI.getMillis =>
-        Left(
-          MetadataError(
-            s"datatype minExclusive ($minE) cannot be greater than maxInclusive ($maxI)"
-          )
-        )
-      case _ => Right((dataTypeNode, stringWarnings))
-    }
-  }
-
-  private def parseMinMaxNumericRanges(
-      dataTypeNode: ObjectNode,
-      stringWarnings: StringWarnings,
-      minInclusive: Option[String],
-      maxInclusive: Option[String],
-      minExclusive: Option[String],
-      maxExclusive: Option[String]
-  ) = {
-    (
-      minInclusive.map(BigDecimal(_)),
-      minExclusive.map(BigDecimal(_)),
-      maxInclusive.map(BigDecimal(_)),
-      maxExclusive.map(BigDecimal(_))
-    ) match {
-      case (Some(minI), _, Some(maxI), _) if minI > maxI =>
-        Left(
-          MetadataError(
-            s"datatype minInclusive ($minI) cannot be greater than maxInclusive ($maxI)"
-          )
-        )
-      case (Some(minI), _, _, Some(maxE)) if minI >= maxE =>
-        Left(
-          MetadataError(
-            s"datatype minInclusive ($minI) cannot be greater than or equal to maxExclusive ($maxE)"
-          )
-        )
-      case (_, Some(minE), _, Some(maxE)) if minE > maxE =>
-        Left(
-          MetadataError(
-            s"datatype minExclusive ($minE) cannot be greater than or equal to maxExclusive ($maxE)"
-          )
-        )
-      case (_, Some(minE), Some(maxI), _) if minE >= maxI =>
-        Left(
-          MetadataError(
-            s"datatype minExclusive ($minE) cannot be greater than maxInclusive ($maxI)"
-          )
-        )
-      case _ => Right((dataTypeNode, stringWarnings))
+      Right((dataTypeNode, existingStringWarnings))
     }
   }
 
@@ -589,22 +435,24 @@ object PropertyChecker {
 
   def parseDataTypeProperty(
       csvwPropertyType: PropertyType.Value
-  ): (JsonNode, String, String) => ParseResult[(
+  ): (JsonNode, String, String) => ParseResult[
+    (
         ObjectNode,
         StringWarnings,
         PropertyType.Value
-    )] = { (value, baseUrl, lang) =>
+    )
+  ] = { (value, baseUrl, lang) =>
     {
       initialDataTypePropertyParse(value, baseUrl, lang)
         .flatMap(parseDataTypeLengths)
         .flatMap(parseDataTypeMinMaxValues)
         .map({
-          case (dataTypeNode, _) =>
+          case (dataTypeNode, stringWarnings) =>
             dataTypeNode
               .getMaybeNode("format")
               .map(formatNode => {
                 val baseDataType = dataTypeNode.get("base").asText()
-                val (formatNodeReplacement, stringWarnings) =
+                val (formatNodeReplacement, newStringWarnings) =
                   parseDataTypeFormat(formatNode, baseDataType)
                 val parsedDataTypeNode = formatNodeReplacement match {
                   case Some(newNode) =>
@@ -615,7 +463,7 @@ object PropertyChecker {
                       .remove("format")
                       .asInstanceOf[ObjectNode]
                 }
-                (parsedDataTypeNode, stringWarnings)
+                (parsedDataTypeNode, stringWarnings ++ newStringWarnings)
               })
               .getOrElse((dataTypeNode, Array[String]()))
         })
@@ -623,137 +471,6 @@ object PropertyChecker {
           case (dataTypeNode, stringWarnings) =>
             (dataTypeNode, stringWarnings, csvwPropertyType)
         })
-    }
-  }
-
-  private def parseDataTypeLengths(
-      inputs: (ObjectNode, StringWarnings)
-  ): ParseResult[(ObjectNode, StringWarnings)] = {
-    val (dataTypeNode: ObjectNode, _) = inputs
-
-    val baseDataType = dataTypeNode.get("base").asText()
-
-    val lengthNode = dataTypeNode.getMaybeNode("length")
-    val minLengthNode = dataTypeNode.getMaybeNode("minLength")
-    val maxLengthNode = dataTypeNode.getMaybeNode("maxLength")
-
-    if (
-      PropertyCheckerConstants.StringDataTypes.contains(
-        baseDataType
-      ) || PropertyCheckerConstants.BinaryDataTypes.contains(baseDataType)
-    ) {
-      // String and Binary data types are permitted length/minLength/maxLength fields.
-
-      if (
-        lengthNode.exists(len =>
-          minLengthNode.exists(minLen => len.asInt < minLen.asInt)
-        )
-      ) {
-        Left(
-          MetadataError(
-            s"datatype length (${lengthNode.map(_.asInt).get}) cannot be less than minLength (${minLengthNode.map(_.asInt).get})"
-          )
-        )
-      } else if (
-        lengthNode.exists(len =>
-          maxLengthNode.exists(maxLen => len.asInt > maxLen.asInt)
-        )
-      ) {
-        Left(
-          MetadataError(
-            s"datatype length (${lengthNode.map(_.asInt)}) cannot be more than maxLength (${maxLengthNode
-              .map(_.asInt)})"
-          )
-        )
-      } else if (
-        minLengthNode
-          .exists(min => maxLengthNode.exists(max => min.asInt > max.asInt))
-      ) {
-        Left(
-          MetadataError(
-            s"datatype minLength (${minLengthNode.map(_.asInt)}) cannot be more than maxLength (${maxLengthNode
-              .map(_.asInt)})"
-          )
-        )
-      } else {
-        Right(inputs)
-      }
-    } else {
-      // length, minLength and maxLength are only permitted on String and Binary data types.
-      if (lengthNode.isDefined) {
-        Left(
-          MetadataError(
-            s"Data types based on $baseDataType cannot have a length facet"
-          )
-        )
-      } else if (minLengthNode.isDefined) {
-        Left(
-          MetadataError(
-            s"Data types based on $baseDataType cannot have a minLength facet"
-          )
-        )
-      } else if (maxLengthNode.isDefined) {
-        Left(
-          MetadataError(
-            s"Data types based on $baseDataType cannot have a maxLength facet"
-          )
-        )
-      } else {
-        Right(inputs)
-      }
-    }
-  }
-
-  private def initialDataTypePropertyParse(
-      value: JsonNode,
-      baseUrl: String,
-      lang: String
-  ): ParseResult[(ObjectNode, StringWarnings)] = {
-    value match {
-      case dataTypeObjectNode: ObjectNode =>
-        parseDataTypeObject(dataTypeObjectNode, baseUrl, lang)
-      case x: TextNode if XsdDataTypes.types.contains(x.asText()) =>
-        Right(
-          (
-            objectMapper.createObjectNode
-              .put("@id", XsdDataTypes.types(x.asText())),
-            Array[String]()
-          )
-        )
-      case _: TextNode =>
-        Right(
-          (
-            objectMapper.createObjectNode
-              .put("@id", XsdDataTypes.types("string")),
-            Array(PropertyChecker.invalidValueWarning)
-          )
-        )
-      case _ =>
-        throw new IllegalArgumentException(s"Unhandled data type $value")
-    }
-  }
-
-  private def parseDataTypeObjectIdNode(
-      baseUrl: String,
-      lang: String,
-      valueNode: JsonNode
-  ): ParseResult[(Option[JsonNode], StringWarnings)] = {
-    val idValue = valueNode.asText()
-    if (XsdDataTypes.types.values.toList.contains(idValue)) {
-      Left(
-        MetadataError(
-          s"datatype @id must not be the id of a built-in datatype ($idValue)"
-        )
-      )
-    } else {
-      parseUrlLinkProperty(PropertyType.Common)(
-        valueNode,
-        baseUrl,
-        lang
-      ).map({
-        case (linkNode, warns @ Array(), _) => (Some(linkNode), warns)
-        case (_, warns, _)                  => (None, warns)
-      })
     }
   }
 
@@ -785,28 +502,6 @@ object PropertyChecker {
           )
       }
     }
-  }
-
-  private def getDataTypeRangeConstraint(
-      maybeConstraintNode: Option[JsonNode]
-  ): Option[String] = {
-    maybeConstraintNode.flatMap(constraintNode =>
-      constraintNode match {
-        case rangeConstraint: ObjectNode =>
-          rangeConstraint
-            .getMaybeNode("dateTime")
-            .map(rangeConstraint => rangeConstraint.asText())
-        case rangeConstraint: TextNode =>
-          Some(rangeConstraint.asText())
-        case rangeConstraint: IntNode =>
-          Some(rangeConstraint.asText())
-        case rangeConstraint: DecimalNode =>
-          Some(rangeConstraint.asText())
-        case rangeConstraint: LongNode =>
-          Some(rangeConstraint.asText())
-      }
-    )
-
   }
 
   def parseDataTypeFormatNumeric(
@@ -1078,71 +773,10 @@ object PropertyChecker {
           baseUrl,
           language
         ).map({
-            case (parsedObject, stringWarnings) =>
-              (parsedObject, stringWarnings, csvwPropertyType)
-          })
+          case (parsedObject, stringWarnings) =>
+            (parsedObject, stringWarnings, csvwPropertyType)
+        })
       case _ => Left(MetadataError("foreignKey reference is not an object"))
-    }
-  }
-
-  private def parseForeignKeyReferenceObjectNode(
-      foreignKeyObjectNode: ObjectNode,
-      baseUrl: String,
-      language: String
-  ): ParseResult[(ObjectNode, StringWarnings)] = {
-    val columnReferenceProperty =
-      foreignKeyObjectNode.getMaybeNode("columnReference")
-    val resourceProperty = foreignKeyObjectNode.getMaybeNode("resource")
-    val schemaReferenceProperty =
-      foreignKeyObjectNode.getMaybeNode("schemaReference")
-
-    (columnReferenceProperty, resourceProperty, schemaReferenceProperty) match {
-      case (None, _, _) =>
-        Left(MetadataError("foreignKey reference columnReference is missing"))
-      case (_, None, None) =>
-        Left(
-          MetadataError(
-            "foreignKey reference does not have either resource or schemaReference"
-          )
-        )
-      case (_, Some(_), Some(_)) =>
-        Left(
-          MetadataError(
-            "foreignKey reference has both resource and schemaReference"
-          )
-        )
-      case _ =>
-        foreignKeyObjectNode
-          .fields()
-          .asScala
-          .map(keyValuePair => {
-            val propertyName = keyValuePair.getKey
-            val propertyValue = keyValuePair.getValue
-            // Check if property is included in the valid properties for a foreign key object
-            if (
-              Array[String]("resource", "schemaReference", "columnReference")
-                .contains(propertyName)
-            ) {
-              parseJsonProperty(propertyName, propertyValue, baseUrl, language)
-                .map({
-                  case (newValue, Array(), _) =>
-                    (propertyName, Some(newValue), Array[String]())
-                  case (_, stringWarnings, _) =>
-                    (propertyName, None, stringWarnings)
-                })
-            } else if (PropertyChecker.containsColon.matches(propertyName)) {
-              Left(
-                MetadataError(
-                  s"foreignKey reference ($propertyName) includes a prefixed (common) property"
-                )
-              )
-            } else {
-              Right(
-                (propertyName, None, Array(PropertyChecker.invalidValueWarning))
-              )
-            }
-          })
-          .toObjectNodeAndStringWarnings
     }
   }
 
@@ -1183,23 +817,6 @@ object PropertyChecker {
       }
     }
   }
-
-  def getValidTextualElementsFromArray(
-      a: ArrayNode
-  ): (Array[String], StringWarnings) =
-    a.elements()
-      .asScala
-      .map({
-        case s: TextNode => Right(s.asText())
-        case _ =>
-          Left(a.toPrettyString + " is invalid, textual elements expected")
-      })
-      .foldLeft((Array[String](), Array[String]()))({
-        case ((validColumnNames, stringWarnings), Right(validColumnName)) =>
-          (validColumnNames :+ validColumnName, stringWarnings)
-        case ((validColumnNames, stringWarnings), Left(stringWarning)) =>
-          (validColumnNames, stringWarnings :+ stringWarning)
-      })
 
   def parseNaturalLanguageProperty(
       csvwPropertyType: PropertyType.Value
@@ -1262,6 +879,23 @@ object PropertyChecker {
         }
       })
       .toObjectNodeAndStringWarnings
+
+  def getValidTextualElementsFromArray(
+      a: ArrayNode
+  ): (Array[String], StringWarnings) =
+    a.elements()
+      .asScala
+      .map({
+        case s: TextNode => Right(s.asText())
+        case _ =>
+          Left(a.toPrettyString + " is invalid, textual elements expected")
+      })
+      .foldLeft((Array[String](), Array[String]()))({
+        case ((validColumnNames, stringWarnings), Right(validColumnName)) =>
+          (validColumnNames :+ validColumnName, stringWarnings)
+        case ((validColumnNames, stringWarnings), Left(stringWarning)) =>
+          (validColumnNames, stringWarnings :+ stringWarning)
+      })
 
   def parseNameProperty(
       csvwPropertyType: PropertyType.Value
@@ -1452,44 +1086,6 @@ object PropertyChecker {
     }
   }
 
-  private def parseDialectObjectProperty(
-      baseUrl: String,
-      lang: String,
-      key: String,
-      valueNode: JsonNode
-  ): ObjectPropertyParseResult = {
-    key match {
-      case "@id" =>
-        if (PropertyChecker.startsWithUnderscore.matches(valueNode.asText())) {
-          Left(MetadataError("@id starts with _:"))
-        } else {
-          Right(key, Some(valueNode), Array())
-        }
-      case "@type" =>
-        if (valueNode.asText() == "Dialect") {
-          Right(key, Some(valueNode), Array())
-        } else {
-          Left(MetadataError("@type of dialect is not 'Dialect'"))
-        }
-      case _ =>
-        parseJsonProperty(key, valueNode, baseUrl, lang)
-          .map({
-            case (parsedValueNode, propertyWarnings, propertyType) =>
-              if (
-                propertyType == PropertyType.Dialect && propertyWarnings.isEmpty
-              ) {
-                (key, Some(parsedValueNode), Array())
-              } else {
-                val warnings =
-                  if (propertyType != PropertyType.Dialect)
-                    Array("invalid_property")
-                  else Array[String]()
-                (key, None, warnings)
-              }
-          })
-    }
-  }
-
   def parseTransformationsProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, baseUrl, lang) =>
@@ -1583,6 +1179,442 @@ object PropertyChecker {
       .map({
         case (objectNode, stringWarnings) => (Some(objectNode), stringWarnings)
       })
+  }
+
+  private def parseMinMaxRanges(
+      dataTypeNode: ObjectNode,
+      baseDataType: String,
+      minimumNode: Option[JsonNode],
+      maximumNode: Option[JsonNode],
+      minInclusiveNode: Option[JsonNode],
+      minExclusiveNode: Option[JsonNode],
+      maxInclusiveNode: Option[JsonNode],
+      maxExclusiveNode: Option[JsonNode],
+      stringWarnings: StringWarnings
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
+
+    if (minimumNode.isDefined) {
+      dataTypeNode.put("minInclusive", minimumNode.map(_.asText()).get)
+      dataTypeNode.remove("minimum")
+    }
+
+    if (maximumNode.isDefined) {
+      dataTypeNode.put("maxInclusive", maximumNode.map(_.asText()).get)
+      dataTypeNode.remove("maximum")
+    }
+
+    val minInclusive: Option[String] = getDataTypeRangeConstraint(
+      minInclusiveNode
+    )
+    val maxInclusive: Option[String] = getDataTypeRangeConstraint(
+      maxInclusiveNode
+    )
+    val minExclusive: Option[String] = getDataTypeRangeConstraint(
+      minExclusiveNode
+    )
+    val maxExclusive: Option[String] = getDataTypeRangeConstraint(
+      maxExclusiveNode
+    )
+
+    (minInclusive, minExclusive, maxInclusive, maxExclusive) match {
+      case (Some(minI), Some(minE), _, _) =>
+        Left(
+          MetadataError(
+            s"datatype cannot specify both minimum/minInclusive ($minI) and minExclusive ($minE)"
+          )
+        )
+      case (_, _, Some(maxI), Some(maxE)) =>
+        Left(
+          MetadataError(
+            s"datatype cannot specify both maximum/maxInclusive ($maxI) and maxExclusive ($maxE)"
+          )
+        )
+      case _ =>
+        if (
+          PropertyCheckerConstants.NumericFormatDataTypes.contains(baseDataType)
+        ) {
+          parseMinMaxNumericRanges(
+            dataTypeNode,
+            stringWarnings,
+            minInclusive,
+            maxInclusive,
+            minExclusive,
+            maxExclusive
+          )
+        } else if (
+          PropertyCheckerConstants.DateFormatDataTypes.contains(baseDataType)
+        ) {
+          parseMinMaxDateTimeRanges(
+            dataTypeNode,
+            stringWarnings,
+            minInclusive,
+            maxInclusive,
+            minExclusive,
+            maxExclusive
+          )
+        }
+        throw new IllegalArgumentException(
+          s"Base data type was neither numeric note date/time - $baseDataType"
+        )
+    }
+  }
+
+  private def parseMinMaxDateTimeRanges(
+      dataTypeNode: ObjectNode,
+      stringWarnings: StringWarnings,
+      minInclusive: Option[String],
+      maxInclusive: Option[String],
+      minExclusive: Option[String],
+      maxExclusive: Option[String]
+  ) = {
+    (
+      minInclusive.map(DateTime.parse),
+      minExclusive.map(DateTime.parse),
+      maxInclusive.map(DateTime.parse),
+      maxExclusive.map(DateTime.parse)
+    ) match {
+      case (Some(minI), _, Some(maxI), _) if minI.getMillis > maxI.getMillis =>
+        Left(
+          MetadataError(
+            s"datatype minInclusive ($minI) cannot be greater than maxInclusive ($maxI)"
+          )
+        )
+      case (Some(minI), _, _, Some(maxE)) if minI.getMillis >= maxE.getMillis =>
+        Left(
+          MetadataError(
+            s"datatype minInclusive ($minI) cannot be greater than or equal to maxExclusive ($maxE)"
+          )
+        )
+      case (_, Some(minE), _, Some(maxE)) if minE.getMillis > maxE.getMillis =>
+        Left(
+          MetadataError(
+            s"datatype minExclusive ($minE) cannot be greater than or equal to maxExclusive ($maxE)"
+          )
+        )
+      case (_, Some(minE), Some(maxI), _) if minE.getMillis >= maxI.getMillis =>
+        Left(
+          MetadataError(
+            s"datatype minExclusive ($minE) cannot be greater than maxInclusive ($maxI)"
+          )
+        )
+      case _ => Right((dataTypeNode, stringWarnings))
+    }
+  }
+
+  private def parseMinMaxNumericRanges(
+      dataTypeNode: ObjectNode,
+      stringWarnings: StringWarnings,
+      minInclusive: Option[String],
+      maxInclusive: Option[String],
+      minExclusive: Option[String],
+      maxExclusive: Option[String]
+  ) = {
+    (
+      minInclusive.map(BigDecimal(_)),
+      minExclusive.map(BigDecimal(_)),
+      maxInclusive.map(BigDecimal(_)),
+      maxExclusive.map(BigDecimal(_))
+    ) match {
+      case (Some(minI), _, Some(maxI), _) if minI > maxI =>
+        Left(
+          MetadataError(
+            s"datatype minInclusive ($minI) cannot be greater than maxInclusive ($maxI)"
+          )
+        )
+      case (Some(minI), _, _, Some(maxE)) if minI >= maxE =>
+        Left(
+          MetadataError(
+            s"datatype minInclusive ($minI) cannot be greater than or equal to maxExclusive ($maxE)"
+          )
+        )
+      case (_, Some(minE), _, Some(maxE)) if minE > maxE =>
+        Left(
+          MetadataError(
+            s"datatype minExclusive ($minE) cannot be greater than or equal to maxExclusive ($maxE)"
+          )
+        )
+      case (_, Some(minE), Some(maxI), _) if minE >= maxI =>
+        Left(
+          MetadataError(
+            s"datatype minExclusive ($minE) cannot be greater than maxInclusive ($maxI)"
+          )
+        )
+      case _ => Right((dataTypeNode, stringWarnings))
+    }
+  }
+
+  private def parseDataTypeLengths(
+      inputs: (ObjectNode, StringWarnings)
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
+    val (dataTypeNode: ObjectNode, stringWarnings) = inputs
+
+    dataTypeNode
+      .getMaybeNode("base")
+      .map({
+        case baseDataTypeNode: TextNode =>
+          parseDataTypeWithBase(
+            dataTypeNode,
+            baseDataTypeNode.asText,
+            stringWarnings
+          )
+        case baseNode =>
+          Left(
+            MetadataError(
+              s"Unexpected base data type value: ${baseNode.toPrettyString}"
+            )
+          )
+      })
+      .getOrElse(Right(inputs))
+  }
+
+  private def parseDataTypeWithBase(
+      dataTypeNode: ObjectNode,
+      baseDataType: String,
+      existingStringWarnings: StringWarnings
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
+    val lengthNode = dataTypeNode.getMaybeNode("length")
+    val minLengthNode = dataTypeNode.getMaybeNode("minLength")
+    val maxLengthNode = dataTypeNode.getMaybeNode("maxLength")
+
+    if (
+      PropertyCheckerConstants.StringDataTypes.contains(
+        baseDataType
+      ) || PropertyCheckerConstants.BinaryDataTypes.contains(baseDataType)
+    ) {
+      // String and Binary data types are permitted length/minLength/maxLength fields.
+
+      if (
+        lengthNode.exists(len =>
+          minLengthNode.exists(minLen => len.asInt < minLen.asInt)
+        )
+      ) {
+        Left(
+          MetadataError(
+            s"datatype length (${lengthNode.map(_.asInt).get}) cannot be less than minLength (${minLengthNode.map(_.asInt).get})"
+          )
+        )
+      } else if (
+        lengthNode.exists(len =>
+          maxLengthNode.exists(maxLen => len.asInt > maxLen.asInt)
+        )
+      ) {
+        Left(
+          MetadataError(
+            s"datatype length (${lengthNode.map(_.asInt)}) cannot be more than maxLength (${maxLengthNode
+              .map(_.asInt)})"
+          )
+        )
+      } else if (
+        minLengthNode
+          .exists(min => maxLengthNode.exists(max => min.asInt > max.asInt))
+      ) {
+        Left(
+          MetadataError(
+            s"datatype minLength (${minLengthNode.map(_.asInt)}) cannot be more than maxLength (${maxLengthNode
+              .map(_.asInt)})"
+          )
+        )
+      } else {
+        Right((dataTypeNode, existingStringWarnings))
+      }
+    } else {
+      // length, minLength and maxLength are only permitted on String and Binary data types.
+      if (lengthNode.isDefined) {
+        Left(
+          MetadataError(
+            s"Data types based on $baseDataType cannot have a length facet"
+          )
+        )
+      } else if (minLengthNode.isDefined) {
+        Left(
+          MetadataError(
+            s"Data types based on $baseDataType cannot have a minLength facet"
+          )
+        )
+      } else if (maxLengthNode.isDefined) {
+        Left(
+          MetadataError(
+            s"Data types based on $baseDataType cannot have a maxLength facet"
+          )
+        )
+      } else {
+        Right((dataTypeNode, existingStringWarnings))
+      }
+    }
+  }
+
+  private def initialDataTypePropertyParse(
+      value: JsonNode,
+      baseUrl: String,
+      lang: String
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
+    value match {
+      case dataTypeObjectNode: ObjectNode =>
+        parseDataTypeObject(dataTypeObjectNode, baseUrl, lang)
+      case x: TextNode if XsdDataTypes.types.contains(x.asText()) =>
+        Right(
+          (
+            objectMapper.createObjectNode
+              .put("@id", XsdDataTypes.types(x.asText())),
+            Array[String]()
+          )
+        )
+      case _: TextNode =>
+        Right(
+          (
+            objectMapper.createObjectNode
+              .put("@id", XsdDataTypes.types("string")),
+            Array(PropertyChecker.invalidValueWarning)
+          )
+        )
+      case _ =>
+        throw new IllegalArgumentException(s"Unhandled data type $value")
+    }
+  }
+
+  private def parseDataTypeObjectIdNode(
+      baseUrl: String,
+      lang: String,
+      valueNode: JsonNode
+  ): ParseResult[(Option[JsonNode], StringWarnings)] = {
+    val idValue = valueNode.asText()
+    if (XsdDataTypes.types.values.toList.contains(idValue)) {
+      Left(
+        MetadataError(
+          s"datatype @id must not be the id of a built-in datatype ($idValue)"
+        )
+      )
+    } else {
+      parseUrlLinkProperty(PropertyType.Common)(
+        valueNode,
+        baseUrl,
+        lang
+      ).map({
+        case (linkNode, warns @ Array(), _) => (Some(linkNode), warns)
+        case (_, warns, _)                  => (None, warns)
+      })
+    }
+  }
+
+  private def getDataTypeRangeConstraint(
+      maybeConstraintNode: Option[JsonNode]
+  ): Option[String] = {
+    maybeConstraintNode.flatMap(constraintNode =>
+      constraintNode match {
+        case rangeConstraint: ObjectNode =>
+          rangeConstraint
+            .getMaybeNode("dateTime")
+            .map(rangeConstraint => rangeConstraint.asText())
+        case rangeConstraint: TextNode =>
+          Some(rangeConstraint.asText())
+        case rangeConstraint: IntNode =>
+          Some(rangeConstraint.asText())
+        case rangeConstraint: DecimalNode =>
+          Some(rangeConstraint.asText())
+        case rangeConstraint: LongNode =>
+          Some(rangeConstraint.asText())
+      }
+    )
+
+  }
+
+  private def parseForeignKeyReferenceObjectNode(
+      foreignKeyObjectNode: ObjectNode,
+      baseUrl: String,
+      language: String
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
+    val columnReferenceProperty =
+      foreignKeyObjectNode.getMaybeNode("columnReference")
+    val resourceProperty = foreignKeyObjectNode.getMaybeNode("resource")
+    val schemaReferenceProperty =
+      foreignKeyObjectNode.getMaybeNode("schemaReference")
+
+    (columnReferenceProperty, resourceProperty, schemaReferenceProperty) match {
+      case (None, _, _) =>
+        Left(MetadataError("foreignKey reference columnReference is missing"))
+      case (_, None, None) =>
+        Left(
+          MetadataError(
+            "foreignKey reference does not have either resource or schemaReference"
+          )
+        )
+      case (_, Some(_), Some(_)) =>
+        Left(
+          MetadataError(
+            "foreignKey reference has both resource and schemaReference"
+          )
+        )
+      case _ =>
+        foreignKeyObjectNode
+          .fields()
+          .asScala
+          .map(keyValuePair => {
+            val propertyName = keyValuePair.getKey
+            val propertyValue = keyValuePair.getValue
+            // Check if property is included in the valid properties for a foreign key object
+            if (
+              Array[String]("resource", "schemaReference", "columnReference")
+                .contains(propertyName)
+            ) {
+              parseJsonProperty(propertyName, propertyValue, baseUrl, language)
+                .map({
+                  case (newValue, Array(), _) =>
+                    (propertyName, Some(newValue), Array[String]())
+                  case (_, stringWarnings, _) =>
+                    (propertyName, None, stringWarnings)
+                })
+            } else if (PropertyChecker.containsColon.matches(propertyName)) {
+              Left(
+                MetadataError(
+                  s"foreignKey reference ($propertyName) includes a prefixed (common) property"
+                )
+              )
+            } else {
+              Right(
+                (propertyName, None, Array(PropertyChecker.invalidValueWarning))
+              )
+            }
+          })
+          .toObjectNodeAndStringWarnings
+    }
+  }
+
+  private def parseDialectObjectProperty(
+      baseUrl: String,
+      lang: String,
+      key: String,
+      valueNode: JsonNode
+  ): ObjectPropertyParseResult = {
+    key match {
+      case "@id" =>
+        if (PropertyChecker.startsWithUnderscore.matches(valueNode.asText())) {
+          Left(MetadataError("@id starts with _:"))
+        } else {
+          Right(key, Some(valueNode), Array())
+        }
+      case "@type" =>
+        if (valueNode.asText() == "Dialect") {
+          Right(key, Some(valueNode), Array())
+        } else {
+          Left(MetadataError("@type of dialect is not 'Dialect'"))
+        }
+      case _ =>
+        parseJsonProperty(key, valueNode, baseUrl, lang)
+          .map({
+            case (parsedValueNode, propertyWarnings, propertyType) =>
+              if (
+                propertyType == PropertyType.Dialect && propertyWarnings.isEmpty
+              ) {
+                (key, Some(parsedValueNode), Array())
+              } else {
+                val warnings =
+                  if (propertyType != PropertyType.Dialect)
+                    Array("invalid_property")
+                  else Array[String]()
+                (key, None, warnings)
+              }
+          })
+    }
   }
 
   private def asUri(property: String): Option[URI] =
