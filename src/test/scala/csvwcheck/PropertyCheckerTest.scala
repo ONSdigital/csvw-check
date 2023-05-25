@@ -391,7 +391,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     val Left(MetadataError(errorMessage, _)) =
       PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
-      errorMessage === "minInclusive is only allowed for numeric, date/time and duration types"
+      errorMessage === "minimum/minInclusive/minExclusive/maximum/maxInclusive/maxExclusive are only allowed for numeric, date/time and duration types"
     )
   }
 
@@ -410,7 +410,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     val Left(MetadataError(errorMessage, _)) =
       PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
-      errorMessage === "maxExclusive is only allowed for numeric, date/time and duration types"
+      errorMessage === "minimum/minInclusive/minExclusive/maximum/maxInclusive/maxExclusive are only allowed for numeric, date/time and duration types"
     )
   }
   // 2 more similar tests for minExclusive and maxInclusive can be added
@@ -513,9 +513,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     for (json <- jsonArray) {
       val jsonNode = objectMapper.readTree(json)
-      intercept[MetadataError] {
-        PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
-      }
+      val Left(MetadataError(_, _)) = PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
     }
   }
 
@@ -546,9 +544,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     for (json <- jsonArray) {
       val jsonNode = objectMapper.readTree(json)
-      intercept[MetadataError] {
-        PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
-      }
+      val Left(MetadataError(_, _)) = PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
     }
   }
 

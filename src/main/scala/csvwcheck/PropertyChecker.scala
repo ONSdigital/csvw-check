@@ -366,8 +366,9 @@ object PropertyChecker {
             "minimum/minInclusive/minExclusive/maximum/maxInclusive/maxExclusive are only allowed for numeric, date/time and duration types"
           )
         )
+      } else {
+        Right((dataTypeNode, existingStringWarnings))
       }
-      Right((dataTypeNode, existingStringWarnings))
     }
   }
 
@@ -1250,10 +1251,11 @@ object PropertyChecker {
             minExclusive,
             maxExclusive
           )
+        } else {
+          throw new IllegalArgumentException(
+            s"Base data type was neither numeric note date/time - $baseDataType"
+          )
         }
-        throw new IllegalArgumentException(
-          s"Base data type was neither numeric note date/time - $baseDataType"
-        )
     }
   }
 
