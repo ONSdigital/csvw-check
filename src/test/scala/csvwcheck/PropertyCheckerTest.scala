@@ -558,7 +558,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     val jsonNode = objectMapper.readTree(json)
     val Right((_, warnings, _)) =
       PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
-    assert(warnings === Array[String]("invalid_boolean_format"))
+    assert(warnings === Array[String]("invalid_boolean_format '\"YES|NO|MAYBE\"'"))
   }
 
   // Format for boolean datatype is not being split into parts and kept in array anymore. Commenting this test for now
@@ -642,7 +642,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     val Right((returnedValue, warnings, _)) =
       PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
 
-    assert(warnings === Array[String]("invalid_date_format"))
+    assert(warnings === Array[String]("invalid_date_format 'dd/ZZ/yyyy'"))
     assert(
       returnedValue === expectedValue
     ) // expectedValue does not contain format
@@ -681,7 +681,7 @@ class PropertyCheckerTest extends AnyFunSuite {
         "http://www.w3.org/",
         "und"
       )
-    assert(errorMessage === "@type of schema is not 'Schema'")
+    assert(errorMessage === "@type of schema is not 'Schema' (\"someValueOtherThanSchema\")")
   }
 
   test(
@@ -831,7 +831,7 @@ class PropertyCheckerTest extends AnyFunSuite {
         "und"
       )
     assert(
-      errorMessage === "foreignKey reference (contain:colon) includes a prefixed (common) property"
+      errorMessage === "foreignKey reference columnReference is missing"
     )
   }
   // Add more test cases for referenceProperty after resource, schemaReference, columnReference property validations
@@ -929,8 +929,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     )
     assert(
       warnings === Array[String](
-        "[ true, \"sample text value\" ] is invalid, textual elements expected",
-        "invalid_value"
+        "[ true, \"sample text value\" ] is invalid, textual elements expected"
       )
     )
   }
@@ -996,7 +995,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     val Right((values, warnings, _)) =
       PropertyChecker.parseJsonProperty("transformations", jsonNode, "", "und")
 
-    assert(warnings.contains("invalid_property"))
+    assert(warnings.contains("invalid_property 'textDirection' with type Inherited"))
     assert(warnings.contains("invalid_value"))
     assert(!values.asInstanceOf[ArrayNode].has("source"))
     // After processing TextDirection will be removed from json or should not be present in json

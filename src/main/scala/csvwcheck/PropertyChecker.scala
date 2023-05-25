@@ -460,10 +460,11 @@ object PropertyChecker {
                   case Some(newNode) =>
                     dataTypeNode.deepCopy().set("format", newNode)
                   case None =>
-                    dataTypeNode
+                    val modifiedDataTypeNode = dataTypeNode
                       .deepCopy()
-                      .remove("format")
-                      .asInstanceOf[ObjectNode]
+                    modifiedDataTypeNode.remove("format")
+
+                    modifiedDataTypeNode
                 }
                 (parsedDataTypeNode, stringWarnings ++ newStringWarnings)
               })
@@ -647,7 +648,7 @@ object PropertyChecker {
           Right((propertyName, Some(value), Array.empty))
         } else {
           Left(
-            MetadataError(s"@type of schema is not 'Schema' ($value.asText)")
+            MetadataError(s"@type of schema is not 'Schema' (${value.toPrettyString})")
           )
         }
       case _ =>
@@ -823,22 +824,20 @@ object PropertyChecker {
     {
       value match {
         case s: TextNode =>
-          val languageMap = JsonNodeFactory.instance
-            .objectNode()
-            .set(lang, JsonNodeFactory.instance.arrayNode().add(s.asText()))
+          val languageMap = JsonNodeFactory.instance.objectNode()
+          val arrayForLang = JsonNodeFactory.instance.arrayNode()
+          arrayForLang.add(s.asText)
+          languageMap.set(lang, arrayForLang)
           Right((languageMap, Array[String](), csvwPropertyType))
         case a: ArrayNode =>
           val (validStrings, warnings) = getValidTextualElementsFromArray(a)
           val arrayNode: ArrayNode = objectMapper.valueToTree(validStrings)
-          val languageMap =
-            JsonNodeFactory.instance.objectNode().set(lang, arrayNode)
+          val languageMap = JsonNodeFactory.instance.objectNode()
+          languageMap.set(lang, arrayNode)
           Right((languageMap, warnings, csvwPropertyType))
         case languageMapObject: ObjectNode =>
           processNaturalLanguagePropertyObject(languageMapObject)
-            .map({
-              case (parsedLanguageMap, stringWarnings) =>
-                (parsedLanguageMap, stringWarnings, csvwPropertyType)
-            })
+            .map(_ :+ csvwPropertyType)
         case _ =>
           Right(
             (
@@ -1107,10 +1106,7 @@ object PropertyChecker {
                 }
             })
             .toArrayNodeAndStringWarnings
-            .map({
-              case (parsedNode, stringWarnings) =>
-                (parsedNode, stringWarnings, csvwPropertyType)
-            })
+            .map(_ :+ csvwPropertyType)
         case _ =>
           Right(
             (
@@ -1154,9 +1150,11 @@ object PropertyChecker {
                 )
               )
             }
+          // Hmm, really not sure about this random exclusion here.
+          case "url" | "titles" => Right((propertyName, Some(valueNode), Array[String]()))
           case _ =>
             parseJsonProperty(propertyName, valueNode, baseUrl, lang)
-              .map(_ match {
+              .map({
                 case (
                       parsedTransformation,
                       Array(),
@@ -1169,7 +1167,7 @@ object PropertyChecker {
                   (
                     propertyName,
                     None,
-                    stringWarnings :+ s"invalid_property with type $propertyType"
+                    stringWarnings :+ s"invalid_property '$propertyName' with type $propertyType"
                   )
               })
         }
