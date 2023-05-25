@@ -9,6 +9,7 @@ import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import org.joda.time.DateTime
+import shapeless.syntax.std.tuple.productTupleOps
 
 import java.net.{URI, URL}
 import scala.annotation.tailrec
@@ -465,12 +466,9 @@ object PropertyChecker {
                 }
                 (parsedDataTypeNode, stringWarnings ++ newStringWarnings)
               })
-              .getOrElse((dataTypeNode, Array[String]()))
+              .getOrElse((dataTypeNode, stringWarnings))
         })
-        .map({
-          case (dataTypeNode, stringWarnings) =>
-            (dataTypeNode, stringWarnings, csvwPropertyType)
-        })
+        .map(_ :+ csvwPropertyType)
     }
   }
 
