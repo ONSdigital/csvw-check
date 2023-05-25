@@ -1,24 +1,39 @@
 package csvwcheck.models
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
+import com.fasterxml.jackson.databind.node.{
+  ArrayNode,
+  JsonNodeFactory,
+  ObjectNode,
+  TextNode
+}
 import com.typesafe.scalalogging.Logger
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{ErrorWithCsvContext, ErrorWithoutContext, MetadataError}
-import csvwcheck.helpers.MapHelpers
-import csvwcheck.models.Column.{rdfSyntaxNs, unsignedLongMaxValue, validDoubleDatatypeRegex, xmlSchema}
+import csvwcheck.errors.{
+  ErrorWithCsvContext,
+  ErrorWithoutContext,
+  MetadataError
+}
+import csvwcheck.models.Column.{
+  rdfSyntaxNs,
+  unsignedLongMaxValue,
+  validDoubleDatatypeRegex,
+  xmlSchema
+}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.NumberParser
-import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
+import csvwcheck.traits.ObjectNodeExtentions.{
+  IteratorHasGetKeysAndValues,
+  ObjectNodeGetMaybeNode
+}
 import csvwcheck.{PropertyChecker, models}
 import org.joda.time.{DateTime, DateTimeZone}
 
 import java.math.BigInteger
 import java.time.{LocalDateTime, Month, ZoneId, ZonedDateTime}
-import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, Map}
+import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 import scala.math.BigInt.javaBigInteger2bigInt
 import scala.util.matching.Regex
@@ -29,18 +44,9 @@ object Column {
     .objectNode()
     .set("@id", new TextNode(s"${xmlSchema}string"))
   val rdfSyntaxNs = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-
-  private val validDecimalDatatypeRegex =
-    "(\\+|-)?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)".r
-
   // https://www.w3.org/TR/xmlschema11-2/#float, https://www.w3.org/TR/xmlschema11-2/#double
   val validDoubleDatatypeRegex, validFloatDatatypeRegex =
     "(\\+|-)?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([Ee](\\+|-)?[0-9]+)?|(\\+|-)?INF|NaN".r
-
-  private val validIntegerRegex = "[\\-+]?[0-9]+".r
-
-  private val validLongDatatypeRegex = "[\\-+]?[0-9]+".r
-
   // https://www.w3.org/TR/xmlschema11-2/#duration
   val validDurationRegex: Regex =
     "-?P((([0-9]+Y([0-9]+M)?([0-9]+D)?|([0-9]+M)([0-9]+D)?|([0-9]+D))(T(([0-9]+H)([0-9]+M)?([0-9]+(\\.[0-9]+)?S)?|([0-9]+M)([0-9]+(\\.[0-9]+)?S)?|([0-9]+(\\.[0-9]+)?S)))?)|(T(([0-9]+H)([0-9]+M)?([0-9]+(\\.[0-9]+)?S)?|([0-9]+M)([0-9]+(\\.[0-9]+)?S)?|([0-9]+(\\.[0-9]+)?S))))".r
@@ -48,24 +54,31 @@ object Column {
     "-?P(([0-9]+D(T(([0-9]+H)([0-9]+M)?([0-9]+(\\.[0-9]+)?S)?|([0-9]+M)([0-9]+(\\.[0-9]+)?S)?|([0-9]+(\\.[0-9]+)?S)))?)|(T(([0-9]+H)([0-9]+M)?([0-9]+(\\.[0-9]+)?S)?|([0-9]+M)([0-9]+(\\.[0-9]+)?S)?|([0-9]+(\\.[0-9]+)?S))))".r
   val validYearMonthDurationRegex: Regex =
     """-?P([0-9]+Y([0-9]+M)?|([0-9]+M))""".r
-
   val unsignedLongMaxValue: BigInt = BigInt("18446744073709551615")
+  private val validDecimalDatatypeRegex =
+    "(\\+|-)?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)".r
+  private val validIntegerRegex = "[\\-+]?[0-9]+".r
+  private val validLongDatatypeRegex = "[\\-+]?[0-9]+".r
 
   def fromJson(
       columnOrdinal: Int,
       columnDesc: ObjectNode,
       baseUrl: String,
       lang: String,
-      inheritedProperties: mutable.Map[String, JsonNode]
+      inheritedProperties: Map[String, JsonNode]
   ): ParseResult[(Column, Array[ErrorWithoutContext])] = {
-      partitionAndValidateColumnPropertiesByType(
-        columnDesc,
-        columnOrdinal,
-        baseUrl,
-        lang,
-        inheritedProperties
+    partitionAndValidateColumnPropertiesByType(
+      columnDesc,
+      columnOrdinal,
+      baseUrl,
+      lang,
+      inheritedProperties
+    ).flatMap(parsedColumnProperties =>
+        parseLangTitles(parsedColumnProperties.column.get("titles"))
+          .map((parsedColumnProperties, _))
       )
-        .map(parsedColumnProperties => {
+      .map({
+        case (parsedColumnProperties, titles) =>
           val datatype = getDatatypeOrDefault(inheritedProperties)
           val minLength: Option[Int] =
             if (datatype.path("minLength").isMissingNode) None
@@ -95,8 +108,6 @@ object Column {
           val name = getName(parsedColumnProperties.column, lang)
           val formatNode = datatype.path("format")
 
-          val titles = parsedColumnProperties.column.get("titles")
-
           val column = new Column(
             columnOrdinal = columnOrdinal,
             name = name,
@@ -118,7 +129,7 @@ object Column {
             valueUrl = getValueUrl(inheritedProperties),
             separator = getSeparator(inheritedProperties),
             ordered = getOrdered(inheritedProperties),
-            titleValues = getTitleValues(titles),
+            titleValues = titles,
             suppressOutput = getSuppressOutput(parsedColumnProperties.column),
             virtual = getVirtual(parsedColumnProperties.column),
             format = getMaybeFormatForColumn(formatNode),
@@ -127,11 +138,11 @@ object Column {
           )
 
           (column, parsedColumnProperties.warnings)
-        })
+      })
   }
 
   def getOrdered(
-      inheritedProperties: mutable.Map[String, JsonNode]
+      inheritedProperties: Map[String, JsonNode]
   ): Boolean = {
     val inheritedPropertiesNode = inheritedProperties.get("ordered")
     inheritedPropertiesNode match {
@@ -141,7 +152,7 @@ object Column {
   }
 
   def getTextDirection(
-      inheritedProperties: mutable.Map[String, JsonNode]
+      inheritedProperties: Map[String, JsonNode]
   ): String = {
     val textDirectionNode = inheritedProperties.get("textDirection")
     textDirectionNode match {
@@ -151,7 +162,7 @@ object Column {
   }
 
   def getSuppressOutput(
-      columnProperties: mutable.Map[String, JsonNode]
+      columnProperties: Map[String, JsonNode]
   ): Boolean = {
     val suppressOutputNode = columnProperties.get("suppressOutput")
     suppressOutputNode match {
@@ -160,7 +171,7 @@ object Column {
     }
   }
 
-  def getVirtual(columnProperties: mutable.Map[String, JsonNode]): Boolean = {
+  def getVirtual(columnProperties: Map[String, JsonNode]): Boolean = {
     val virtualNode = columnProperties.get("virtual")
     virtualNode match {
       case Some(value) => value.asBoolean()
@@ -169,7 +180,7 @@ object Column {
   }
 
   def getRequired(
-      inheritedProperties: mutable.Map[String, JsonNode]
+      inheritedProperties: Map[String, JsonNode]
   ): Boolean = {
     inheritedProperties.get("required") match {
       case Some(value) => value.asBoolean()
@@ -177,20 +188,20 @@ object Column {
     }
   }
 
-  def getDefault(inheritedProperties: mutable.Map[String, JsonNode]): String = {
+  def getDefault(inheritedProperties: Map[String, JsonNode]): String = {
     inheritedProperties.get("default") match {
       case Some(value) => value.asInstanceOf[TextNode].asText()
       case _           => ""
     }
   }
 
-  def getId(columnProperties: mutable.Map[String, JsonNode]): Option[String] = {
+  def getId(columnProperties: Map[String, JsonNode]): Option[String] = {
     val idNode = columnProperties.get("@id")
     if (idNode.isDefined) Some(idNode.get.asText()) else None
   }
 
   def getName(
-      columnProperties: mutable.Map[String, JsonNode],
+      columnProperties: Map[String, JsonNode],
       lang: String
   ): Option[String] = {
     val name = columnProperties.get("name")
@@ -209,7 +220,7 @@ object Column {
   }
 
   def getNullParam(
-      inheritedProperties: mutable.Map[String, JsonNode]
+      inheritedProperties: Map[String, JsonNode]
   ): Array[String] = {
     inheritedProperties.get("null") match {
       case Some(value) =>
@@ -229,7 +240,7 @@ object Column {
   }
 
   def getAboutUrl(
-      inheritedProperties: mutable.Map[String, JsonNode]
+      inheritedProperties: Map[String, JsonNode]
   ): Option[String] = {
     val aboutUrlNode = inheritedProperties.get("aboutUrl")
     aboutUrlNode match {
@@ -239,7 +250,7 @@ object Column {
   }
 
   def getPropertyUrl(
-      inheritedProperties: mutable.Map[String, JsonNode]
+      inheritedProperties: Map[String, JsonNode]
   ): Option[String] = {
     val propertyUrlNode = inheritedProperties.get("propertyUrl")
     propertyUrlNode match {
@@ -249,7 +260,7 @@ object Column {
   }
 
   def getValueUrl(
-      inheritedProperties: mutable.Map[String, JsonNode]
+      inheritedProperties: Map[String, JsonNode]
   ): Option[String] = {
     val valueUrlNode = inheritedProperties.get("valueUrl")
     valueUrlNode match {
@@ -259,7 +270,7 @@ object Column {
   }
 
   def getSeparator(
-      inheritedProperties: mutable.Map[String, JsonNode]
+      inheritedProperties: Map[String, JsonNode]
   ): Option[String] = {
     val separatorNode = inheritedProperties.get("separator")
     separatorNode match {
@@ -268,18 +279,35 @@ object Column {
     }
   }
 
-  def getTitleValues(
+  def parseLangTitles(
       titles: Option[JsonNode]
-  ): mutable.Map[String, Array[String]] = {
-    val langToTitles = mutable.Map[String, Array[String]]()
-    titles match {
-      case Some(titles) =>
-        for ((l, v) <- titles.asInstanceOf[ObjectNode].getKeysAndValues) {
-          langToTitles(l) = Array.from(v.elements().asScala.map(_.asText()))
-        }
-        langToTitles
-      case _ => langToTitles
-    }
+  ): ParseResult[Map[String, Array[String]]] = {
+    titles
+      .map({
+        case titlesObjectNode: ObjectNode =>
+          titlesObjectNode.getKeysAndValues
+            .foldLeft[ParseResult[Map[String, Array[String]]]](Right(Map()))({
+              case (err @ Left(_), _) => err
+              case (Right(titlesMap), (lang, values: ArrayNode)) =>
+                Right(
+                  titlesMap + (lang -> Array
+                    .from(values.elements().asScala.map(_.asText())))
+                )
+              case (_, (_, valuesNode)) =>
+                Left(
+                  MetadataError(
+                    s"Unexpected language titles value: ${valuesNode.toPrettyString}"
+                  )
+                )
+            })
+        case valuesNode =>
+          Left(
+            MetadataError(
+              s"Unexpected language mapping: ${valuesNode.toPrettyString}"
+            )
+          )
+      })
+      .getOrElse(Right(Map()))
   }
 
   def getBaseDataType(datatype: JsonNode): String = {
@@ -289,6 +317,121 @@ object Column {
     } else {
       datatypeBaseField.asText()
     }
+  }
+
+  def partitionAndValidateColumnPropertiesByType(
+      columnDesc: ObjectNode,
+      columnOrdinal: Int,
+      baseUrl: String,
+      lang: String,
+      inheritedProperties: Map[String, JsonNode]
+  ): ParseResult[ParsedColumnProperties] = {
+    val initialAccumulator: ParseResult[ParsedColumnProperties] = Right(
+      ParsedColumnProperties(inherited = inheritedProperties)
+    )
+
+    columnDesc.getKeysAndValues
+      .map({
+        case ("@type", textNode: TextNode) if textNode.asText != "Column" =>
+          Left(
+            MetadataError(
+              s"columns[$columnOrdinal].@type, @type of column is not 'Column'"
+            )
+          )
+        case (propertyName, value) =>
+          PropertyChecker
+            .parseJsonProperty(propertyName, value, baseUrl, lang)
+            .map({ case (v, ws, pt) => (propertyName, v, ws, pt) })
+      })
+      .foldLeft(initialAccumulator)({
+        case (err @ Left(_), _) => err
+        case (_, Left(newErr))  => Left(newErr)
+        case (
+              Right(parsedProperties),
+              Right((propertyName, parsedValue, stringWarnings, propertyType))
+            ) =>
+          val partitionedProperties = (propertyType match {
+            case PropertyType.Inherited =>
+              parsedProperties
+                .withInheritedProperty(propertyName -> parsedValue)
+            case PropertyType.Annotation =>
+              parsedProperties
+                .withAnnotationProperty(propertyName -> parsedValue)
+            case PropertyType.Common | PropertyType.Column =>
+              parsedProperties.withColumnProperty(propertyName -> parsedValue)
+            case _ =>
+              parsedProperties.withWarning(
+                ErrorWithoutContext(
+                  s"invalid_property",
+                  s"column: $propertyName"
+                )
+              )
+          }).withWarnings(
+            stringWarnings.map(
+              ErrorWithoutContext(
+                _,
+                s"$propertyName: ${parsedValue.toPrettyString}"
+              )
+            )
+          )
+          Right(partitionedProperties)
+      })
+  }
+
+  private def getMaybeFormatForColumn(formatNode: JsonNode): Option[Format] = {
+    if (formatNode.isMissingNode || formatNode.isNull) {
+      None
+    } else {
+      formatNode match {
+        case s: TextNode => Some(Format(Some(s.asText()), None, None))
+        case _ =>
+          val formatObjectNode = formatNode.asInstanceOf[ObjectNode]
+
+          def getMaybeValueFromNode(
+              node: ObjectNode,
+              propertyName: String
+          ): Option[String] = {
+            if (node.isMissingNode) None
+            else node.getMaybeNode(propertyName).map(_.asText())
+          }
+
+          val pattern = getMaybeValueFromNode(formatObjectNode, "pattern")
+          val decimalChar =
+            getMaybeValueFromNode(formatObjectNode, "decimalChar")
+              .map(d => d(0))
+          val groupChar = getMaybeValueFromNode(formatObjectNode, "groupChar")
+            .map(d => d(0))
+
+          Some(Format(pattern, decimalChar, groupChar))
+      }
+    }
+  }
+
+  private def getLangOrDefault(
+      inheritedPropertiesCopy: Map[String, JsonNode]
+  ): String = {
+    inheritedPropertiesCopy.get("lang") match {
+      case Some(lang) => lang.asText()
+      case _          => "und"
+    }
+  }
+
+  private def getDatatypeOrDefault(
+      inheritedPropertiesCopy: Map[String, JsonNode]
+  ): JsonNode = {
+    inheritedPropertiesCopy.get("datatype") match {
+      case Some(datatype) => datatype
+      case _              => datatypeDefaultValue
+    }
+  }
+
+  def languagesMatch(l1: String, l2: String): Boolean = {
+    val languagesMatchOrEitherIsUndefined =
+      l1 == l2 || l1 == "und" || l2 == "und"
+    val oneLanguageIsSubClassOfAnother =
+      l1.startsWith(s"$l2-") || l2.startsWith(s"$l1-")
+
+    languagesMatchOrEitherIsUndefined || oneLanguageIsSubClassOfAnother
   }
 
   case class ParsedColumnProperties(
@@ -338,117 +481,6 @@ object Column {
       )
   }
 
-  def partitionAndValidateColumnPropertiesByType(
-      columnDesc: ObjectNode,
-      columnOrdinal: Int,
-      baseUrl: String,
-      lang: String,
-      inheritedProperties: Map[String, JsonNode]
-  ): ParseResult[ParsedColumnProperties] = {
-    val initialAccumulator: ParseResult[ParsedColumnProperties] = Right(
-      ParsedColumnProperties(inherited = inheritedProperties)
-    )
-
-    columnDesc.getKeysAndValues
-      .map({
-        case ("@type", textNode: TextNode) if textNode.asText != "Column" =>
-          Left(MetadataError(s"columns[$columnOrdinal].@type, @type of column is not 'Column'"))
-        case (propertyName, value) =>
-          PropertyChecker
-            .parseJsonProperty(propertyName, value, baseUrl, lang)
-            .map({ case (v, ws, pt) => (propertyName, v, ws, pt) })
-      })
-      .foldLeft(initialAccumulator)({
-        case (err @ Left(_), _) => err
-        case (_, Left(newErr))  => Left(newErr)
-        case (
-              Right(parsedProperties),
-              Right((propertyName, parsedValue, stringWarnings, propertyType))
-            ) =>
-          val partitionedProperties = (propertyType match {
-            case PropertyType.Inherited =>
-              parsedProperties
-                .withInheritedProperty(propertyName -> parsedValue)
-            case PropertyType.Annotation =>
-              parsedProperties
-                .withAnnotationProperty(propertyName -> parsedValue)
-            case PropertyType.Common | PropertyType.Column =>
-              parsedProperties.withColumnProperty(propertyName -> parsedValue)
-            case _ =>
-              parsedProperties.withWarning(
-                ErrorWithoutContext(
-                  s"invalid_property",
-                  s"column: $propertyName"
-                )
-              )
-          }).withWarnings(
-              stringWarnings.map(
-                ErrorWithoutContext(
-                  _,
-                  s"$propertyName: ${parsedValue.toPrettyString}"
-                )
-              )
-            )
-          Right(partitionedProperties)
-      })
-  }
-
-  private def getMaybeFormatForColumn(formatNode: JsonNode): Option[Format] = {
-    if (formatNode.isMissingNode || formatNode.isNull) {
-      None
-    } else {
-      formatNode match {
-        case s: TextNode => Some(Format(Some(s.asText()), None, None))
-        case _ =>
-          val formatObjectNode = formatNode.asInstanceOf[ObjectNode]
-
-          def getMaybeValueFromNode(
-              node: ObjectNode,
-              propertyName: String
-          ): Option[String] = {
-            if (node.isMissingNode) None
-            else node.getMaybeNode(propertyName).map(_.asText())
-          }
-
-          val pattern = getMaybeValueFromNode(formatObjectNode, "pattern")
-          val decimalChar =
-            getMaybeValueFromNode(formatObjectNode, "decimalChar")
-              .map(d => d(0))
-          val groupChar = getMaybeValueFromNode(formatObjectNode, "groupChar")
-            .map(d => d(0))
-
-          Some(Format(pattern, decimalChar, groupChar))
-      }
-    }
-  }
-
-  private def getLangOrDefault(
-      inheritedPropertiesCopy: mutable.Map[String, JsonNode]
-  ): String = {
-    inheritedPropertiesCopy.get("lang") match {
-      case Some(lang) => lang.asText()
-      case _          => "und"
-    }
-  }
-
-  private def getDatatypeOrDefault(
-      inheritedPropertiesCopy: mutable.Map[String, JsonNode]
-  ): JsonNode = {
-    inheritedPropertiesCopy.get("datatype") match {
-      case Some(datatype) => datatype
-      case _              => datatypeDefaultValue
-    }
-  }
-
-  def languagesMatch(l1: String, l2: String): Boolean = {
-    val languagesMatchOrEitherIsUndefined =
-      l1 == l2 || l1 == "und" || l2 == "und"
-    val oneLanguageIsSubClassOfAnother =
-      l1.startsWith(s"$l2-") || l2.startsWith(s"$l1-")
-
-    languagesMatchOrEitherIsUndefined || oneLanguageIsSubClassOfAnother
-  }
-
 }
 
 case class Column private (
@@ -473,11 +505,11 @@ case class Column private (
     separator: Option[String],
     suppressOutput: Boolean,
     textDirection: String,
-    titleValues: mutable.Map[String, Array[String]],
+    titleValues: Map[String, Array[String]],
     valueUrl: Option[String],
     virtual: Boolean,
     format: Option[Format],
-    annotations: mutable.Map[String, JsonNode]
+    annotations: Map[String, JsonNode]
 ) {
   lazy val minInclusiveNumeric: Option[BigDecimal] =
     minInclusive.map(BigDecimal(_))
@@ -514,11 +546,11 @@ case class Column private (
         logger.debug(e)
         Left(e.getMessage)
     }
-  val datatypeParser: mutable.Map[String, String => Either[
+  val datatypeParser: Map[String, String => Either[
     ErrorWithoutContext,
     Any
   ]] =
-    mutable.Map(
+    Map(
       s"${rdfSyntaxNs}XMLLiteral" -> trimValue,
       s"${rdfSyntaxNs}HTML" -> trimValue,
       "http://www.w3.org/ns/csvw#JSON" -> trimValue,
@@ -567,52 +599,52 @@ case class Column private (
 
   val noAdditionalValidation: Function[String, Boolean] = (_: String) => true
 
-  private val datatypeFormatValidation
-      : mutable.Map[String, Function[String, Boolean]] = mutable.Map(
-    s"${rdfSyntaxNs}XMLLiteral" -> regexpValidation,
-    s"${rdfSyntaxNs}HTML" -> regexpValidation,
-    "http://www.w3.org/ns/csvw#JSON" -> regexpValidation,
-    s"${xmlSchema}anyAtomicType" -> regexpValidation,
-    s"${xmlSchema}anyURI" -> regexpValidation,
-    s"${xmlSchema}base64Binary" -> regexpValidation,
-    s"${xmlSchema}boolean" -> noAdditionalValidation,
-    s"${xmlSchema}date" -> noAdditionalValidation,
-    s"${xmlSchema}dateTime" -> noAdditionalValidation,
-    s"${xmlSchema}dateTimeStamp" -> noAdditionalValidation,
-    s"${xmlSchema}decimal" -> noAdditionalValidation,
-    s"${xmlSchema}integer" -> noAdditionalValidation,
-    s"${xmlSchema}long" -> noAdditionalValidation,
-    s"${xmlSchema}int" -> noAdditionalValidation,
-    s"${xmlSchema}short" -> noAdditionalValidation,
-    s"${xmlSchema}byte" -> noAdditionalValidation,
-    s"${xmlSchema}nonNegativeInteger" -> noAdditionalValidation,
-    s"${xmlSchema}positiveInteger" -> noAdditionalValidation,
-    s"${xmlSchema}unsignedLong" -> noAdditionalValidation,
-    s"${xmlSchema}unsignedInt" -> noAdditionalValidation,
-    s"${xmlSchema}unsignedShort" -> noAdditionalValidation,
-    s"${xmlSchema}unsignedByte" -> noAdditionalValidation,
-    s"${xmlSchema}nonPositiveInteger" -> noAdditionalValidation,
-    s"${xmlSchema}negativeInteger" -> noAdditionalValidation,
-    s"${xmlSchema}double" -> noAdditionalValidation,
-    s"${xmlSchema}duration" -> regexpValidation,
-    s"${xmlSchema}dayTimeDuration" -> regexpValidation,
-    s"${xmlSchema}yearMonthDuration" -> regexpValidation,
-    s"${xmlSchema}float" -> noAdditionalValidation,
-    s"${xmlSchema}gDay" -> noAdditionalValidation,
-    s"${xmlSchema}gMonth" -> noAdditionalValidation,
-    s"${xmlSchema}gMonthDay" -> noAdditionalValidation,
-    s"${xmlSchema}gYear" -> noAdditionalValidation,
-    s"${xmlSchema}gYearMonth" -> noAdditionalValidation,
-    s"${xmlSchema}hexBinary" -> regexpValidation,
-    s"${xmlSchema}QName" -> regexpValidation,
-    s"${xmlSchema}string" -> regexpValidation,
-    s"${xmlSchema}normalizedString" -> regexpValidation,
-    s"${xmlSchema}token" -> regexpValidation,
-    s"${xmlSchema}language" -> regexpValidation,
-    s"${xmlSchema}Name" -> regexpValidation,
-    s"${xmlSchema}NMTOKEN" -> regexpValidation,
-    s"${xmlSchema}time" -> noAdditionalValidation
-  )
+  private val datatypeFormatValidation: Map[String, Function[String, Boolean]] =
+    Map(
+      s"${rdfSyntaxNs}XMLLiteral" -> regexpValidation,
+      s"${rdfSyntaxNs}HTML" -> regexpValidation,
+      "http://www.w3.org/ns/csvw#JSON" -> regexpValidation,
+      s"${xmlSchema}anyAtomicType" -> regexpValidation,
+      s"${xmlSchema}anyURI" -> regexpValidation,
+      s"${xmlSchema}base64Binary" -> regexpValidation,
+      s"${xmlSchema}boolean" -> noAdditionalValidation,
+      s"${xmlSchema}date" -> noAdditionalValidation,
+      s"${xmlSchema}dateTime" -> noAdditionalValidation,
+      s"${xmlSchema}dateTimeStamp" -> noAdditionalValidation,
+      s"${xmlSchema}decimal" -> noAdditionalValidation,
+      s"${xmlSchema}integer" -> noAdditionalValidation,
+      s"${xmlSchema}long" -> noAdditionalValidation,
+      s"${xmlSchema}int" -> noAdditionalValidation,
+      s"${xmlSchema}short" -> noAdditionalValidation,
+      s"${xmlSchema}byte" -> noAdditionalValidation,
+      s"${xmlSchema}nonNegativeInteger" -> noAdditionalValidation,
+      s"${xmlSchema}positiveInteger" -> noAdditionalValidation,
+      s"${xmlSchema}unsignedLong" -> noAdditionalValidation,
+      s"${xmlSchema}unsignedInt" -> noAdditionalValidation,
+      s"${xmlSchema}unsignedShort" -> noAdditionalValidation,
+      s"${xmlSchema}unsignedByte" -> noAdditionalValidation,
+      s"${xmlSchema}nonPositiveInteger" -> noAdditionalValidation,
+      s"${xmlSchema}negativeInteger" -> noAdditionalValidation,
+      s"${xmlSchema}double" -> noAdditionalValidation,
+      s"${xmlSchema}duration" -> regexpValidation,
+      s"${xmlSchema}dayTimeDuration" -> regexpValidation,
+      s"${xmlSchema}yearMonthDuration" -> regexpValidation,
+      s"${xmlSchema}float" -> noAdditionalValidation,
+      s"${xmlSchema}gDay" -> noAdditionalValidation,
+      s"${xmlSchema}gMonth" -> noAdditionalValidation,
+      s"${xmlSchema}gMonthDay" -> noAdditionalValidation,
+      s"${xmlSchema}gYear" -> noAdditionalValidation,
+      s"${xmlSchema}gYearMonth" -> noAdditionalValidation,
+      s"${xmlSchema}hexBinary" -> regexpValidation,
+      s"${xmlSchema}QName" -> regexpValidation,
+      s"${xmlSchema}string" -> regexpValidation,
+      s"${xmlSchema}normalizedString" -> regexpValidation,
+      s"${xmlSchema}token" -> regexpValidation,
+      s"${xmlSchema}language" -> regexpValidation,
+      s"${xmlSchema}Name" -> regexpValidation,
+      s"${xmlSchema}NMTOKEN" -> regexpValidation,
+      s"${xmlSchema}time" -> noAdditionalValidation
+    )
   private val logger = Logger(this.getClass.getName)
 
   def regexpValidation(value: String): Boolean = {
@@ -888,54 +920,6 @@ case class Column private (
     }
   }
 
-  /**
-    * In CSV-W, grouping characters can be used to group numbers in a decimal but this grouping
-    * char won't be recognised by the regular expression we use to validate decimal at a later stage.
-    * This function removes grouping character if any and replaces any custom decimal character with the default
-    * decimal character.
-    */
-  def standardisedValue(value: String): String = {
-    val lastChar = value.takeRight(1)
-    var newValue =
-      if (lastChar == "%" || lastChar == "‰")
-        value.substring(0, value.length - 1)
-      else value
-    newValue = groupChar match {
-      case Some(groupChar) =>
-        s"(?<=[0-9])$groupChar(?=[0-9])".r.replaceAllIn(newValue, "")
-      case None => newValue
-    }
-
-    newValue = decimalChar match {
-      case Some(decimalChar) =>
-        s"(?<=[0-9])$decimalChar(?=[0-9])".r.replaceAllIn(newValue, ".")
-      case None => newValue
-    }
-
-    newValue
-  }
-
-  def groupChar: Option[Char] = {
-    format.flatMap(_.groupChar)
-  }
-
-  def decimalChar: Option[Char] = {
-    format.flatMap(_.decimalChar)
-  }
-
-  private def patternIsEmpty(): Boolean =
-    format
-      .flatMap(_.pattern)
-      .isEmpty
-
-  def parseNumberAgainstFormat(
-      value: String
-  ): Either[String, BigDecimal] =
-    numberParserForFormat match {
-      case Right(numericParser) => numericParser.parse(value)
-      case Left(err)            => Left(err)
-    }
-
   def processByteDatatype(
       value: String
   ): Either[ErrorWithoutContext, Byte] = {
@@ -1015,44 +999,6 @@ case class Column private (
     }
   }
 
-  def processUnsignedInt(
-      value: String
-  ): Either[ErrorWithoutContext, Long] = {
-    val result = processNonNegativeInteger(value)
-    result match {
-      case Left(w) =>
-        Left(ErrorWithoutContext("invalid_unsignedInt", w.content))
-      case Right(parsedValue) =>
-        if (parsedValue > 4294967295L) {
-          Left(
-            ErrorWithoutContext(
-              "invalid_unsignedInt",
-              "Value greater than 4294967295"
-            )
-          )
-        } else Right(parsedValue.longValue())
-    }
-  }
-
-  def processUnsignedShort(
-      value: String
-  ): Either[ErrorWithoutContext, Long] = {
-    val result = processNonNegativeInteger(value)
-    result match {
-      case Left(w) =>
-        Left(ErrorWithoutContext("invalid_unsignedShort", w.content))
-      case Right(parsedValue) =>
-        if (parsedValue > 65535) {
-          Left(
-            ErrorWithoutContext(
-              "invalid_unsignedShort",
-              "Value greater than 65535"
-            )
-          )
-        } else Right(parsedValue.intValue())
-    }
-  }
-
   def processNonNegativeInteger(
       value: String
   ): Either[ErrorWithoutContext, BigInteger] = {
@@ -1106,6 +1052,54 @@ case class Column private (
     }
   }
 
+  /**
+    * In CSV-W, grouping characters can be used to group numbers in a decimal but this grouping
+    * char won't be recognised by the regular expression we use to validate decimal at a later stage.
+    * This function removes grouping character if any and replaces any custom decimal character with the default
+    * decimal character.
+    */
+  def standardisedValue(value: String): String = {
+    val lastChar = value.takeRight(1)
+    var newValue =
+      if (lastChar == "%" || lastChar == "‰")
+        value.substring(0, value.length - 1)
+      else value
+    newValue = groupChar match {
+      case Some(groupChar) =>
+        s"(?<=[0-9])$groupChar(?=[0-9])".r.replaceAllIn(newValue, "")
+      case None => newValue
+    }
+
+    newValue = decimalChar match {
+      case Some(decimalChar) =>
+        s"(?<=[0-9])$decimalChar(?=[0-9])".r.replaceAllIn(newValue, ".")
+      case None => newValue
+    }
+
+    newValue
+  }
+
+  def groupChar: Option[Char] = {
+    format.flatMap(_.groupChar)
+  }
+
+  def decimalChar: Option[Char] = {
+    format.flatMap(_.decimalChar)
+  }
+
+  private def patternIsEmpty(): Boolean =
+    format
+      .flatMap(_.pattern)
+      .isEmpty
+
+  def parseNumberAgainstFormat(
+      value: String
+  ): Either[String, BigDecimal] =
+    numberParserForFormat match {
+      case Right(numericParser) => numericParser.parse(value)
+      case Left(err)            => Left(err)
+    }
+
   private def convertToBigIntegerValue(
       parsedValue: BigDecimal
   ): Either[ErrorWithoutContext, BigInteger] = {
@@ -1114,6 +1108,44 @@ case class Column private (
     } catch {
       case e: Throwable =>
         Left(ErrorWithoutContext("invalid_integer", e.getMessage))
+    }
+  }
+
+  def processUnsignedInt(
+      value: String
+  ): Either[ErrorWithoutContext, Long] = {
+    val result = processNonNegativeInteger(value)
+    result match {
+      case Left(w) =>
+        Left(ErrorWithoutContext("invalid_unsignedInt", w.content))
+      case Right(parsedValue) =>
+        if (parsedValue > 4294967295L) {
+          Left(
+            ErrorWithoutContext(
+              "invalid_unsignedInt",
+              "Value greater than 4294967295"
+            )
+          )
+        } else Right(parsedValue.longValue())
+    }
+  }
+
+  def processUnsignedShort(
+      value: String
+  ): Either[ErrorWithoutContext, Long] = {
+    val result = processNonNegativeInteger(value)
+    result match {
+      case Left(w) =>
+        Left(ErrorWithoutContext("invalid_unsignedShort", w.content))
+      case Right(parsedValue) =>
+        if (parsedValue > 65535) {
+          Left(
+            ErrorWithoutContext(
+              "invalid_unsignedShort",
+              "Value greater than 65535"
+            )
+          )
+        } else Right(parsedValue.intValue())
     }
   }
 
@@ -1227,18 +1259,6 @@ case class Column private (
     )
   }
 
-  def dateTimeParser(
-      datatype: String,
-      warning: String,
-      value: String
-  ): Either[ErrorWithoutContext, ZonedDateTime] = {
-    val dateFormatObject = DateFormat(format.flatMap(f => f.pattern), datatype)
-    dateFormatObject.parse(value) match {
-      case Right(value) => Right(value)
-      case Left(error)  => Left(ErrorWithoutContext(warning, error))
-    }
-  }
-
   def processDateTimeStamp(
       value: String
   ): Either[ErrorWithoutContext, ZonedDateTime] = {
@@ -1288,6 +1308,7 @@ case class Column private (
       value
     )
   }
+
   def processGYearMonth(
       value: String
   ): Either[ErrorWithoutContext, ZonedDateTime] = {
@@ -1306,6 +1327,18 @@ case class Column private (
       "invalid_time",
       value
     )
+  }
+
+  def dateTimeParser(
+      datatype: String,
+      warning: String,
+      value: String
+  ): Either[ErrorWithoutContext, ZonedDateTime] = {
+    val dateFormatObject = DateFormat(format.flatMap(f => f.pattern), datatype)
+    dateFormatObject.parse(value) match {
+      case Right(value) => Right(value)
+      case Left(error)  => Left(ErrorWithoutContext(warning, error))
+    }
   }
 
   def processDuration(

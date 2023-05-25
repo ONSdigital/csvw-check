@@ -1,19 +1,29 @@
 package csvwcheck.models
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
+import com.fasterxml.jackson.databind.node.{
+  ArrayNode,
+  JsonNodeFactory,
+  ObjectNode,
+  TextNode
+}
 import csvwcheck.PropertyChecker
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
+import csvwcheck.errors.{
+  ErrorWithCsvContext,
+  MetadataError,
+  WarningWithCsvContext
+}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
-import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
+import csvwcheck.traits.ObjectNodeExtentions.{
+  IteratorHasGetKeysAndValues,
+  ObjectNodeGetMaybeNode
+}
 import org.apache.commons.csv.CSVRecord
 import shapeless.syntax.std.tuple.productTupleOps
 
 import java.net.URL
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 import scala.util.matching.Regex
 
 object TableGroup {
@@ -22,9 +32,9 @@ object TableGroup {
   val containsWhitespaces: Regex = ".*\\s.*".r
 
   def fromJson(
-                tableGroupNodeIn: ObjectNode,
-                baseUri: String
-              ): ParseResult[WithWarningsAndErrors[TableGroup]] = {
+      tableGroupNodeIn: ObjectNode,
+      baseUri: String
+  ): ParseResult[WithWarningsAndErrors[TableGroup]] = {
     val baseUrl = baseUri.trim
     if (containsWhitespaces.matches(baseUrl)) {
       // todo: Shouldn't this be a warning?
@@ -36,17 +46,23 @@ object TableGroup {
     val tableGroupNode = restructureIfNodeIsSingleTable(tableGroupNodeIn)
 
     parseTableGroupType(tableGroupNode)
-      .flatMap(_ => processContextGetBaseUrlLang(tableGroupNodeIn, baseUrl, "und"))
+      .flatMap(_ => parseContext(tableGroupNodeIn, baseUrl, "und"))
       .flatMap({
         case (baseUrl, lang, warnings) =>
           partitionTableGroupProperties(
             tableGroupNode,
             baseUrl,
             lang
-          ).map(props => (baseUrl, lang, props.copy(warnings = props.warnings ++ warnings)))
+          ).map(props =>
+            (baseUrl, lang, props.copy(warnings = props.warnings ++ warnings))
+          )
       })
       .flatMap({
-        case all@(baseUrl, lang, PartitionedTableGroupProperties(_, common, inherited, _)) =>
+        case all @ (
+              baseUrl,
+              lang,
+              PartitionedTableGroupProperties(_, common, inherited, _)
+            ) =>
           parseTables(
             tableGroupNode,
             baseUrl,
@@ -57,11 +73,25 @@ object TableGroup {
       })
       .flatMap({
         case (baseUrl, lang, parsedProperties, tablesWithWarningsAndErrors) =>
-          linkForeignKeysToReferencedTables(baseUrl, tablesWithWarningsAndErrors.component)
-            .map(tables => (baseUrl, lang, parsedProperties, tablesWithWarningsAndErrors.copy(component = tables)))
+          linkForeignKeysToReferencedTables(
+            baseUrl,
+            tablesWithWarningsAndErrors.component
+          ).map(tables =>
+            (
+              baseUrl,
+              lang,
+              parsedProperties,
+              tablesWithWarningsAndErrors.copy(component = tables)
+            )
+          )
       })
       .map({
-        case (baseUrl, _, PartitionedTableGroupProperties(annotations, common, _, warnings), tablesWithWarningsAndErrors) =>
+        case (
+              baseUrl,
+              _,
+              PartitionedTableGroupProperties(annotations, common, _, warnings),
+              tablesWithWarningsAndErrors
+            ) =>
           val tableGroup = TableGroup(
             baseUrl,
             getId(common),
@@ -72,14 +102,18 @@ object TableGroup {
 
           WithWarningsAndErrors(
             tableGroup,
-            WarningsAndErrors(warnings = warnings ++ tablesWithWarningsAndErrors.warningsAndErrors.warnings, errors = tablesWithWarningsAndErrors.warningsAndErrors.errors)
+            WarningsAndErrors(
+              warnings =
+                warnings ++ tablesWithWarningsAndErrors.warningsAndErrors.warnings,
+              errors = tablesWithWarningsAndErrors.warningsAndErrors.errors
+            )
           )
       })
   }
 
   private def restructureIfNodeIsSingleTable(
-                                              tableGroupNode: ObjectNode
-                                            ): ObjectNode = {
+      tableGroupNode: ObjectNode
+  ): ObjectNode = {
     if (tableGroupNode.getMaybeNode("tables").isEmpty) {
       if (tableGroupNode.getMaybeNode("url").isDefined) {
         val newTableGroup = JsonNodeFactory.instance.objectNode()
@@ -92,13 +126,13 @@ object TableGroup {
     tableGroupNode
   }
 
-  def processContextGetBaseUrlLang(
-                                    rootNode: ObjectNode,
-                                    baseUrl: String,
-                                    lang: String
-                                  ): ParseResult[(String, String, Array[WarningWithCsvContext])] = {
+  def parseContext(
+      rootNode: ObjectNode,
+      baseUrl: String,
+      lang: String
+  ): ParseResult[(String, String, Array[WarningWithCsvContext])] = {
     (rootNode.get("@context") match {
-      case a: ArrayNode => validateContextArrayNode(a, baseUrl, lang)
+      case a: ArrayNode => parseContextArrayNode(a, baseUrl, lang)
       case s: TextNode if s.asText == csvwContextUri =>
         Right((baseUrl, lang, Array[WarningWithCsvContext]()))
       case _ => Left(MetadataError("Invalid Context"))
@@ -109,14 +143,14 @@ object TableGroup {
   }
 
   // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#top-level-properties
-  def validateContextArrayNode(
-                                context: ArrayNode,
-                                baseUrl: String,
-                                lang: String
-                              ): ParseResult[(String, String, Array[WarningWithCsvContext])] = {
+  def parseContextArrayNode(
+      context: ArrayNode,
+      baseUrl: String,
+      lang: String
+  ): ParseResult[(String, String, Array[WarningWithCsvContext])] = {
     def validateFirstItemInContext(
-                                    firstItem: JsonNode
-                                  ): ParseResult[Unit] = {
+        firstItem: JsonNode
+    ): ParseResult[Unit] = {
       firstItem match {
         case s: TextNode if s.asText == csvwContextUri => Right()
         case _ =>
@@ -136,7 +170,7 @@ object TableGroup {
           .flatMap(_ => {
             secondItem match {
               case contextBaseAndLangObject: ObjectNode =>
-                getAndValidateBaseAndLangFromContextObject(
+                parseContextObject(
                   contextBaseAndLangObject,
                   baseUrl,
                   lang
@@ -170,53 +204,56 @@ object TableGroup {
     * @param lang                     - The language.
     * @return newBaseUrl, newLang, warnings (if any)
     */
-  def getAndValidateBaseAndLangFromContextObject(
-                                                  contextBaseAndLangObject: ObjectNode,
-                                                  baseUrl: String,
-                                                  lang: String
-                                                ): ParseResult[(String, String, Array[WarningWithCsvContext])] = {
+  def parseContextObject(
+      contextBaseAndLangObject: ObjectNode,
+      baseUrl: String,
+      lang: String
+  ): ParseResult[(String, String, Array[WarningWithCsvContext])] = {
     val acc: Either[
       MetadataError,
       (String, String, Array[WarningWithCsvContext])
     ] = Right((baseUrl, lang, Array[WarningWithCsvContext]()))
     contextBaseAndLangObject.getKeysAndValues
       .foldLeft(acc)({
-        case (err@Left(_), _) => err
+        case (err @ Left(_), _) => err
         case (Right((baseUrl, lang, warnings)), (property, value)) =>
           property match {
             case "@base" | "@language" =>
               PropertyChecker
-                .parseJsonProperty(property, value, baseUrl, lang) match {
-                case (propertyNode, Array(), _) =>
-                  val propertyTextValue = propertyNode.asText()
-                  property match {
-                    case "@base" => Right((propertyTextValue, lang, warnings))
-                    case "@language" =>
-                      Right((baseUrl, propertyTextValue, warnings))
-                    case _ =>
-                      Left(
-                        MetadataError(s"Unhandled context property '$property'")
-                      )
-                  }
-                case (_, ws, _) =>
-                  // There are warnings, don't update any properties.
-                  Right(
-                    (
-                      baseUrl,
-                      lang,
-                      warnings ++ ws.map(
-                        WarningWithCsvContext(
-                          _,
-                          "metadata",
-                          "",
-                          "",
-                          s"$property: $value",
-                          ""
+                .parseJsonProperty(property, value, baseUrl, lang)
+                .flatMap({
+                  case (propertyNode, Array(), _) =>
+                    val propertyTextValue = propertyNode.asText()
+                    property match {
+                      case "@base" => Right((propertyTextValue, lang, warnings))
+                      case "@language" =>
+                        Right((baseUrl, propertyTextValue, warnings))
+                      case _ =>
+                        Left(
+                          MetadataError(
+                            s"Unhandled context property '$property'"
+                          )
+                        )
+                    }
+                  case (_, ws, _) =>
+                    // There are warnings, don't update any properties.
+                    Right(
+                      (
+                        baseUrl,
+                        lang,
+                        warnings ++ ws.map(
+                          WarningWithCsvContext(
+                            _,
+                            "metadata",
+                            "",
+                            "",
+                            s"$property: $value",
+                            ""
+                          )
                         )
                       )
                     )
-                  )
-              }
+                })
             case _ =>
               Left(
                 MetadataError(
@@ -228,95 +265,162 @@ object TableGroup {
   }
 
   private def linkForeignKeysToReferencedTables(
-                                                 baseUrl: String,
-                                                 tables: Map[String, Table]
-                                               ): ParseResult[Map[String, Table]] = {
+      baseUrl: String,
+      tables: Map[String, Table]
+  ): ParseResult[Map[String, Table]] = {
     tables.foldLeft[ParseResult[Map[String, Table]]](Right(tables))({
-      case (err@Left(_), _) => err
-      case (Right(tables), (_, originTable)) => linkForeignKeysDefinedOnTable(baseUrl, tables, originTable)
+      case (err @ Left(_), _) => err
+      case (Right(tables), (_, originTable)) =>
+        linkForeignKeysDefinedOnTable(baseUrl, tables, originTable)
     })
   }
 
   private def linkForeignKeysDefinedOnTable(
-                                             baseUrl: String,
-                                             tables: Map[String, Table],
-                                             definitionTable: Table
+      baseUrl: String,
+      tables: Map[String, Table],
+      definitionTable: Table
   ): ParseResult[Map[String, Table]] = {
-    definitionTable.schema.map(tableSchema =>
-      tableSchema.foreignKeys.zipWithIndex.foldLeft[ParseResult[Map[String, Table]]](Right(tables))({
-        case (err@Left(_), _) => err
-        case (Right(tables), (foreignKey, foreignKeyOrdinal)) =>
-          linkForeignKeyToReferencedTable(baseUrl, tables, definitionTable, foreignKey, foreignKeyOrdinal)
-      })
-    )
+    definitionTable.schema
+      .map(tableSchema =>
+        tableSchema.foreignKeys.zipWithIndex
+          .foldLeft[ParseResult[Map[String, Table]]](Right(tables))({
+            case (err @ Left(_), _) => err
+            case (Right(tables), (foreignKey, foreignKeyOrdinal)) =>
+              linkForeignKeyToReferencedTable(
+                baseUrl,
+                tables,
+                definitionTable,
+                foreignKey,
+                foreignKeyOrdinal
+              )
+          })
+      )
       .getOrElse(Right(tables))
   }
 
   private def linkForeignKeyToReferencedTable(
-                                               baseUrl: String,
-                                               tables: Map[String, Table],
-                                               definitionTable: Table,
-                                               foreignKey: ForeignKeyDefinition,
-                                               foreignKeyOrdinal: Int
+      baseUrl: String,
+      tables: Map[String, Table],
+      definitionTable: Table,
+      foreignKey: ForeignKeyDefinition,
+      foreignKeyOrdinal: Int
   ): ParseResult[Map[String, Table]] = {
-    foreignKey.jsonObject.getMaybeNode("reference")
+    foreignKey.jsonObject
+      .getMaybeNode("reference")
       .map({
         case referenceObjectNode: ObjectNode =>
-          getReferencedTableForForeignKey(baseUrl, tables, definitionTable.url, foreignKeyOrdinal, referenceObjectNode)
-            .flatMap(referencedTable =>
+          getReferencedTableForForeignKey(
+            baseUrl,
+            tables,
+            definitionTable.url,
+            foreignKeyOrdinal,
+            referenceObjectNode
+          ).flatMap(referencedTable =>
               referencedTable.schema
-                .map(setForeignKeyOnReferencedTable(definitionTable, foreignKey, referencedTable, _, referenceObjectNode, foreignKeyOrdinal))
-                .getOrElse(Left(MetadataError(s"Unable to locate schema for table '${definitionTable.url}'")))
+                .map(
+                  setForeignKeyOnReferencedTable(
+                    definitionTable,
+                    foreignKey,
+                    referencedTable,
+                    _,
+                    referenceObjectNode,
+                    foreignKeyOrdinal
+                  )
+                )
+                .getOrElse(
+                  Left(
+                    MetadataError(
+                      s"Unable to locate schema for table '${definitionTable.url}'"
+                    )
+                  )
+                )
             )
-            .map(referencedTable => tables.updated(referencedTable.url, referencedTable))
-        case referenceNode => Left(MetadataError(s"Foreign Key reference was not an object: ${referenceNode.toPrettyString}"))
+            .map(referencedTable =>
+              tables.updated(referencedTable.url, referencedTable)
+            )
+        case referenceNode =>
+          Left(
+            MetadataError(
+              s"Foreign Key reference was not an object: ${referenceNode.toPrettyString}"
+            )
+          )
       })
-      .getOrElse(Left(MetadataError(s"Foreign key reference node unset on '${definitionTable.url}' foreign key at index $foreignKeyOrdinal.")))
+      .getOrElse(
+        Left(
+          MetadataError(
+            s"Foreign key reference node unset on '${definitionTable.url}' foreign key at index $foreignKeyOrdinal."
+          )
+        )
+      )
   }
 
   private def getReferencedTableForForeignKey(
-                                               baseUrl: String,
-                                               tables: Map[String, Table],
-                                               originTableUrl: String,
-                                               foreignKeyArrayIndex: Int,
-                                               referenceObject: ObjectNode
-                                             ): ParseResult[Table] = {
-    referenceObject.getMaybeNode("resource")
+      baseUrl: String,
+      tables: Map[String, Table],
+      originTableUrl: String,
+      foreignKeyArrayIndex: Int,
+      referenceObject: ObjectNode
+  ): ParseResult[Table] = {
+    referenceObject
+      .getMaybeNode("resource")
       .map(resourceNode => {
         val referencedTableUrl = new URL(
           new URL(baseUrl),
           resourceNode.asText()
         ).toString
-        tables.get(referencedTableUrl).map(Right(_)).getOrElse(Left(MetadataError(
-          s"Could not find foreign key referenced table $referencedTableUrl, " +
-            s"$$.tables[?(@.url = '$originTableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference.resource"
-        )))
+        tables
+          .get(referencedTableUrl)
+          .map(Right(_))
+          .getOrElse(
+            Left(
+              MetadataError(
+                s"Could not find foreign key referenced table $referencedTableUrl, " +
+                  s"$$.tables[?(@.url = '$originTableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference.resource"
+              )
+            )
+          )
       })
       .getOrElse(
-        referenceObject.getMaybeNode("schemaReference")
+        referenceObject
+          .getMaybeNode("schemaReference")
           .map(schemaReferenceNode => {
             val schemaUrl =
               new URL(new URL(baseUrl), schemaReferenceNode.asText()).toString
             tables.values
-              .filter(table => table.schema.exists(s => s.schemaId.exists(_ == schemaUrl)))
-              .toList.headOption
+              .filter(table =>
+                table.schema.exists(s => s.schemaId.exists(_ == schemaUrl))
+              )
+              .toList
+              .headOption
               .map(Right(_))
-              .getOrElse(Left(MetadataError(
-                s"Could not find foreign key referenced schema $schemaUrl, " +
-                  s"$$.tables[?(@.url = '$originTableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference.SchemaReference"
-              )))
+              .getOrElse(
+                Left(
+                  MetadataError(
+                    s"Could not find foreign key referenced schema $schemaUrl, " +
+                      s"$$.tables[?(@.url = '$originTableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference.SchemaReference"
+                  )
+                )
+              )
           })
+          .getOrElse(
+            Left(
+              MetadataError(
+                s"Could not find foreign `resource` or `schemaReference` on " +
+                  s"$$.tables[?(@.url = '$originTableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference"
+              )
+            )
+          )
       )
   }
 
   private def setForeignKeyOnReferencedTable(
-                                              definitionTable: Table,
-                                              foreignKeyDefinition: ForeignKeyDefinition,
-                                              referencedTable: Table,
-                                              referencedTableSchema: TableSchema,
-                                              referenceNode: ObjectNode,
-                                              foreignKeyOrdinal: Int
-                                            ): ParseResult[Table] = {
+      definitionTable: Table,
+      foreignKeyDefinition: ForeignKeyDefinition,
+      referencedTable: Table,
+      referencedTableSchema: TableSchema,
+      referenceNode: ObjectNode,
+      foreignKeyOrdinal: Int
+  ): ParseResult[Table] = {
     val mapNameToColumn = referencedTableSchema.columns
       .flatMap(col => col.name.map((_, col)))
       .toMap
@@ -330,165 +434,274 @@ object TableGroup {
             .asScalaArray
             .map({
               case columnReference: TextNode =>
-                mapNameToColumn.get(columnReference.asText())
+                mapNameToColumn
+                  .get(columnReference.asText())
                   .map(Right(_))
-                  .getOrElse(Left(MetadataError(
-                    s"column named ${columnReference.asText()} does not exist in ${referencedTable.url}," +
-                      s" $$.tables[?(@.url = '${definitionTable.url}')].tableSchema.foreign_keys[$foreignKeyOrdinal].reference.columnReference"
-                  )))
-              case columnReferenceNode => Left(MetadataError(s"Unexpected columnReference '${columnReferenceNode.toPrettyString}'"))
+                  .getOrElse(
+                    Left(
+                      MetadataError(
+                        s"column named ${columnReference
+                          .asText()} does not exist in ${referencedTable.url}," +
+                          s" $$.tables[?(@.url = '${definitionTable.url}')].tableSchema.foreign_keys[$foreignKeyOrdinal].reference.columnReference"
+                      )
+                    )
+                  )
+              case columnReferenceNode =>
+                Left(
+                  MetadataError(
+                    s"Unexpected columnReference '${columnReferenceNode.toPrettyString}'"
+                  )
+                )
             })
             .foldLeft[ParseResult[Array[Column]]](Right(Array[Column]()))({
-              case (err@Left(_), _) => err
-              case (_, Left(newErr)) => Left(newErr)
-              case (Right(columns), Right(newColumn)) => Right(columns :+ newColumn)
+              case (err @ Left(_), _) => err
+              case (_, Left(newErr))  => Left(newErr)
+              case (Right(columns), Right(newColumn)) =>
+                Right(columns :+ newColumn)
             })
-        case columnReferenceNode => Left(MetadataError(s"Unexpected columnReference node ${columnReferenceNode.toPrettyString}"))
+        case columnReferenceNode =>
+          Left(
+            MetadataError(
+              s"Unexpected columnReference node ${columnReferenceNode.toPrettyString}"
+            )
+          )
       })
       .getOrElse(
         Left(MetadataError("Did not find columnReference node."))
       )
-      .map(
-        referencedTableColumns =>
-          referencedTable.copy(
-            foreignKeyReferences = referencedTable.foreignKeyReferences :+ ReferencedTableForeignKeyReference(
+      .map(referencedTableColumns =>
+        referencedTable.copy(
+          foreignKeyReferences =
+            referencedTable.foreignKeyReferences :+ ReferencedTableForeignKeyReference(
               foreignKeyDefinition,
               referencedTable,
               referencedTableColumns,
               definitionTable
             )
-          )
+        )
       )
   }
 
-  private def parseTableGroupType(tableGroupNode: ObjectNode): ParseResult[String] = {
-    tableGroupNode.getMaybeNode("@type").map(typeNode => {
-      val allegedType = typeNode.asText
-      if (allegedType == "TableGroup")
-        Right(allegedType)
-      else
-        Left(MetadataError(s"@type of table group is not 'TableGroup', found @type to be a '$allegedType'"))
-    })
+  private def parseTableGroupType(
+      tableGroupNode: ObjectNode
+  ): ParseResult[String] = {
+    tableGroupNode
+      .getMaybeNode("@type")
+      .map(typeNode => {
+        val allegedType = typeNode.asText
+        if (allegedType == "TableGroup")
+          Right(allegedType)
+        else
+          Left(
+            MetadataError(
+              s"@type of table group is not 'TableGroup', found @type to be a '$allegedType'"
+            )
+          )
+      })
       .getOrElse(Right("TableGroup"))
   }
 
   def partitionTableGroupProperties(
-                                     tableGroupNode: ObjectNode,
-                                     baseUrl: String,
-                                     lang: String
-                                   ): ParseResult[PartitionedTableGroupProperties] = {
-    tableGroupNode.getKeysAndValues.map({
-      case (propertyName, valueNode) if validProperties.contains(propertyName) => Right((propertyName, valueNode, Array[String](), PropertyType.Common))
-      case (propertyName, valueNode) =>
-        PropertyChecker.parseJsonProperty(propertyName, valueNode, baseUrl, lang)
-          .map(propertyName +: _)
-    })
-      .foldLeft[ParseResult[PartitionedTableGroupProperties]](Right(PartitionedTableGroupProperties()))({
-        case (err@Left(_), _) => err
-        case (_, Left(newErr)) => Left(newErr)
-        case (Right(partitionedProperties), Right((propertyName, parsedValue, stringWarnings, propertyType))) =>
-          val warnings = partitionedProperties.warnings ++ stringWarnings.map(WarningWithCsvContext(
-            _,
-            "metadata",
-            "",
-            "",
-            s"$propertyName : ${parsedValue.toPrettyString}",
-            ""
-          ))
-          propertyType match {
-            case PropertyType.Annotation => Right(partitionedProperties.copy(annotations = partitionedProperties.annotations + (propertyName -> parsedValue), warnings = warnings))
-            case PropertyType.Common => Right(partitionedProperties.copy(common = partitionedProperties.common + (propertyName -> parsedValue), warnings = warnings))
-            case PropertyType.Inherited => Right(partitionedProperties.copy(inherited = partitionedProperties.inherited + (propertyName -> parsedValue), warnings = warnings))
-            case _ => Right(partitionedProperties.copy(warnings = warnings :+ WarningWithCsvContext(
-              "invalid_property",
+      tableGroupNode: ObjectNode,
+      baseUrl: String,
+      lang: String
+  ): ParseResult[PartitionedTableGroupProperties] = {
+    tableGroupNode.getKeysAndValues
+      .map({
+        case (propertyName, valueNode)
+            if validProperties.contains(propertyName) =>
+          Right((propertyName, valueNode, Array[String](), PropertyType.Common))
+        case (propertyName, valueNode) =>
+          PropertyChecker
+            .parseJsonProperty(propertyName, valueNode, baseUrl, lang)
+            .map(propertyName +: _)
+      })
+      .foldLeft[ParseResult[PartitionedTableGroupProperties]](
+        Right(PartitionedTableGroupProperties())
+      )({
+        case (err @ Left(_), _) => err
+        case (_, Left(newErr))  => Left(newErr)
+        case (
+              Right(partitionedProperties),
+              Right((propertyName, parsedValue, stringWarnings, propertyType))
+            ) =>
+          val warnings = partitionedProperties.warnings ++ stringWarnings.map(
+            WarningWithCsvContext(
+              _,
               "metadata",
               "",
               "",
-              propertyName,
+              s"$propertyName : ${parsedValue.toPrettyString}",
               ""
-            )))
+            )
+          )
+          propertyType match {
+            case PropertyType.Annotation =>
+              Right(
+                partitionedProperties.copy(
+                  annotations =
+                    partitionedProperties.annotations + (propertyName -> parsedValue),
+                  warnings = warnings
+                )
+              )
+            case PropertyType.Common =>
+              Right(
+                partitionedProperties.copy(
+                  common =
+                    partitionedProperties.common + (propertyName -> parsedValue),
+                  warnings = warnings
+                )
+              )
+            case PropertyType.Inherited =>
+              Right(
+                partitionedProperties.copy(
+                  inherited =
+                    partitionedProperties.inherited + (propertyName -> parsedValue),
+                  warnings = warnings
+                )
+              )
+            case _ =>
+              Right(
+                partitionedProperties.copy(warnings =
+                  warnings :+ WarningWithCsvContext(
+                    "invalid_property",
+                    "metadata",
+                    "",
+                    "",
+                    propertyName,
+                    ""
+                  )
+                )
+              )
           }
       })
   }
 
   private def parseTables(
-                           tableGroupNode: ObjectNode,
-                           baseUrl: String,
-                           lang: String,
-                           commonProperties: Map[String, JsonNode],
-                           inheritedProperties: Map[String, JsonNode]
-                         ): ParseResult[WithWarningsAndErrors[Map[String, Table]]] = {
-    tableGroupNode.getMaybeNode("tables").map({
-      case tablesArrayNode: ArrayNode if tablesArrayNode.isEmpty() => Left(MetadataError("Empty tables property"))
-      case tablesArrayNode: ArrayNode =>
-        parseArrayNodeTables(
-          tablesArrayNode,
-          baseUrl,
-          lang,
-          commonProperties,
-          inheritedProperties
-        )
-      case _ => Left(MetadataError("Tables property is not an array"))
-    }).getOrElse(Left(MetadataError("No tables property")))
-  }
-
-  def parseArrayNodeTables(
-                            tablesArrayNode: ArrayNode,
-                            baseUrl: String,
-                            lang: String,
-                            commonProperties: Map[String, JsonNode],
-                            inheritedProperties: Map[String, JsonNode]
-                          ): ParseResult[WithWarningsAndErrors[Map[String, Table]]] = {
-    val warnings = ArrayBuffer.empty[WarningWithCsvContext]
-    val errors = ArrayBuffer.empty[ErrorWithCsvContext]
-    val tables = mutable.Map[String, Table]()
-    for (tableElement <- tablesArrayNode.elements().asScalaArray) {
-      tableElement match {
-        case tableElementObject: ObjectNode =>
-          var tableUrl = tableElement.get("url")
-          if (!tableUrl.isTextual) {
-            errors.addOne(
-              ErrorWithCsvContext(
-                "invalid_url",
-                "metadata",
-                "",
-                "",
-                s"url: $tableUrl",
-                ""
-              )
-            )
-            tableUrl = new TextNode("")
-          }
-          tableUrl = new TextNode(
-            new URL(new URL(baseUrl), tableUrl.asText()).toString
-          )
-          tableElementObject.set("url", tableUrl)
-          val (table, w) = Table.fromJson(
-            tableElementObject,
+      tableGroupNode: ObjectNode,
+      baseUrl: String,
+      lang: String,
+      commonProperties: Map[String, JsonNode],
+      inheritedProperties: Map[String, JsonNode]
+  ): ParseResult[WithWarningsAndErrors[Map[String, Table]]] = {
+    tableGroupNode
+      .getMaybeNode("tables")
+      .map({
+        case tablesArrayNode: ArrayNode if tablesArrayNode.isEmpty() =>
+          Left(MetadataError("Empty tables property"))
+        case tablesArrayNode: ArrayNode =>
+          parseArrayNodeTables(
+            tablesArrayNode,
             baseUrl,
             lang,
             commonProperties,
             inheritedProperties
           )
-          tables += (tableUrl.asText -> table)
-          warnings.addAll(w)
-        case _ =>
-          warnings.addOne(
-            WarningWithCsvContext(
+        case _ => Left(MetadataError("Tables property is not an array"))
+      })
+      .getOrElse(Left(MetadataError("No tables property")))
+  }
+
+  def parseArrayNodeTables(
+      tablesArrayNode: ArrayNode,
+      baseUrl: String,
+      lang: String,
+      commonProperties: Map[String, JsonNode],
+      inheritedProperties: Map[String, JsonNode]
+  ): ParseResult[WithWarningsAndErrors[Map[String, Table]]] = {
+    tablesArrayNode
+      .elements()
+      .asScalaArray
+      .foldLeft[ParseResult[WithWarningsAndErrors[Map[String, Table]]]](
+        Right(WithWarningsAndErrors(Map(), WarningsAndErrors()))
+      )({
+        case (err @ Left(_), _) => err
+        case (
+              Right(WithWarningsAndErrors(tables, warningsAndErrors)),
+              tableElementObject: ObjectNode
+            ) =>
+          val (tableUrl, errors) = parseTableUrl(tableElementObject)
+
+          val tableUrlNode = new TextNode(
+            new URL(new URL(baseUrl), tableUrl).toString
+          )
+          val modifiedTableNode =
+            tableElementObject.deepCopy().set("url", tableUrlNode)
+
+          Table
+            .fromJson(
+              modifiedTableNode,
+              baseUrl,
+              lang,
+              commonProperties,
+              inheritedProperties
+            )
+            .map({
+              case (table, warnings) =>
+                WithWarningsAndErrors(
+                  tables + (table.url -> table),
+                  warningsAndErrors.copy(
+                    warnings = warningsAndErrors.warnings ++ warnings,
+                    errors = warningsAndErrors.errors ++ errors
+                  )
+                )
+            })
+        case (
+              Right(WithWarningsAndErrors(tables, warningsAndErrors)),
+              tableElement
+            ) =>
+          val newWarningsAndErrors = warningsAndErrors.copy(warnings =
+            warningsAndErrors.warnings :+ WarningWithCsvContext(
               "invalid_table_description",
               "metadata",
               "",
               "",
-              s"Value must be instance of object, found: ${tableElement.toPrettyString}",
+              s"Table must be instance of object, found: ${tableElement}",
               ""
             )
           )
-      }
-    }
-    (
-      tables,
-      WarningsAndErrors(errors = errors.toArray, warnings = warnings.toArray)
-    )
+          Right(WithWarningsAndErrors(tables, newWarningsAndErrors))
+      })
+  }
+
+  private def parseTableUrl(
+      tableElementObject: ObjectNode
+  ): (String, Array[ErrorWithCsvContext]) = {
+    tableElementObject
+      .getMaybeNode("url")
+      .map({
+        case urlTextNode: TextNode =>
+          (urlTextNode.asText, Array[ErrorWithCsvContext]())
+        case urlNode =>
+          (
+            "",
+            Array(
+              ErrorWithCsvContext(
+                "invalid_url",
+                "metadata",
+                "",
+                "",
+                s"url: ${urlNode.toPrettyString}",
+                ""
+              )
+            )
+          )
+      })
+      .getOrElse(
+        (
+          "",
+          Array(
+            ErrorWithCsvContext(
+              "invalid_url",
+              "metadata",
+              "",
+              "",
+              s"Did not find URL for table.",
+              ""
+            )
+          )
+        )
+      )
   }
 
   private def getId(commonProperties: Map[String, JsonNode]): Option[String] = {
@@ -498,14 +711,14 @@ object TableGroup {
   }
 
   case class PartitionedTableGroupProperties(
-                                              annotations: Map[String, JsonNode] = Map(),
-                                              common: Map[String, JsonNode] = Map(),
-                                              inherited: Map[String, JsonNode] = Map(),
-                                              warnings: Array[WarningWithCsvContext] = Array()
-                                            )
+      annotations: Map[String, JsonNode] = Map(),
+      common: Map[String, JsonNode] = Map(),
+      inherited: Map[String, JsonNode] = Map(),
+      warnings: Array[WarningWithCsvContext] = Array()
+  )
 }
 
-  case class TableGroup private(
+case class TableGroup private (
     baseUrl: String,
     id: Option[String],
     tables: Map[String, Table],

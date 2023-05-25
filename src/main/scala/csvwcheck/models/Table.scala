@@ -4,23 +4,16 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode, TextNode}
 import csvwcheck.PropertyChecker.StringWarnings
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{
-  ErrorWithCsvContext,
-  MetadataError,
-  WarningWithCsvContext
-}
+import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
-import csvwcheck.traits.ObjectNodeExtentions.{
-  IteratorHasGetKeysAndValues,
-  ObjectNodeGetMaybeNode
-}
+import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import csvwcheck.{PropertyChecker, models}
 import org.apache.commons.csv.CSVRecord
 
 import scala.collection.JavaConverters.asScalaIteratorConverter
 import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, Map}
+import scala.collection.mutable.ArrayBuffer
 object Table {
 
   private val tablePermittedProperties = Array[String](
@@ -34,8 +27,8 @@ object Table {
       tableDesc: ObjectNode,
       baseUrl: String,
       lang: String,
-      commonProperties: mutable.Map[String, JsonNode],
-      inheritedPropertiesIn: mutable.Map[String, JsonNode]
+      commonProperties: Map[String, JsonNode],
+      inheritedPropertiesIn: Map[String, JsonNode]
   ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
     partitionAndValidateTablePropertiesByType(
       commonProperties,
@@ -77,8 +70,8 @@ object Table {
   }
 
   private def partitionAndValidateTablePropertiesByType(
-      commonProperties: mutable.Map[String, JsonNode],
-      inheritedProperties: mutable.Map[String, JsonNode],
+      commonProperties: Map[String, JsonNode],
+      inheritedProperties: Map[String, JsonNode],
       tableObjectNode: ObjectNode,
       baseUrl: String,
       lang: String
@@ -197,8 +190,8 @@ object Table {
   }
 
   private def extractTableSchema(
-      tableProperties: mutable.Map[String, JsonNode],
-      inheritedPropertiesCopy: mutable.Map[String, JsonNode]
+      tableProperties: Map[String, JsonNode],
+      inheritedPropertiesCopy: Map[String, JsonNode]
   ): Option[JsonNode] = {
     tableProperties
       .get("tableSchema")
@@ -207,12 +200,12 @@ object Table {
 
   private def parseTable(
       tableSchema: JsonNode,
-      inheritedProperties: mutable.Map[String, JsonNode],
+      inheritedProperties: Map[String, JsonNode],
       baseUrl: String,
       lang: String,
       tableUrl: String,
-      tableProperties: mutable.Map[String, JsonNode],
-      annotations: mutable.Map[String, JsonNode],
+      tableProperties: Map[String, JsonNode],
+      annotations: Map[String, JsonNode],
       existingWarnings: Array[WarningWithCsvContext]
   ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
     tableSchema match {
@@ -734,7 +727,7 @@ object Table {
   }
 
   private def getTableSchemaInheritedProperties(
-      inheritedProperties: mutable.Map[String, JsonNode],
+      inheritedProperties: Map[String, JsonNode],
       tableSchemaObject: ObjectNode
   ): Map[String, JsonNode] = {
     inheritedProperties ++ tableSchemaObject.getKeysAndValues
@@ -747,7 +740,7 @@ object Table {
 
   private def parseNotes(
       tableAndWarnings: (Table, Array[WarningWithCsvContext]),
-      tableProperties: mutable.Map[String, JsonNode]
+      tableProperties: Map[String, JsonNode]
   ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
     val (table, warnings) = tableAndWarnings
 
@@ -762,7 +755,7 @@ object Table {
   }
 
   private def initializeTableWithDefaults(
-      annotations: mutable.Map[String, JsonNode],
+      annotations: Map[String, JsonNode],
       warnings: Array[WarningWithCsvContext],
       url: String
   ): (Table, Array[WarningWithCsvContext]) = {
@@ -797,7 +790,7 @@ case class TableSchema(
 case class Table private (
     url: String,
     suppressOutput: Boolean,
-    annotations: mutable.Map[String, JsonNode],
+    annotations: Map[String, JsonNode],
     id: Option[String] = None,
     schema: Option[TableSchema] = None,
     dialect: Option[Dialect] = None,

@@ -313,7 +313,7 @@ class TableGroupTest extends AnyFunSuite {
       .readTree(json)
       .asInstanceOf[ArrayNode]
     val thrown = intercept[MetadataError] {
-      TableGroup.validateContextArrayNode(
+      TableGroup.parseContextArrayNode(
         arrayNode,
         "http://default-base-url",
         "default-lang"
@@ -342,7 +342,7 @@ class TableGroupTest extends AnyFunSuite {
       .readTree(json)
       .asInstanceOf[ArrayNode]
     val thrown = intercept[MetadataError] {
-      TableGroup.validateContextArrayNode(
+      TableGroup.parseContextArrayNode(
         arrayNode,
         "http://default-base-url",
         "default-lang"
@@ -369,7 +369,7 @@ class TableGroupTest extends AnyFunSuite {
     val arrayNode = objectMapper
       .readTree(json)
       .asInstanceOf[ArrayNode]
-    val (newBaseUrl, newLang, err) = TableGroup.validateContextArrayNode(
+    val (newBaseUrl, newLang, err) = TableGroup.parseContextArrayNode(
       arrayNode,
       "http://default-base-url",
       "default-lang"
