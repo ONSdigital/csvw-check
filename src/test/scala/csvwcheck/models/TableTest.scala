@@ -77,20 +77,20 @@ class TableTest extends AnyFunSuite {
     val jsonNode = objectMapper.readTree(json)
     val tableObject1 = jsonNode.get("tables").elements().asScalaArray(0)
     val tableObject2 = jsonNode.get("tables").elements().asScalaArray(1)
-    val (table1, w1) = Table.fromJson(
+    val Right((table1, w1)) = Table.fromJson(
       tableObject1.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/countries.json",
       "und",
-      mutable.Map(),
-      mutable.Map()
+      Map(),
+      Map()
     )
 
-    val (table2, _) = Table.fromJson(
+    val Right((table2, _)) = Table.fromJson(
       tableObject2.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/countries.json",
       "und",
-      mutable.Map(),
-      mutable.Map()
+      Map(),
+      Map()
     )
 
     assert(table1.url === "http://w3c.github.io/csvw/tests/countries.csv")
@@ -152,8 +152,8 @@ class TableTest extends AnyFunSuite {
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
         "und",
-        mutable.Map(),
-        mutable.Map()
+        Map(),
+        Map()
       )
     }
     assert(thrown.getMessage === "Multiple columns named year")
@@ -198,8 +198,8 @@ class TableTest extends AnyFunSuite {
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
         "und",
-        mutable.Map(),
-        mutable.Map()
+        Map(),
+        Map()
       )
     }
     assert(
@@ -242,8 +242,8 @@ class TableTest extends AnyFunSuite {
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
         "und",
-        mutable.Map(),
-        mutable.Map()
+        Map(),
+        Map()
       )
     }
     assert(thrown.getMessage === "URL not found for table")
@@ -264,8 +264,8 @@ class TableTest extends AnyFunSuite {
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
         "und",
-        mutable.Map(),
-        mutable.Map()
+        Map(),
+        Map()
       )
     }
     assert(
@@ -288,8 +288,8 @@ class TableTest extends AnyFunSuite {
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
         "und",
-        mutable.Map(),
-        mutable.Map()
+        Map(),
+        Map()
       )
     }
     assert(

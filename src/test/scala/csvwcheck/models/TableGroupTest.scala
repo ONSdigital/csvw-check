@@ -65,7 +65,7 @@ class TableGroupTest extends AnyFunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (tableGroup, _) = TableGroup.fromJson(
+    val Right(WithWarningsAndErrors(tableGroup, _)) = TableGroup.fromJson(
       jsonNode.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/countries.json"
     )
@@ -77,13 +77,13 @@ class TableGroupTest extends AnyFunSuite {
     assert(referencedTable.foreignKeyReferences.length === 1)
     val foreignKeyReference = referencedTable.foreignKeyReferences(0)
     assert(
-      foreignKeyReference.parentTable.url === "http://w3c.github.io/csvw/tests/countries.csv"
+      foreignKeyReference.referencedTable.url === "http://w3c.github.io/csvw/tests/countries.csv"
     )
 
-    assert(foreignKeyReference.parentTableReferencedColumns.length === 1)
+    assert(foreignKeyReference.referencedTableReferencedColumns.length === 1)
     assert(
       foreignKeyReference
-        .parentTableReferencedColumns(0)
+        .referencedTableReferencedColumns(0)
         .name
         .get === "countryCode"
     )
@@ -157,7 +157,7 @@ class TableGroupTest extends AnyFunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (tableGroup, _) = TableGroup.fromJson(
+    val Right(WithWarningsAndErrors(tableGroup, _)) = TableGroup.fromJson(
       jsonNode.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/"
     )
@@ -166,11 +166,11 @@ class TableGroupTest extends AnyFunSuite {
 
     assert(referencedTable.foreignKeyReferences.length === 1)
     val foreignKeyReference = referencedTable.foreignKeyReferences(0)
-    assert(foreignKeyReference.parentTable.url === referencedTable.url)
-    assert(foreignKeyReference.parentTableReferencedColumns.length === 1)
+    assert(foreignKeyReference.referencedTable.url === referencedTable.url)
+    assert(foreignKeyReference.referencedTableReferencedColumns.length === 1)
     assert(
       foreignKeyReference
-        .parentTableReferencedColumns(0)
+        .referencedTableReferencedColumns(0)
         .name
         .get === "countryCode"
     )
@@ -218,7 +218,7 @@ class TableGroupTest extends AnyFunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (tableGroup, warningsAndErrors) = TableGroup.fromJson(
+    val Right(WithWarningsAndErrors(tableGroup, warningsAndErrors)) = TableGroup.fromJson(
       jsonNode.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/test040-metadata.json"
     )
@@ -284,7 +284,7 @@ class TableGroupTest extends AnyFunSuite {
         |  }
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (tableGroup, _) = TableGroup.fromJson(
+    val Right(WithWarningsAndErrors(tableGroup, _)) = TableGroup.fromJson(
       jsonNode.asInstanceOf[ObjectNode],
       "http://w3c.github.io/csvw/tests/test040-metadata.json"
     )
@@ -369,7 +369,7 @@ class TableGroupTest extends AnyFunSuite {
     val arrayNode = objectMapper
       .readTree(json)
       .asInstanceOf[ArrayNode]
-    val (newBaseUrl, newLang, err) = TableGroup.parseContextArrayNode(
+    val Right((newBaseUrl, newLang, err)) = TableGroup.parseContextArrayNode(
       arrayNode,
       "http://default-base-url",
       "default-lang"
