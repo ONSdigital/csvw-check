@@ -84,19 +84,20 @@ object Column {
       .flatMapKeepAccumulating({case (parsedColumnProperties, _, _, _) => parseUrls(parsedColumnProperties)})
       .flatMapKeepAccumulating({case (_, dataTypeObjectNode, _, _, _) => parseLengthRestrictions(dataTypeObjectNode)})
       .flatMapKeepAccumulating({case (_, dataTypeObjectNode, _, _, _, _) => parseNumericAndDateRangeRestrictions(dataTypeObjectNode)})
+      .flatMapKeepAccumulating({case (_, dataTypeObjectNode, _, _, _, _, _) => parseBaseDataType(dataTypeObjectNode)})
+      .flatMapKeepAccumulating({case (parsedColumnProperties, _, _, _, _, _, _, _) => parseName(parsedColumnProperties.column, lang)})
       .map({
-        case (parsedColumnProperties, dataTypeObjectNode, titles, nullParam, urls, lengthRestrictions, numericAndDateRangeRestrictions) =>
-          val name = getName(parsedColumnProperties.column, lang)
+        case (parsedColumnProperties, dataTypeObjectNode, titles, nullParam, urls, lengthRestrictions, numericAndDateRangeRestrictions, baseDataType, name) =>
           val formatNode = dataTypeObjectNode.path("format")
 
           val column = new Column(
             annotations = parsedColumnProperties.annotation,
-            baseDataType = getBaseDataType(dataTypeObjectNode),
+            baseDataType = baseDataType,
             columnOrdinal = columnOrdinal,
             default = "", // Filled in later
             format = getMaybeFormatForColumn(formatNode),
             name = name,
-            id = getId(parsedColumnProperties.column),
+            id = None, // Filled in later
             lengthRestrictions = lengthRestrictions,
             lang = lang, // Filled in later
             nullParam = nullParam,
@@ -117,6 +118,7 @@ object Column {
         case (parsedProperties, column) =>
           parseTextProperty(parsedProperties.inherited, "default")
             .flatMapStartAccumulating(_ => parseTextProperty(parsedProperties.inherited, "lang"))
+            .flatMapKeepAccumulating(_ => parseTextProperty(parsedProperties.inherited, "id"))
             .flatMapKeepAccumulating(_ => parseBooleanProperty(parsedProperties.inherited, "ordered"))
             .flatMapKeepAccumulating(_ => parseBooleanProperty(parsedProperties.inherited, "required"))
             .flatMapKeepAccumulating(_ => parseTextProperty(parsedProperties.inherited, "separator"))
@@ -124,11 +126,12 @@ object Column {
             .flatMapKeepAccumulating(_ => parseTextProperty(parsedProperties.inherited, "textDirection"))
             .flatMapKeepAccumulating(_ => parseBooleanProperty(parsedProperties.column, "virtual"))
             .map({
-              case (default, lang, ordered, required, separator, suppressOutput, textDirection, virtual) =>
+              case (default, lang, id, ordered, required, separator, suppressOutput, textDirection, virtual) =>
                 (
                   column.copy(
                     default = default.getOrElse(""),
                     lang = lang.getOrElse("und"),
+                    id = id,
                     ordered = ordered.getOrElse(false),
                     required = required.getOrElse(false),
                     separator = separator,
@@ -195,28 +198,38 @@ object Column {
     case node => Left(MetadataError(s"Unexpected value, expected boolean but got: ${node.toPrettyString}"))
   }
 
-  def getId(columnProperties: Map[String, JsonNode]): Option[String] = {
-    val idNode = columnProperties.get("@id")
-    if (idNode.isDefined) Some(idNode.get.asText()) else None
-  }
-
-  def getName(
+  def parseName(
       columnProperties: Map[String, JsonNode],
       lang: String
-  ): Option[String] = {
-    val name = columnProperties.get("name")
-    val titles = columnProperties.get("titles")
-
-    if (name.isDefined && !name.get.isNull) {
-      Some(name.get.asInstanceOf[TextNode].asText())
-    } else if (titles.isDefined && titles.get.path(lang).isMissingNode) {
-      val langArray = Array.from(
-        titles.get.path(lang).elements().asScala
+  ): ParseResult[Option[String]] = {
+    parseTextProperty(columnProperties, "name")
+      .flatMap(name =>
+        name
+          .map(name => Right(Some(name)))
+          .getOrElse(parseTitlesAsName(columnProperties, lang))
       )
-      if (langArray.nonEmpty) {
-        Some(langArray(0).asText())
-      } else None
-    } else None // Not sure what to return here. Hope it does not reach here
+  }
+
+  private def parseTitlesAsName(columnProperties: Map[String, JsonNode], lang: String): ParseResult[Option[String]] = {
+    columnProperties.get("titles")
+      .map({
+        case titlesObjectNode: ObjectNode =>
+          if (titlesObjectNode.size() > 0)
+            parseNodeAsText(
+              titlesObjectNode.getMaybeNode(lang)
+                .getOrElse(titlesObjectNode.get(0))
+            ).map(Some(_))
+          else
+            Right(None)
+        case titlesArrayNode: ArrayNode =>
+          if (titlesArrayNode.size() > 0)
+            parseNodeAsText(titlesArrayNode.get(0)).map(Some(_))
+          else
+            Right(None)
+        case titlesTextNode: TextNode => parseNodeAsText(titlesTextNode).map(Some(_))
+        case titlesNode => Left(MetadataError(s"Unexpected `titles` value: ${titlesNode.toPrettyString}"))
+      })
+      .getOrElse(Right(None))
   }
 
   def getNullParam(
@@ -270,14 +283,11 @@ object Column {
       .getOrElse(Right(Map()))
   }
 
-  def getBaseDataType(datatype: JsonNode): String = {
-    val datatypeBaseField = datatype.path("base")
-    if (datatypeBaseField.isMissingNode) {
-      datatype.get("@id").asText()
-    } else {
-      datatypeBaseField.asText()
-    }
-  }
+  def parseBaseDataType(dataTypeObjectNode: ObjectNode): ParseResult[String] =
+    dataTypeObjectNode.getMaybeNode("base")
+      .orElse(dataTypeObjectNode.getMaybeNode("@id"))
+      .map(parseNodeAsText)
+      .getOrElse(Left(MetadataError("datatype object has neither `base` nor `@id`")))
 
   def partitionAndValidateColumnPropertiesByType(
       columnDesc: ObjectNode,
