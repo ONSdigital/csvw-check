@@ -625,8 +625,8 @@ object TableGroup {
           val tableUrlNode = new TextNode(
             new URL(new URL(baseUrl), tableUrl).toString
           )
-          val modifiedTableNode =
-            tableElementObject.deepCopy().set("url", tableUrlNode)
+          val modifiedTableNode = tableElementObject.deepCopy()
+          modifiedTableNode.set("url", tableUrlNode)
 
           Table
             .fromJson(

@@ -749,9 +749,9 @@ object Table {
       .map({
         case notesNode: ArrayNode =>
           Right(table.copy(notes = Some(notesNode)), warnings)
-        case _ => Right(tableAndWarnings)
+        case _ => Left(MetadataError("Notes property should be an array"))
       })
-      .getOrElse(Left(MetadataError("Notes property should be an array")))
+      .getOrElse(Right(tableAndWarnings))
   }
 
   private def initializeTableWithDefaults(

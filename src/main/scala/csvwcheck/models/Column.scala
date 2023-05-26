@@ -1,35 +1,20 @@
 package csvwcheck.models
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{
-  ArrayNode,
-  JsonNodeFactory,
-  ObjectNode,
-  TextNode
-}
+import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
 import com.typesafe.scalalogging.Logger
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{
-  ErrorWithCsvContext,
-  ErrorWithoutContext,
-  MetadataError
-}
-import csvwcheck.models.Column.{
-  rdfSyntaxNs,
-  unsignedLongMaxValue,
-  validDoubleDatatypeRegex,
-  xmlSchema
-}
+import csvwcheck.errors.{ErrorWithCsvContext, ErrorWithoutContext, MetadataError}
+import csvwcheck.models.Column.{rdfSyntaxNs, unsignedLongMaxValue, validDoubleDatatypeRegex, xmlSchema}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.NumberParser
-import csvwcheck.traits.ObjectNodeExtentions.{
-  IteratorHasGetKeysAndValues,
-  ObjectNodeGetMaybeNode
-}
+import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
+import csvwcheck.traits.ParseResultExtensions.{ParseResultExtensions, TupleParseResultExtensions}
 import csvwcheck.{PropertyChecker, models}
 import org.joda.time.{DateTime, DateTimeZone}
+import shapeless.syntax.std.tuple.productTupleOps
 
 import java.math.BigInteger
 import java.time.{LocalDateTime, Month, ZoneId, ZonedDateTime}
@@ -73,40 +58,26 @@ object Column {
       baseUrl,
       lang,
       inheritedProperties
-    ).flatMap(parsedColumnProperties =>
-        parseLangTitles(parsedColumnProperties.column.get("titles"))
-          .map((parsedColumnProperties, _))
-      )
+    )
+      .flatMapStartAccumulating(parsedColumnProperties => parseLangTitles(parsedColumnProperties.column.get("titles")))
+      .flatMapKeepAccumulating({case (parsedColumnProperties, _) => getNullParam(parsedColumnProperties.inherited)})
+      .flatMapKeepAccumulating({case (parsedColumnProperties, _, _) => getDefault(parsedColumnProperties.inherited)})
+      .flatMapKeepAccumulating({case (parsedColumnProperties, _, _, _) => getDatatypeOrDefault(parsedColumnProperties.inherited)})
       .map({
-        case (parsedColumnProperties, titles) =>
-          val datatype = getDatatypeOrDefault(inheritedProperties)
-          val minLength: Option[Int] =
-            if (datatype.path("minLength").isMissingNode) None
-            else Some(datatype.get("minLength").asText().toInt)
-          val maxLength: Option[Int] =
-            if (datatype.path("maxLength").isMissingNode) None
-            else Some(datatype.get("maxLength").asText().toInt)
-          val length: Option[Int] =
-            if (datatype.path("length").isMissingNode) None
-            else Some(datatype.get("length").asText().toInt)
+        case (parsedColumnProperties, titles, nullParam, default, dataTypeObjectNode) =>
+          val minLength: Option[Int] = dataTypeObjectNode.getMaybeNode("minLength").map(_.asText.toInt)
+          val maxLength: Option[Int] = dataTypeObjectNode.getMaybeNode("maxLength").map(_.asText.toInt)
+          val length: Option[Int] = dataTypeObjectNode.getMaybeNode("length").map(_.asText.toInt)
 
-          val minInclusive: Option[String] =
-            if (datatype.path("minInclusive").isMissingNode) None
-            else Some(datatype.get("minInclusive").asText)
-          val maxInclusive: Option[String] =
-            if (datatype.path("maxInclusive").isMissingNode) None
-            else Some(datatype.get("maxInclusive").asText)
-          val minExclusive: Option[String] =
-            if (datatype.path("minExclusive").isMissingNode) None
-            else Some(datatype.get("minExclusive").asText)
-          val maxExclusive: Option[String] =
-            if (datatype.path("maxExclusive").isMissingNode) None
-            else Some(datatype.get("maxExclusive").asText)
+          val minInclusive: Option[String] = dataTypeObjectNode.getMaybeNode("minInclusive").map(_.asText)
+          val maxInclusive: Option[String] = dataTypeObjectNode.getMaybeNode("maxInclusive").map(_.asText)
+          val minExclusive: Option[String] = dataTypeObjectNode.getMaybeNode("minExclusive").map(_.asText)
+          val maxExclusive: Option[String] = dataTypeObjectNode.getMaybeNode("maxExclusive").map(_.asText)
 
           val newLang = getLangOrDefault(inheritedProperties)
 
           val name = getName(parsedColumnProperties.column, lang)
-          val formatNode = datatype.path("format")
+          val formatNode = dataTypeObjectNode.path("format")
 
           val column = new Column(
             columnOrdinal = columnOrdinal,
@@ -119,10 +90,10 @@ object Column {
             maxInclusive = maxInclusive,
             minExclusive = minExclusive,
             maxExclusive = maxExclusive,
-            baseDataType = getBaseDataType(datatype),
+            baseDataType = getBaseDataType(dataTypeObjectNode),
             lang = newLang,
-            nullParam = getNullParam(inheritedProperties),
-            default = getDefault(inheritedProperties),
+            nullParam = nullParam,
+            default = default,
             required = getRequired(inheritedProperties),
             aboutUrl = getAboutUrl(inheritedProperties),
             propertyUrl = getPropertyUrl(inheritedProperties),
@@ -188,11 +159,12 @@ object Column {
     }
   }
 
-  def getDefault(inheritedProperties: Map[String, JsonNode]): String = {
-    inheritedProperties.get("default") match {
-      case Some(value) => value.asInstanceOf[TextNode].asText()
-      case _           => ""
-    }
+  def getDefault(inheritedProperties: Map[String, JsonNode]): ParseResult[String] = {
+    inheritedProperties.get("default").map({
+      case defaultNode: TextNode => Right(defaultNode.asText)
+      case defaultNode => Left(MetadataError(s"Unexpected default value: ${defaultNode.toPrettyString}"))
+    })
+      .getOrElse(Right(""))
   }
 
   def getId(columnProperties: Map[String, JsonNode]): Option[String] = {
@@ -221,22 +193,21 @@ object Column {
 
   def getNullParam(
       inheritedProperties: Map[String, JsonNode]
-  ): Array[String] = {
-    inheritedProperties.get("null") match {
-      case Some(value) =>
-        value match {
-          case a: ArrayNode =>
-            var nullParamsToReturn = Array[String]()
-            val nullParams = Array.from(a.elements.asScala)
-            for (np <- nullParams)
-              nullParamsToReturn :+= np.asText()
-            nullParamsToReturn
-          case s: TextNode => Array[String](s.asText())
-          case _ =>
-            throw MetadataError("unexpected value for null property")
-        }
-      case None => Array[String]("")
-    }
+  ): ParseResult[Array[String]] = {
+    inheritedProperties.get("null")
+      .map({
+        case a: ArrayNode =>
+          var nullParamsToReturn = Array[String]()
+          val nullParams = Array.from(a.elements.asScala)
+          for (np <- nullParams)
+            nullParamsToReturn :+= np.asText()
+
+          Right(nullParamsToReturn)
+        case s: TextNode => Right(Array[String](s.asText()))
+        case nullNode =>
+          Left(MetadataError(s"unexpected value for null property: ${nullNode.toPrettyString}"))
+      })
+      .getOrElse(Right(Array[String]("")))
   }
 
   def getAboutUrl(
@@ -341,7 +312,7 @@ object Column {
         case (propertyName, value) =>
           PropertyChecker
             .parseJsonProperty(propertyName, value, baseUrl, lang)
-            .map({ case (v, ws, pt) => (propertyName, v, ws, pt) })
+            .map(propertyName +: _)
       })
       .foldLeft(initialAccumulator)({
         case (err @ Left(_), _) => err
@@ -350,30 +321,38 @@ object Column {
               Right(parsedProperties),
               Right((propertyName, parsedValue, stringWarnings, propertyType))
             ) =>
-          val partitionedProperties = (propertyType match {
+          val mappedWarnings = stringWarnings.map(
+            ErrorWithoutContext(
+              _,
+              s"$propertyName: ${parsedValue.toPrettyString}"
+            )
+          )
+
+          val partitionedProperties = propertyType match {
             case PropertyType.Inherited =>
-              parsedProperties
-                .withInheritedProperty(propertyName -> parsedValue)
+              parsedProperties.copy(
+                inherited = parsedProperties.inherited + (propertyName -> parsedValue),
+                warnings = parsedProperties.warnings ++ mappedWarnings
+              )
             case PropertyType.Annotation =>
-              parsedProperties
-                .withAnnotationProperty(propertyName -> parsedValue)
+              parsedProperties.copy(
+                annotation = parsedProperties.annotation + (propertyName -> parsedValue),
+                warnings = parsedProperties.warnings ++ mappedWarnings
+              )
             case PropertyType.Common | PropertyType.Column =>
-              parsedProperties.withColumnProperty(propertyName -> parsedValue)
+              parsedProperties.copy(
+                column = parsedProperties.column + (propertyName -> parsedValue),
+                warnings = parsedProperties.warnings ++ mappedWarnings
+              )
             case _ =>
-              parsedProperties.withWarning(
-                ErrorWithoutContext(
+              parsedProperties.copy(
+                warnings = parsedProperties.warnings ++ mappedWarnings :+ ErrorWithoutContext(
                   s"invalid_property",
                   s"column: $propertyName"
                 )
               )
-          }).withWarnings(
-            stringWarnings.map(
-              ErrorWithoutContext(
-                _,
-                s"$propertyName: ${parsedValue.toPrettyString}"
-              )
-            )
-          )
+          }
+
           Right(partitionedProperties)
       })
   }
@@ -418,12 +397,12 @@ object Column {
 
   private def getDatatypeOrDefault(
       inheritedPropertiesCopy: Map[String, JsonNode]
-  ): JsonNode = {
-    inheritedPropertiesCopy.get("datatype") match {
-      case Some(datatype) => datatype
-      case _              => datatypeDefaultValue
-    }
-  }
+  ): ParseResult[ObjectNode] = inheritedPropertiesCopy.get("datatype")
+    .map({
+      case dataTypeNode: ObjectNode => Right(dataTypeNode)
+      case dataTypeNode => Left(MetadataError(s"Unexpected datatype value: ${dataTypeNode.toPrettyString}"))
+    })
+    .getOrElse(Right(datatypeDefaultValue))
 
   def languagesMatch(l1: String, l2: String): Boolean = {
     val languagesMatchOrEitherIsUndefined =
@@ -439,48 +418,7 @@ object Column {
       annotation: Map[String, JsonNode] = Map(),
       column: Map[String, JsonNode] = Map(),
       warnings: Array[ErrorWithoutContext] = Array()
-  ) {
-    def withInheritedProperty(keyValuePair: (String, JsonNode)) =
-      ParsedColumnProperties(
-        inherited = inherited + keyValuePair,
-        annotation = annotation,
-        column = column,
-        warnings = warnings
-      )
-
-    def withAnnotationProperty(keyValuePair: (String, JsonNode)) =
-      ParsedColumnProperties(
-        inherited = inherited,
-        annotation = annotation + keyValuePair,
-        column = column,
-        warnings = warnings
-      )
-
-    def withColumnProperty(keyValuePair: (String, JsonNode)) =
-      ParsedColumnProperties(
-        inherited = inherited,
-        annotation = annotation,
-        column = column + keyValuePair,
-        warnings = warnings
-      )
-
-    def withWarning(warning: ErrorWithoutContext) =
-      ParsedColumnProperties(
-        inherited = inherited,
-        annotation = annotation,
-        column = column,
-        warnings = warnings :+ warning
-      )
-
-    def withWarnings(warnings: Array[ErrorWithoutContext]) =
-      ParsedColumnProperties(
-        inherited = inherited,
-        annotation = annotation,
-        column = column,
-        warnings = warnings ++ warnings
-      )
-  }
-
+  )
 }
 
 case class Column private (
