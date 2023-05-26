@@ -147,7 +147,7 @@ class TableTest extends AnyFunSuite {
         |  }]
         |}""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val thrown = intercept[MetadataError] {
+    val Left(MetadataError(errorMessage, _)) =
       Table.fromJson(
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
@@ -155,8 +155,7 @@ class TableTest extends AnyFunSuite {
         Map(),
         Map()
       )
-    }
-    assert(thrown.getMessage === "Multiple columns named year")
+    assert(errorMessage === "Multiple columns named year")
   }
 
   test(
@@ -193,7 +192,7 @@ class TableTest extends AnyFunSuite {
         |  }]
         |}""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val thrown = intercept[MetadataError] {
+    val Left(MetadataError(errorMessage, _)) =
       Table.fromJson(
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
@@ -201,9 +200,8 @@ class TableTest extends AnyFunSuite {
         Map(),
         Map()
       )
-    }
     assert(
-      thrown.getMessage === "virtual columns before non-virtual column population (3)"
+      errorMessage === "virtual columns before non-virtual column population (3)"
     )
   }
 
@@ -237,7 +235,7 @@ class TableTest extends AnyFunSuite {
         |  }]
         |}""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val thrown = intercept[MetadataError] {
+    val Left(MetadataError(errorMessage, _)) =
       Table.fromJson(
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
@@ -245,8 +243,8 @@ class TableTest extends AnyFunSuite {
         Map(),
         Map()
       )
-    }
-    assert(thrown.getMessage === "URL not found for table")
+
+    assert(errorMessage === "URL not found for table")
   }
 
   test("should raise exception if tableSchema is not an object") {
@@ -259,7 +257,7 @@ class TableTest extends AnyFunSuite {
         |  }]
         |}""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val thrown = intercept[MetadataError] {
+    val Left(MetadataError(errorMessage, _)) =
       Table.fromJson(
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
@@ -267,9 +265,9 @@ class TableTest extends AnyFunSuite {
         Map(),
         Map()
       )
-    }
+
     assert(
-      thrown.getMessage === "Table schema must be object for table http://w3c.github.io/csvw/tests/country_slice.csv "
+      errorMessage === "Table schema must be object for table http://w3c.github.io/csvw/tests/country_slice.csv "
     )
   }
 
@@ -283,7 +281,7 @@ class TableTest extends AnyFunSuite {
         |  }]
         |}""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val thrown = intercept[MetadataError] {
+    val Left(MetadataError(errorMessage, _)) =
       Table.fromJson(
         jsonNode.get("tables").elements().next().asInstanceOf[ObjectNode],
         "http://w3c.github.io/csvw/tests/countries.json",
@@ -291,9 +289,9 @@ class TableTest extends AnyFunSuite {
         Map(),
         Map()
       )
-    }
+
     assert(
-      thrown.getMessage === "@type of table is not 'Table' - country_slice.csv.@type"
+      errorMessage === "@type of table is not 'Table' - country_slice.csv.@type"
     )
   }
 }

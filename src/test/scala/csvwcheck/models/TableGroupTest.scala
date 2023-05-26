@@ -312,15 +312,14 @@ class TableGroupTest extends AnyFunSuite {
     val arrayNode = objectMapper
       .readTree(json)
       .asInstanceOf[ArrayNode]
-    val thrown = intercept[MetadataError] {
+    val Left(MetadataError(errorMessage, _)) =
       TableGroup.parseContextArrayNode(
         arrayNode,
         "http://default-base-url",
         "default-lang"
       )
-    }
     assert(
-      thrown.getMessage === "Second @context array value must be an object"
+      errorMessage === "Second @context array value must be an object"
     )
   }
 
@@ -341,15 +340,14 @@ class TableGroupTest extends AnyFunSuite {
     val arrayNode = objectMapper
       .readTree(json)
       .asInstanceOf[ArrayNode]
-    val thrown = intercept[MetadataError] {
+    val Left(MetadataError(errorMessage, _)) =
       TableGroup.parseContextArrayNode(
         arrayNode,
         "http://default-base-url",
         "default-lang"
       )
-    }
     assert(
-      thrown.getMessage === "First item in @context must be string http://www.w3.org/ns/csvw "
+      errorMessage === "First item in @context must be string http://www.w3.org/ns/csvw "
     )
   }
 

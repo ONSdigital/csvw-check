@@ -10,9 +10,9 @@ import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import csvwcheck.{PropertyChecker, models}
 import org.apache.commons.csv.CSVRecord
+import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.collection.JavaConverters.asScalaIteratorConverter
-import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 object Table {
 
@@ -174,10 +174,7 @@ object Table {
       case (propertyName, value) =>
         PropertyChecker
           .parseJsonProperty(propertyName, value, baseUrl, lang)
-          .map({
-            case (parsedNode, stringWarnings, propertyType) =>
-              (propertyName, parsedNode, stringWarnings, propertyType)
-          })
+          .map(propertyName +: _)
     }
 
   private def getUrl(
@@ -210,7 +207,7 @@ object Table {
   ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
     tableSchema match {
       case tableSchemaObject: ObjectNode =>
-        val tablePropertiesIncludingInherited =
+        val inheritedPropertiesWithPermittedTableProperties =
           getTableSchemaInheritedProperties(
             inheritedProperties,
             tableSchemaObject
@@ -229,11 +226,11 @@ object Table {
         parseTableSchema(
           partiallyParsedTable,
           tableSchemaObject,
-          tablePropertiesIncludingInherited,
+          inheritedPropertiesWithPermittedTableProperties,
           baseUrl,
           lang
-        ).flatMap(parseDialect(_, tablePropertiesIncludingInherited))
-          .flatMap(parseNotes(_, tablePropertiesIncludingInherited))
+        ).flatMap(parseDialect(_, tableProperties))
+          .flatMap(parseNotes(_, tableProperties))
           .map({
             case (table, warnings) => (table, warnings ++ existingWarnings)
           })
@@ -771,7 +768,7 @@ object Table {
     (table, warnings)
   }
 
-  case class PartitionedTableProperties(
+  case class PartitionedTableProperties private (
       annotations: Map[String, JsonNode] = Map(),
       tableProperties: Map[String, JsonNode] = Map(),
       inheritedProperties: Map[String, JsonNode] = Map(),
@@ -779,7 +776,7 @@ object Table {
   )
 }
 
-case class TableSchema(
+case class TableSchema private (
                         columns: Array[Column],
                         primaryKey: Array[Column],
                         rowTitleColumns: Array[Column],

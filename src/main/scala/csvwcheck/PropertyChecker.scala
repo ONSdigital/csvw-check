@@ -1064,10 +1064,7 @@ object PropertyChecker {
               )
             )
             .toObjectNodeAndStringWarnings
-            .map({
-              case (objectNode, warnings) =>
-                (objectNode, warnings, csvwPropertyType)
-            })
+            .map(_ :+ csvwPropertyType)
         case _ =>
           // May be we might need to support dialect property of type other than ObjectNode.
           //  The dialect of a table is an object property. It could be provided as a URL that indicates
@@ -1603,12 +1600,14 @@ object PropertyChecker {
               if (
                 propertyType == PropertyType.Dialect && propertyWarnings.isEmpty
               ) {
-                (key, Some(parsedValueNode), Array())
+                (key, Some(parsedValueNode), propertyWarnings)
               } else {
                 val warnings =
                   if (propertyType != PropertyType.Dialect)
-                    Array("invalid_property")
-                  else Array[String]()
+                    propertyWarnings :+ "invalid_property"
+                   else
+                    propertyWarnings
+
                 (key, None, warnings)
               }
           })
