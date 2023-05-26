@@ -59,9 +59,9 @@ class ColumnTest extends AnyFunSuite {
     assert(!column.ordered)
     assert(!column.required)
     assert(!column.suppressOutput)
-    assert(column.aboutUrl.isEmpty)
+    assert(column.urls.aboutUrl.isEmpty)
     assert(column.default == "")
-    assert(column.propertyUrl.isEmpty)
+    assert(column.urls.propertyUrl.isEmpty)
     assert(column.separator.isEmpty)
     assert(column.titleValues.isEmpty)
   }
@@ -104,19 +104,19 @@ class ColumnTest extends AnyFunSuite {
     assert(column.name.get === "countryCode")
     assert(column.columnOrdinal === 1)
     assert(column.id === None)
-    assert(column.aboutUrl.get === "sampleUrl")
+    assert(column.urls.aboutUrl.get === "sampleUrl")
     assert(column.baseDataType === expectedDataType)
     assert(column.default === "00")
     assert(column.lang === "en")
     assert(column.nullParam === Array[String]("-"))
     assert(column.ordered === true)
-    assert(column.propertyUrl.get === "http://www.geonames.org/ontology")
+    assert(column.urls.propertyUrl.get === "http://www.geonames.org/ontology")
     assert(column.required === true)
     assert(column.separator.get === ",")
     assert(column.suppressOutput === true)
     assert(column.textDirection === "rtl")
     assert(column.titleValues("en") === Array("countryCode"))
-    assert(column.valueUrl.get === "http://www.geonames.org/ontology")
+    assert(column.urls.valueUrl.get === "http://www.geonames.org/ontology")
     assert(column.virtual === true)
     assert(column.annotations === Map[String, JsonNode]())
     assert(warnings === Array[WarningWithCsvContext]())
@@ -194,7 +194,7 @@ class ColumnTest extends AnyFunSuite {
 
     assert(column.name.get === "Id")
     assert(column.required)
-    assert(column.minLength.get === 3)
+    assert(column.lengthRestrictions.minLength.get === 3)
   }
 
   // Tests for processFloatDatatype method

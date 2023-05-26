@@ -1,11 +1,11 @@
 package csvwcheck.models
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
+import com.fasterxml.jackson.databind.node.{ArrayNode, BooleanNode, DecimalNode, FloatNode, IntNode, JsonNodeFactory, NumericNode, ObjectNode, TextNode}
 import com.typesafe.scalalogging.Logger
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, ErrorWithoutContext, MetadataError}
-import csvwcheck.models.Column.{rdfSyntaxNs, unsignedLongMaxValue, validDoubleDatatypeRegex, xmlSchema}
+import csvwcheck.models.Column.{LengthRestrictions, NumericAndDateRangeRestrictions, Urls, rdfSyntaxNs, unsignedLongMaxValue, validDoubleDatatypeRegex, xmlSchema}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import csvwcheck.traits.LoggerExtensions.LogDebugException
@@ -45,6 +45,25 @@ object Column {
   private val validIntegerRegex = "[\\-+]?[0-9]+".r
   private val validLongDatatypeRegex = "[\\-+]?[0-9]+".r
 
+  case class Urls private (
+      aboutUrl: Option[String],
+      propertyUrl: Option[String],
+      valueUrl: Option[String]
+  )
+
+  case class LengthRestrictions private (
+    length: Option[Int],
+    minLength: Option[Int],
+    maxLength: Option[Int],
+  )
+
+  case class NumericAndDateRangeRestrictions private(
+    minInclusive: Option[String],
+    maxInclusive: Option[String],
+    minExclusive: Option[String],
+    maxExclusive: Option[String]
+  )
+
   def fromJson(
       columnOrdinal: Int,
       columnDesc: ObjectNode,
@@ -59,112 +78,121 @@ object Column {
       lang,
       inheritedProperties
     )
-      .flatMapStartAccumulating(parsedColumnProperties => parseLangTitles(parsedColumnProperties.column.get("titles")))
-      .flatMapKeepAccumulating({case (parsedColumnProperties, _) => getNullParam(parsedColumnProperties.inherited)})
-      .flatMapKeepAccumulating({case (parsedColumnProperties, _, _) => getDefault(parsedColumnProperties.inherited)})
-      .flatMapKeepAccumulating({case (parsedColumnProperties, _, _, _) => getDatatypeOrDefault(parsedColumnProperties.inherited)})
+      .flatMapStartAccumulating(parsedColumnProperties => getDatatypeOrDefault(parsedColumnProperties.inherited))
+      .flatMapKeepAccumulating({case (parsedColumnProperties, _) => parseLangTitles(parsedColumnProperties.column.get("titles"))})
+      .flatMapKeepAccumulating({case (parsedColumnProperties, _, _) => getNullParam(parsedColumnProperties.inherited)})
+      .flatMapKeepAccumulating({case (parsedColumnProperties, _, _, _) => parseUrls(parsedColumnProperties)})
+      .flatMapKeepAccumulating({case (_, dataTypeObjectNode, _, _, _) => parseLengthRestrictions(dataTypeObjectNode)})
+      .flatMapKeepAccumulating({case (_, dataTypeObjectNode, _, _, _, _) => parseNumericAndDateRangeRestrictions(dataTypeObjectNode)})
       .map({
-        case (parsedColumnProperties, titles, nullParam, default, dataTypeObjectNode) =>
-          val minLength: Option[Int] = dataTypeObjectNode.getMaybeNode("minLength").map(_.asText.toInt)
-          val maxLength: Option[Int] = dataTypeObjectNode.getMaybeNode("maxLength").map(_.asText.toInt)
-          val length: Option[Int] = dataTypeObjectNode.getMaybeNode("length").map(_.asText.toInt)
-
-          val minInclusive: Option[String] = dataTypeObjectNode.getMaybeNode("minInclusive").map(_.asText)
-          val maxInclusive: Option[String] = dataTypeObjectNode.getMaybeNode("maxInclusive").map(_.asText)
-          val minExclusive: Option[String] = dataTypeObjectNode.getMaybeNode("minExclusive").map(_.asText)
-          val maxExclusive: Option[String] = dataTypeObjectNode.getMaybeNode("maxExclusive").map(_.asText)
-
-          val newLang = getLangOrDefault(inheritedProperties)
-
+        case (parsedColumnProperties, dataTypeObjectNode, titles, nullParam, urls, lengthRestrictions, numericAndDateRangeRestrictions) =>
           val name = getName(parsedColumnProperties.column, lang)
           val formatNode = dataTypeObjectNode.path("format")
 
           val column = new Column(
+            annotations = parsedColumnProperties.annotation,
+            baseDataType = getBaseDataType(dataTypeObjectNode),
             columnOrdinal = columnOrdinal,
+            default = "", // Filled in later
+            format = getMaybeFormatForColumn(formatNode),
             name = name,
             id = getId(parsedColumnProperties.column),
-            minLength = minLength,
-            maxLength = maxLength,
-            length = length,
-            minInclusive = minInclusive,
-            maxInclusive = maxInclusive,
-            minExclusive = minExclusive,
-            maxExclusive = maxExclusive,
-            baseDataType = getBaseDataType(dataTypeObjectNode),
-            lang = newLang,
+            lengthRestrictions = lengthRestrictions,
+            lang = lang, // Filled in later
             nullParam = nullParam,
-            default = default,
-            required = getRequired(inheritedProperties),
-            aboutUrl = getAboutUrl(inheritedProperties),
-            propertyUrl = getPropertyUrl(inheritedProperties),
-            valueUrl = getValueUrl(inheritedProperties),
-            separator = getSeparator(inheritedProperties),
-            ordered = getOrdered(inheritedProperties),
+            numericAndDateRangeRestrictions = numericAndDateRangeRestrictions,
+            ordered = false, // Filled in later
+            required = false, // Filled in later
+            separator = None, // Filled in later
+            suppressOutput = false, // Filled in later
             titleValues = titles,
-            suppressOutput = getSuppressOutput(parsedColumnProperties.column),
-            virtual = getVirtual(parsedColumnProperties.column),
-            format = getMaybeFormatForColumn(formatNode),
-            textDirection = getTextDirection(inheritedProperties),
-            annotations = parsedColumnProperties.annotation
+            textDirection = "", // Filled in later
+            urls = urls,
+            virtual = false, // Filled in later
           )
 
-          (column, parsedColumnProperties.warnings)
+          (parsedColumnProperties, column)
+      })
+      .flatMap({
+        case (parsedProperties, column) =>
+          parseTextProperty(parsedProperties.inherited, "default")
+            .flatMapStartAccumulating(_ => parseTextProperty(parsedProperties.inherited, "lang"))
+            .flatMapKeepAccumulating(_ => parseBooleanProperty(parsedProperties.inherited, "ordered"))
+            .flatMapKeepAccumulating(_ => parseBooleanProperty(parsedProperties.inherited, "required"))
+            .flatMapKeepAccumulating(_ => parseTextProperty(parsedProperties.inherited, "separator"))
+            .flatMapKeepAccumulating(_ => parseBooleanProperty(parsedProperties.column, "suppressOutput"))
+            .flatMapKeepAccumulating(_ => parseTextProperty(parsedProperties.inherited, "textDirection"))
+            .flatMapKeepAccumulating(_ => parseBooleanProperty(parsedProperties.column, "virtual"))
+            .map({
+              case (default, lang, ordered, required, separator, suppressOutput, textDirection, virtual) =>
+                (
+                  column.copy(
+                    default = default.getOrElse(""),
+                    lang = lang.getOrElse("und"),
+                    ordered = ordered.getOrElse(false),
+                    required = required.getOrElse(false),
+                    separator = separator,
+                    suppressOutput = suppressOutput.getOrElse(false),
+                    textDirection = textDirection.getOrElse("inherit"),
+                    virtual = virtual.getOrElse(false)
+                  ),
+                  parsedProperties.warnings
+                )
+            })
       })
   }
 
-  def getOrdered(
-      inheritedProperties: Map[String, JsonNode]
-  ): Boolean = {
-    val inheritedPropertiesNode = inheritedProperties.get("ordered")
-    inheritedPropertiesNode match {
-      case Some(value) => value.asBoolean()
-      case _           => false
-    }
+  private def parseUrls(parsedColumnProperties: ParsedColumnProperties): ParseResult[Urls] = {
+    parseTextProperty(parsedColumnProperties.inherited, "aboutUrl")
+      .flatMapStartAccumulating(_ => parseTextProperty(parsedColumnProperties.inherited, "propertyUrl"))
+      .flatMapKeepAccumulating(_ => parseTextProperty(parsedColumnProperties.inherited, "valueUrl"))
+      .map({ case (aboutUrl, propertyUrl, valueUrl) => Urls(aboutUrl = aboutUrl, propertyUrl = propertyUrl, valueUrl = valueUrl) })
   }
 
-  def getTextDirection(
-      inheritedProperties: Map[String, JsonNode]
-  ): String = {
-    val textDirectionNode = inheritedProperties.get("textDirection")
-    textDirectionNode match {
-      case Some(value) => value.asText()
-      case _           => "inherit"
-    }
+  private def parseNumericAndDateRangeRestrictions(dataTypeObjectNode: ObjectNode): ParseResult[NumericAndDateRangeRestrictions] =
+    dataTypeObjectNode.getMaybeNode("minInclusive").map(v => parseNodeAsText(v).map(Some(_))).getOrElse(Right(None))
+      .flatMapStartAccumulating(_ => dataTypeObjectNode.getMaybeNode("maxInclusive").map(v => parseNodeAsText(v).map(Some(_))).getOrElse(Right(None)))
+      .flatMapKeepAccumulating(_ => dataTypeObjectNode.getMaybeNode("minExclusive").map(v => parseNodeAsText(v).map(Some(_))).getOrElse(Right(None)))
+      .flatMapKeepAccumulating(_ => dataTypeObjectNode.getMaybeNode("maxExclusive").map(v => parseNodeAsText(v).map(Some(_))).getOrElse(Right(None)))
+      .map({
+        case (minInclusive, maxInclusive, minExclusive, maxExclusive) => NumericAndDateRangeRestrictions(minInclusive = minInclusive, maxInclusive = maxInclusive, minExclusive = minExclusive, maxExclusive = maxExclusive)
+      })
+
+  private def parseLengthRestrictions(dataTypeObjectNode: ObjectNode): ParseResult[LengthRestrictions] =
+    dataTypeObjectNode.getMaybeNode("length")
+      .map(v => parseNodeAsInt(v).map(Some(_)))
+      .getOrElse(Right(None))
+      .flatMapStartAccumulating(_ => dataTypeObjectNode.getMaybeNode("minLength")
+        .map(v => parseNodeAsInt(v).map(Some(_)))
+        .getOrElse(Right(None)))
+      .flatMapKeepAccumulating(_ => dataTypeObjectNode.getMaybeNode("maxLength")
+        .map(v => parseNodeAsInt(v).map(Some(_)))
+        .getOrElse(Right(None)))
+      .map({case (length, minLength, maxLength) => LengthRestrictions(length = length, minLength = minLength , maxLength = maxLength)})
+
+  private def parseTextProperty(propertiesMap: Map[String, JsonNode], property: String): ParseResult[Option[String]] =
+    propertiesMap.get(property)
+      .map(n => parseNodeAsText(n).map(Some(_)))
+      .getOrElse(Right(None))
+
+  private def parseBooleanProperty(propertiesMap: Map[String, JsonNode], property: String): ParseResult[Option[Boolean]] =
+    propertiesMap.get(property)
+      .map(n => parseNodeAsBool(n).map(Some(_)))
+      .getOrElse(Right(None))
+
+  private def parseNodeAsText(valueNode: JsonNode): ParseResult[String] = valueNode match {
+    case textNode: TextNode => Right(textNode.asText)
+    case node => Left(MetadataError(s"Unexpected value, expected string/text but got: ${node.toPrettyString}"))
   }
 
-  def getSuppressOutput(
-      columnProperties: Map[String, JsonNode]
-  ): Boolean = {
-    val suppressOutputNode = columnProperties.get("suppressOutput")
-    suppressOutputNode match {
-      case Some(value) => value.asBoolean()
-      case _           => false
-    }
+  private def parseNodeAsInt(valueNode: JsonNode): ParseResult[Int] = valueNode match {
+    case numericNode: IntNode => Right(numericNode.asInt)
+    case node => Left(MetadataError(s"Unexpected value, expected integer but got: ${node.toPrettyString}"))
   }
 
-  def getVirtual(columnProperties: Map[String, JsonNode]): Boolean = {
-    val virtualNode = columnProperties.get("virtual")
-    virtualNode match {
-      case Some(value) => value.asBoolean()
-      case _           => false
-    }
-  }
-
-  def getRequired(
-      inheritedProperties: Map[String, JsonNode]
-  ): Boolean = {
-    inheritedProperties.get("required") match {
-      case Some(value) => value.asBoolean()
-      case _           => false
-    }
-  }
-
-  def getDefault(inheritedProperties: Map[String, JsonNode]): ParseResult[String] = {
-    inheritedProperties.get("default").map({
-      case defaultNode: TextNode => Right(defaultNode.asText)
-      case defaultNode => Left(MetadataError(s"Unexpected default value: ${defaultNode.toPrettyString}"))
-    })
-      .getOrElse(Right(""))
+  private def parseNodeAsBool(valueNode: JsonNode): ParseResult[Boolean] = valueNode match {
+    case booleanNode: BooleanNode => Right(booleanNode.asBoolean())
+    case node => Left(MetadataError(s"Unexpected value, expected boolean but got: ${node.toPrettyString}"))
   }
 
   def getId(columnProperties: Map[String, JsonNode]): Option[String] = {
@@ -210,45 +238,6 @@ object Column {
       .getOrElse(Right(Array[String]("")))
   }
 
-  def getAboutUrl(
-      inheritedProperties: Map[String, JsonNode]
-  ): Option[String] = {
-    val aboutUrlNode = inheritedProperties.get("aboutUrl")
-    aboutUrlNode match {
-      case Some(value) => Some(value.asText())
-      case _           => None
-    }
-  }
-
-  def getPropertyUrl(
-      inheritedProperties: Map[String, JsonNode]
-  ): Option[String] = {
-    val propertyUrlNode = inheritedProperties.get("propertyUrl")
-    propertyUrlNode match {
-      case Some(value) => Some(value.asText())
-      case _           => None
-    }
-  }
-
-  def getValueUrl(
-      inheritedProperties: Map[String, JsonNode]
-  ): Option[String] = {
-    val valueUrlNode = inheritedProperties.get("valueUrl")
-    valueUrlNode match {
-      case Some(value) => Some(value.asText())
-      case _           => None
-    }
-  }
-
-  def getSeparator(
-      inheritedProperties: Map[String, JsonNode]
-  ): Option[String] = {
-    val separatorNode = inheritedProperties.get("separator")
-    separatorNode match {
-      case Some(value) => Some(value.asText())
-      case _           => None
-    }
-  }
 
   def parseLangTitles(
       titles: Option[JsonNode]
@@ -422,55 +411,48 @@ object Column {
 }
 
 case class Column private (
-    columnOrdinal: Int,
-    name: Option[String],
-    id: Option[String],
-    aboutUrl: Option[String],
-    minLength: Option[Int],
-    maxLength: Option[Int],
-    length: Option[Int],
-    minInclusive: Option[String],
-    maxInclusive: Option[String],
-    minExclusive: Option[String],
-    maxExclusive: Option[String],
-    baseDataType: String,
-    default: String,
-    lang: String,
-    nullParam: Array[String],
-    ordered: Boolean,
-    propertyUrl: Option[String],
-    required: Boolean,
-    separator: Option[String],
-    suppressOutput: Boolean,
-    textDirection: String,
-    titleValues: Map[String, Array[String]],
-    valueUrl: Option[String],
-    virtual: Boolean,
-    format: Option[Format],
-    annotations: Map[String, JsonNode]
+                            columnOrdinal: Int,
+                            name: Option[String],
+                            id: Option[String],
+                            lengthRestrictions: LengthRestrictions,
+                            numericAndDateRangeRestrictions: NumericAndDateRangeRestrictions,
+                            baseDataType: String,
+                            default: String,
+                            lang: String,
+                            nullParam: Array[String],
+                            ordered: Boolean,
+                            urls: Urls,
+                            required: Boolean,
+                            separator: Option[String],
+                            suppressOutput: Boolean,
+                            textDirection: String,
+                            titleValues: Map[String, Array[String]],
+                            virtual: Boolean,
+                            format: Option[Format],
+                            annotations: Map[String, JsonNode]
 ) {
   lazy val minInclusiveNumeric: Option[BigDecimal] =
-    minInclusive.map(BigDecimal(_))
+    numericAndDateRangeRestrictions.minInclusive.map(BigDecimal(_))
   lazy val maxInclusiveNumeric: Option[BigDecimal] =
-    maxInclusive.map(BigDecimal(_))
+    numericAndDateRangeRestrictions.maxInclusive.map(BigDecimal(_))
   lazy val minExclusiveNumeric: Option[BigDecimal] =
-    minExclusive.map(BigDecimal(_))
+    numericAndDateRangeRestrictions.minExclusive.map(BigDecimal(_))
   lazy val maxExclusiveNumeric: Option[BigDecimal] =
-    maxExclusive.map(BigDecimal(_))
+    numericAndDateRangeRestrictions.maxExclusive.map(BigDecimal(_))
   lazy val minInclusiveInt: Option[BigInt] = minInclusiveNumeric.map(_.toBigInt)
   lazy val maxInclusiveInt: Option[BigInt] = maxInclusiveNumeric.map(_.toBigInt)
   lazy val minExclusiveInt: Option[BigInt] = minExclusiveNumeric.map(_.toBigInt)
   lazy val maxExclusiveInt: Option[BigInt] = maxExclusiveNumeric.map(_.toBigInt)
   lazy val minInclusiveDateTime: Option[ZonedDateTime] =
-    minInclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
+    numericAndDateRangeRestrictions.minInclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
 
   DateTimeZone.setDefault(DateTimeZone.UTC)
   lazy val maxInclusiveDateTime: Option[ZonedDateTime] =
-    maxInclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
+    numericAndDateRangeRestrictions.maxInclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
   lazy val minExclusiveDateTime: Option[ZonedDateTime] =
-    minExclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
+    numericAndDateRangeRestrictions.minExclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
   lazy val maxExclusiveDateTime: Option[ZonedDateTime] =
-    maxExclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
+    numericAndDateRangeRestrictions.maxExclusive.map(v => mapJodaDateTimeToZonedDateTime(DateTime.parse(v)))
   lazy val numberParserForFormat: Either[String, NumberParser] =
     try {
       Right(
@@ -1395,7 +1377,7 @@ case class Column private (
   def validateLength(
       value: String
   ): Array[ErrorWithoutContext] = {
-    if (length.isEmpty && minLength.isEmpty && maxLength.isEmpty) {
+    if (lengthRestrictions.length.isEmpty && lengthRestrictions.minLength.isEmpty && lengthRestrictions.maxLength.isEmpty) {
       Array.ofDim(0)
     } else {
       val errors = ArrayBuffer.empty[ErrorWithoutContext]
@@ -1405,27 +1387,27 @@ case class Column private (
       } else if (baseDataType == s"${xmlSchema}hexBinary") {
         lengthOfValue = value.length / 2
       }
-      if (minLength.isDefined && lengthOfValue < minLength.get) {
+      if (lengthRestrictions.minLength.isDefined && lengthOfValue < lengthRestrictions.minLength.get) {
         errors.addOne(
           ErrorWithoutContext(
             "minLength",
-            s"value '$value' length less than minLength specified - $minLength"
+            s"value '$value' length less than minLength specified - $lengthRestrictions.minLength"
           )
         )
       }
-      if (maxLength.isDefined && lengthOfValue > maxLength.get) {
+      if (lengthRestrictions.maxLength.isDefined && lengthOfValue > lengthRestrictions.maxLength.get) {
         errors.addOne(
           ErrorWithoutContext(
             "maxLength",
-            s"value '$value' length greater than maxLength specified - $maxLength"
+            s"value '$value' length greater than maxLength specified - $lengthRestrictions.maxLength"
           )
         )
       }
-      if (length.isDefined && lengthOfValue != length.get) {
+      if (lengthRestrictions.length.isDefined && lengthOfValue != lengthRestrictions.length.get) {
         errors.addOne(
           ErrorWithoutContext(
             "length",
-            s"value '$value' length different from length specified - ${length.get}"
+            s"value '$value' length different from length specified - ${lengthRestrictions.length.get}"
           )
         )
       }
@@ -1504,7 +1486,7 @@ case class Column private (
       errors.addOne(
         ErrorWithoutContext(
           "minInclusive",
-          s"value '$value' less than minInclusive value '${minInclusive.get}'"
+          s"value '$value' less than minInclusive value '${numericAndDateRangeRestrictions.minInclusive.get}'"
         )
       )
     }
@@ -1512,7 +1494,7 @@ case class Column private (
       errors.addOne(
         ErrorWithoutContext(
           "maxInclusive",
-          s"value '$value' greater than maxInclusive value '${maxInclusive.get}'"
+          s"value '$value' greater than maxInclusive value '${numericAndDateRangeRestrictions.maxInclusive.get}'"
         )
       )
     }
@@ -1520,7 +1502,7 @@ case class Column private (
       errors.addOne(
         ErrorWithoutContext(
           "minExclusive",
-          s"value '$value' less than or equal to minExclusive value '${minExclusive.get}'"
+          s"value '$value' less than or equal to minExclusive value '${numericAndDateRangeRestrictions.minExclusive.get}'"
         )
       )
     }
@@ -1528,7 +1510,7 @@ case class Column private (
       errors.addOne(
         ErrorWithoutContext(
           "maxExclusive",
-          s"value '$value' greater than or equal to maxExclusive value '${maxExclusive.get}'"
+          s"value '$value' greater than or equal to maxExclusive value '${numericAndDateRangeRestrictions.maxExclusive.get}'"
         )
       )
     }
