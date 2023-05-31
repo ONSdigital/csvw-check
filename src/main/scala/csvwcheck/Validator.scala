@@ -367,7 +367,7 @@ class Validator(
     } else {
       val response = httpClient.send(basicRequest.get(Uri(fileUri)))
       response.body match {
-        case Left(error) => Left(GeneralCsvwLoadError(new Exception(error)))
+        case Left(error) => Left(CascadeToOtherFilesError(new Exception(error)))
         case Right(body) =>
           try {
             Right(objectMapper.readTree(body).asInstanceOf[TJsonNode])
