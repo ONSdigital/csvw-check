@@ -1616,7 +1616,7 @@ object PropertyChecker {
 
   private def asUri(property: String): Option[URI] =
     Option(new URI(property))
-      .filter(!_.getScheme.isEmpty)
+      .filter(uri => uri.getScheme != null && !uri.getScheme.isEmpty)
 
   private def parseBooleanProperty(
       csvwPropertyType: PropertyType.Value

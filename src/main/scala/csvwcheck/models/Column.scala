@@ -153,10 +153,10 @@ object Column {
   }
 
   private def parseNumericAndDateRangeRestrictions(dataTypeObjectNode: ObjectNode): ParseResult[NumericAndDateRangeRestrictions] =
-    dataTypeObjectNode.getMaybeNode("minInclusive").map(v => parseNodeAsText(v).map(Some(_))).getOrElse(Right(None))
-      .flatMapStartAccumulating(_ => dataTypeObjectNode.getMaybeNode("maxInclusive").map(v => parseNodeAsText(v).map(Some(_))).getOrElse(Right(None)))
-      .flatMapKeepAccumulating(_ => dataTypeObjectNode.getMaybeNode("minExclusive").map(v => parseNodeAsText(v).map(Some(_))).getOrElse(Right(None)))
-      .flatMapKeepAccumulating(_ => dataTypeObjectNode.getMaybeNode("maxExclusive").map(v => parseNodeAsText(v).map(Some(_))).getOrElse(Right(None)))
+    dataTypeObjectNode.getMaybeNode("minInclusive").map(v => parseNodeAsText(v, true).map(Some(_))).getOrElse(Right(None))
+      .flatMapStartAccumulating(_ => dataTypeObjectNode.getMaybeNode("maxInclusive").map(v => parseNodeAsText(v, true).map(Some(_))).getOrElse(Right(None)))
+      .flatMapKeepAccumulating(_ => dataTypeObjectNode.getMaybeNode("minExclusive").map(v => parseNodeAsText(v, true).map(Some(_))).getOrElse(Right(None)))
+      .flatMapKeepAccumulating(_ => dataTypeObjectNode.getMaybeNode("maxExclusive").map(v => parseNodeAsText(v, true).map(Some(_))).getOrElse(Right(None)))
       .map({
         case (minInclusive, maxInclusive, minExclusive, maxExclusive) => NumericAndDateRangeRestrictions(minInclusive = minInclusive, maxInclusive = maxInclusive, minExclusive = minExclusive, maxExclusive = maxExclusive)
       })
@@ -183,8 +183,9 @@ object Column {
       .map(n => parseNodeAsBool(n).map(Some(_)))
       .getOrElse(Right(None))
 
-  private def parseNodeAsText(valueNode: JsonNode): ParseResult[String] = valueNode match {
+  private def parseNodeAsText(valueNode: JsonNode, coerceToText: Boolean = false): ParseResult[String] = valueNode match {
     case textNode: TextNode => Right(textNode.asText)
+    case node if coerceToText => Right(node.asText)
     case node => Left(MetadataError(s"Unexpected value, expected string/text but got: ${node.toPrettyString}"))
   }
 
@@ -212,24 +213,28 @@ object Column {
 
   private def parseTitlesAsName(columnProperties: Map[String, JsonNode], lang: String): ParseResult[Option[String]] = {
     columnProperties.get("titles")
-      .map({
-        case titlesObjectNode: ObjectNode =>
-          if (titlesObjectNode.size() > 0)
-            parseNodeAsText(
-              titlesObjectNode.getMaybeNode(lang)
-                .getOrElse(titlesObjectNode.get(0))
-            ).map(Some(_))
-          else
-            Right(None)
-        case titlesArrayNode: ArrayNode =>
-          if (titlesArrayNode.size() > 0)
-            parseNodeAsText(titlesArrayNode.get(0)).map(Some(_))
-          else
-            Right(None)
-        case titlesTextNode: TextNode => parseNodeAsText(titlesTextNode).map(Some(_))
-        case titlesNode => Left(MetadataError(s"Unexpected `titles` value: ${titlesNode.toPrettyString}"))
-      })
+      .map(parseTitlesNodeAsName(_, lang))
       .getOrElse(Right(None))
+  }
+
+  private def parseTitlesNodeAsName(node: JsonNode, lang: String): ParseResult[Option[String]] = node match {
+    case titlesObjectNode: ObjectNode =>
+      if (titlesObjectNode.size() > 0)
+        parseTitlesNodeAsName(
+          titlesObjectNode.getMaybeNode(lang)
+            .getOrElse(titlesObjectNode.get(0)),
+          lang
+        )
+      else
+        Right(None)
+    case titlesArrayNode: ArrayNode =>
+      if (titlesArrayNode.size() > 0)
+        parseNodeAsText(titlesArrayNode.get(0)).map(Some(_))
+      else
+        Right(None)
+    case titlesTextNode: TextNode => parseNodeAsText(titlesTextNode).map(Some(_))
+    case titlesNode => Left(MetadataError(s"Unexpected `titles` value: ${titlesNode.toPrettyString}"))
+
   }
 
   def getNullParam(
@@ -286,7 +291,7 @@ object Column {
   def parseBaseDataType(dataTypeObjectNode: ObjectNode): ParseResult[String] =
     dataTypeObjectNode.getMaybeNode("base")
       .orElse(dataTypeObjectNode.getMaybeNode("@id"))
-      .map(parseNodeAsText)
+      .map(parseNodeAsText(_))
       .getOrElse(Left(MetadataError("datatype object has neither `base` nor `@id`")))
 
   def partitionAndValidateColumnPropertiesByType(
@@ -323,7 +328,7 @@ object Column {
           val mappedWarnings = stringWarnings.map(
             ErrorWithoutContext(
               _,
-              s"$propertyName: ${parsedValue.toPrettyString}"
+              s"$propertyName: ${columnDesc.get(propertyName).toPrettyString}"
             )
           )
 
