@@ -8,13 +8,55 @@ import io.cucumber.scala.{EN, ScalaDsl}
 import sttp.client3._
 import sttp.client3.testing._
 import sttp.model._
+import better.files.Dsl.unzip
+import better.files.File
 
+import java.net.URI
+import java.nio.file.Files
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import scala.io.Source
 
+object StepDefinitions extends ScalaDsl with EN {
+  val fixturesPath = File(System.getProperty("user.dir"))./("src")./("test")./("resources")./("features")./("fixtures")
+
+  def ensureFixtureFilesDownloaded(): Unit = {
+    val expectedFixtureFile = fixturesPath./("test001.csv")
+    if (!expectedFixtureFile.exists) {
+      fixturesPath.synchronized {
+        if (!expectedFixtureFile.exists) {
+          val tmpDir = File(Files.createTempDirectory("csvw-check-test-fixtures").toFile.toPath)
+          tmpDir.deleteOnExit()
+
+          val zipLocalLocation = tmpDir./("data.zip")
+          // Download the zip file containing the fixtures into the temp dir
+          zipLocalLocation.fileOutputStream()
+            .map(outputStream =>
+              HttpClientSyncBackend()
+                .send(basicRequest
+                  .response(asByteArray)
+                  .get(Uri(new URI("https://github.com/w3c/csvw/archive/refs/heads/gh-pages.zip")))
+                )
+                .body
+                .map(outputStream.write)
+                .getOrElse(new Exception("Failed to download the test cases"))
+            )
+
+          unzip(zipLocalLocation)(tmpDir)
+          tmpDir./("csvw-gh-pages")./("tests").children.foreach(_.moveToDirectory(fixturesPath))
+        }
+      }
+    }
+
+    assert(expectedFixtureFile.exists, s"$expectedFixtureFile doesn't exist")
+  }
+
+  ensureFixtureFilesDownloaded()
+}
+
 class StepDefinitions extends ScalaDsl with EN {
-  private val fixturesPath = "src/test/resources/features/fixtures/"
+  import csvwcheck.steps.StepDefinitions.fixturesPath
+
   private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
   private var schemaUrl: Option[String] = None
   private var csvUrl: Option[String] = None
@@ -31,8 +73,8 @@ class StepDefinitions extends ScalaDsl with EN {
       }).thenRespond({
         fileMock.localFileName
           .map(localFileName => {
-            val localFilePath = fixturesPath + localFileName
-            val fileContents = Source.fromFile(localFilePath).getLines.mkString
+            val localFilePath = fixturesPath./(localFileName)
+            val fileContents = Source.fromFile(localFilePath.toString, "utf-8").getLines.mkString
 
             fileMock.linkHeader
               .map(linkHeaderValue => Response(fileContents, StatusCode.Ok, "OK", Array[Header](Header("Link", linkHeaderValue))))
@@ -42,7 +84,6 @@ class StepDefinitions extends ScalaDsl with EN {
       })
       currentFileMock = None
     })
-
 
   Given("""^I have a CSV file called "(.*?)"$""") { (filename: String) =>
     mockCurrentFileResponse()

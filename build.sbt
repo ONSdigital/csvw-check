@@ -20,6 +20,7 @@ libraryDependencies += "io.cucumber" %% "cucumber-scala" % "8.14.1" % Test
 libraryDependencies += "io.cucumber" % "cucumber-junit" % "7.11.1" % Test
 libraryDependencies += "com.novocode" % "junit-interface" % "0.11" % Test
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.15" % Test
+libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.9.2" % Test
 
 libraryDependencies += "io.spray" %% "spray-json" % "1.3.6"
 libraryDependencies += "org.apache.jena" % "jena-arq" % "4.4.0"

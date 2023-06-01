@@ -122,7 +122,7 @@ class ValidatorTest extends AnyFunSuite {
     assert(warningsAndErrors.errors.length === 1)
     val error = warningsAndErrors.errors(0)
     assert(
-      error.content === "key already present - W00000001,2004-04-12T20:20+02:00[UTC+02:00],Y16T49,fair-health"
+      error.content === "key already present - W00000001, 2004-04-12T20:20+02:00[UTC+02:00], Y16T49, fair-health"
     )
   }
 

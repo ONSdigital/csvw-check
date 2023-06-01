@@ -87,9 +87,9 @@ class TableGroupTest extends AnyFunSuite {
         .name
         .get === "countryCode"
     )
-    assert(foreignKeyReference.foreignKey.localColumns.length === 1)
+    assert(foreignKeyReference.foreignKeyDefinition.localColumns.length === 1)
     assert(
-      foreignKeyReference.foreignKey
+      foreignKeyReference.foreignKeyDefinition
         .localColumns(0)
         .name
         .get === "countryRef"
@@ -174,9 +174,9 @@ class TableGroupTest extends AnyFunSuite {
         .name
         .get === "countryCode"
     )
-    assert(foreignKeyReference.foreignKey.localColumns.length === 1)
+    assert(foreignKeyReference.foreignKeyDefinition.localColumns.length === 1)
     assert(
-      foreignKeyReference.foreignKey
+      foreignKeyReference.foreignKeyDefinition
         .localColumns(0)
         .name
         .get === "countryRef"

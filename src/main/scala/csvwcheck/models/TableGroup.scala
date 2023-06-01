@@ -1,29 +1,21 @@
 package csvwcheck.models
 
+import akka.NotUsed
+import akka.stream.scaladsl.Source
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{
-  ArrayNode,
-  JsonNodeFactory,
-  ObjectNode,
-  TextNode
-}
+import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
 import csvwcheck.PropertyChecker
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{
-  ErrorWithCsvContext,
-  MetadataError,
-  WarningWithCsvContext
-}
+import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.models.ParseResult.ParseResult
+import csvwcheck.models.Table.{MapForeignKeyDefinitionToValues, MapForeignKeyReferenceToValues}
+import csvwcheck.models.WarningsAndErrors.TolerableErrors
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
-import csvwcheck.traits.ObjectNodeExtentions.{
-  IteratorHasGetKeysAndValues,
-  ObjectNodeGetMaybeNode
-}
-import org.apache.commons.csv.CSVRecord
+import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import shapeless.syntax.std.tuple.productTupleOps
 
 import java.net.URL
+import scala.math.sqrt
 import scala.util.matching.Regex
 
 object TableGroup {
@@ -725,9 +717,183 @@ case class TableGroup private (
     notes: Option[JsonNode],
     annotations: Map[String, JsonNode]
 ) {
+  type MapTableToForeignKeyDefinitions =
+    Map[Table, MapForeignKeyDefinitionToValues]
+  type MapTableToForeignKeyReferences =
+    Map[Table, MapForeignKeyReferenceToValues]
 
-  def validateHeader(
-      header: CSVRecord,
-      tableUrl: String
-  ): WarningsAndErrors = tables(tableUrl).validateHeader(header)
+  type TableState = (
+    WarningsAndErrors,
+      MapTableToForeignKeyDefinitions,
+      MapTableToForeignKeyReferences
+    )
+
+  def validateCsvsAgainstTables(parallelism: Int, rowGrouping: Int): Source[WarningsAndErrors, NotUsed] = {
+    val degreeOfParallelism = math.min(tables.size, sqrt(parallelism).floor.toInt)
+    val degreeOfParallelismInTable = parallelism / degreeOfParallelism
+    Source
+      .fromIterator(() => tables.values.iterator)
+      .flatMapMerge(
+        degreeOfParallelism,
+        table => table.parseCsv(degreeOfParallelismInTable, rowGrouping)
+          .map(_ :+ table)
+      )
+      .fold[TableState](
+        (
+          WarningsAndErrors(),
+          Map(),
+          Map()
+        )
+      ) {
+        case (
+          (
+            warningsAndErrorsAccumulator,
+            foreignKeysAccumulator,
+            foreignKeyReferencesAccumulator
+            ),
+          (
+            warningsAndErrorsSource,
+            foreignKeysSource,
+            foreignKeyReferencesSource,
+            table
+            )
+          ) =>
+          (
+            WarningsAndErrors(
+              warningsAndErrorsAccumulator.warnings ++ warningsAndErrorsSource.warnings,
+              warningsAndErrorsAccumulator.errors ++ warningsAndErrorsSource.errors
+            ),
+            foreignKeysAccumulator.updated(table, foreignKeysSource),
+            foreignKeyReferencesAccumulator.updated(
+              table,
+              foreignKeyReferencesSource
+            )
+          )
+      }
+      .map {
+        case (
+          warningsAndErrors,
+          allForeignKeyDefinitions,
+          allForeignKeyReferences
+          ) =>
+          WarningsAndErrors(
+            errors = warningsAndErrors.errors ++ validateForeignKeyIntegrity(
+              allForeignKeyDefinitions,
+              allForeignKeyReferences
+            ),
+            warnings = warningsAndErrors.warnings
+          )
+      }
+  }
+
+  private def validateForeignKeyIntegrity(
+                foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+                foreignKeyReferencesByTable: MapTableToForeignKeyReferences
+              ): TolerableErrors = {
+    // Origin/Definition Table : Referenced Table
+    // Country, Year, Population  : Country, Name
+    // UK, 2021, 67M  : UK, United Kingdom
+    // EU, 2021, 448M : EU, Europe
+    val errorsPerForeignKeyReference = for {
+      (referencedTable, mapForeignKeyReferenceToAllPossibleValues) <-
+        foreignKeyReferencesByTable
+
+      (parentTableForeignKeyReference, allPossibleParentTableValues) <-
+        mapForeignKeyReferenceToAllPossibleValues
+    } yield validateForeignKeyIntegrity(foreignKeyDefinitionsByTable, referencedTable, parentTableForeignKeyReference, allPossibleParentTableValues)
+
+    errorsPerForeignKeyReference.flatMap(identity(_)).toArray
+  }
+
+  private def validateForeignKeyIntegrity(
+                                           foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+                                           referencedTable: Table,
+                                           foreignKeyReference: ReferencedTableForeignKeyReference,
+                                           allValidValues: Set[KeyWithContext]
+                                         ): TolerableErrors = {
+    val keysReferencesInOriginTable = getKeysReferencedInOriginTable(
+      foreignKeyDefinitionsByTable,
+      referencedTable,
+      foreignKeyReference
+    )
+
+    getUnmatchedForeignKeyReferences(
+      allValidValues,
+      keysReferencesInOriginTable
+    ) ++
+      getDuplicateKeysInReferencedTable(
+        allValidValues,
+        keysReferencesInOriginTable
+      )
+  }
+  private def getDuplicateKeysInReferencedTable(
+                                                 allPossibleParentTableValues: Set[KeyWithContext],
+                                                 keysReferencesInOriginTable: Set[KeyWithContext]
+                                               ): TolerableErrors = {
+    val duplicateKeysInParent = allPossibleParentTableValues
+      .intersect(keysReferencesInOriginTable)
+      .filter(k => k.isDuplicate)
+
+    if (duplicateKeysInParent.nonEmpty) {
+      duplicateKeysInParent
+        .map(k =>
+          ErrorWithCsvContext(
+            "multiple_matched_rows",
+            "schema",
+            k.rowNumber.toString,
+            "",
+            k.keyValuesToString(),
+            ""
+          )
+        )
+        .toArray
+    } else {
+      Array.empty
+    }
+  }
+
+  private def getUnmatchedForeignKeyReferences(
+                                                allPossibleParentTableValues: Set[KeyWithContext],
+                                                keysReferencesInOriginTable: Set[KeyWithContext]
+                                              ): TolerableErrors = {
+    val keyValuesNotDefinedInParent =
+      keysReferencesInOriginTable.diff(allPossibleParentTableValues)
+    if (keyValuesNotDefinedInParent.nonEmpty) {
+      keyValuesNotDefinedInParent
+        .map(k =>
+          ErrorWithCsvContext(
+            "unmatched_foreign_key_reference",
+            "schema",
+            k.rowNumber.toString,
+            "",
+            k.keyValuesToString(),
+            ""
+          )
+        )
+        .toArray
+    } else {
+      Array.empty
+    }
+  }
+
+  private def getKeysReferencedInOriginTable(
+                                              foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+                                              referencedTable: Table,
+                                              parentTableForeignKeyReference: ReferencedTableForeignKeyReference
+                                            ): Set[KeyWithContext] = {
+    val foreignKeyDefinitionsOnTable = foreignKeyDefinitionsByTable
+      .get(parentTableForeignKeyReference.definitionTable)
+      .getOrElse(
+        throw MetadataError(
+          s"Could not find corresponding origin table(${parentTableForeignKeyReference.definitionTable.url}) for referenced table ${referencedTable.url}"
+        )
+      )
+    foreignKeyDefinitionsOnTable
+      .get(parentTableForeignKeyReference.foreignKeyDefinition)
+      .getOrElse(
+        throw MetadataError(
+          s"Could not find foreign key against origin table." + parentTableForeignKeyReference.foreignKeyDefinition.jsonObject.toPrettyString
+        )
+      )
+  }
 }

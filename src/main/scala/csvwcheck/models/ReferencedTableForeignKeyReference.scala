@@ -1,7 +1,7 @@
 package csvwcheck.models
 
 case class ReferencedTableForeignKeyReference(
-                                               foreignKey: ForeignKeyDefinition,
+                                               foreignKeyDefinition: ForeignKeyDefinition,
                                                /**
                                                  * The table that the foreign key points to.
                                                  */
@@ -11,4 +11,6 @@ case class ReferencedTableForeignKeyReference(
                                                  * The table the foreign key was defined on.
                                                  */
                                                definitionTable: Table
-) {}
+) {
+  override def toString: String = s"ReferencedTableForeignKeyReference($definitionTable.[${foreignKeyDefinition.localColumns.map(_.name.getOrElse("unnamed column")).mkString(", ")}] -> $referencedTable.[${referencedTableReferencedColumns.map(_.name.getOrElse("unnamed column")).mkString(",")}])"
+}

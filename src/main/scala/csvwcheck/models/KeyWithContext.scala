@@ -18,4 +18,14 @@ case class KeyWithContext(
 
   override def hashCode(): Int = this.keyValues.hashCode()
 
+  def keyValuesToString(): String = {
+    val stringList = keyValues.map {
+      case listOfAny: List[Any] =>
+        listOfAny.map(s => s.toString).mkString(",")
+      case i => i.toString
+    }
+    stringList.mkString(",")
+  }
+
+
 }
