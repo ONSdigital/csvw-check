@@ -997,6 +997,7 @@ Feature: CSVW Validation Tests
   Scenario: manifest-validation#test116 file-metadata with query component not found
     Given I have a CSV file called "test116.csv?query"
     And it is stored at the url "https://w3c.github.io/csvw/tests/test116.csv?query"
+    And I have a file called "test116.csv-metadata.json" at the url "https://w3c.github.io/csvw/tests/test116.csv-metadata.json"
     And there is no file at the url "https://w3c.github.io/.well-known/csvm"
     And there is no file at the url "https://w3c.github.io/csvw/tests/test116.csv?query-metadata.json"
     And there is no file at the url "https://w3c.github.io/csvw/tests/csv-metadata.json"
@@ -1023,7 +1024,7 @@ Feature: CSVW Validation Tests
     And it is stored at the url "https://w3c.github.io/csvw/tests/test118/action.csv?query"
     And I have a file called "test118/csv-metadata.json" at the url "https://w3c.github.io/csvw/tests/test118/csv-metadata.json"
     And there is no file at the url "https://w3c.github.io/.well-known/csvm"
-    And there is no file at the url "https://w3c.github.io/csvw/tests/test118/action.csv?query-metadata.json"
+    And there is no file at the url "https://w3c.github.io/csvw/tests/test118/action.csv-metadata.json"
     When I carry out CSVW validation
     Then there should not be errors
     And there should not be warnings

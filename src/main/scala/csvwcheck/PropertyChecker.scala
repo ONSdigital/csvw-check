@@ -19,7 +19,7 @@ import scala.util.matching.Regex
 
 object PropertyChecker {
 
-  type StringWarnings = Array[String]
+  private type StringWarnings = Array[String]
   private type JsonNodeParseResult = Either[
     MetadataError,
     (JsonNode, StringWarnings, PropertyType.Value)
@@ -142,20 +142,14 @@ object PropertyChecker {
         .matches(property) && NameSpaces.values.contains(property.split(":")(0))
     ) {
       parseCommonPropertyValue(value, baseUrl, lang)
-        .map({
-          case (parsedNode, warnings) =>
-            (parsedNode, warnings, PropertyType.Annotation)
-        })
+        .map(_ :+ PropertyType.Annotation)
     } else {
       // property name must be an absolute URI
       asUri(property)
         .map(_ => {
           try {
             parseCommonPropertyValue(value, baseUrl, lang)
-              .map({
-                case (newValue, warnings) =>
-                  (newValue, warnings, PropertyType.Annotation)
-              })
+              .map(_ :+ PropertyType.Annotation)
           } catch {
             case e: Exception =>
               Right(
@@ -180,7 +174,44 @@ object PropertyChecker {
     }
   }
 
-  def parseNullProperty(
+  def parseNodeAsText(
+                               valueNode: JsonNode,
+                               coerceToText: Boolean = false
+                             ): ParseResult[String] =
+    valueNode match {
+      case textNode: TextNode   => Right(textNode.asText)
+      case node if coerceToText => Right(node.asText)
+      case node =>
+        Left(
+          MetadataError(
+            s"Unexpected value, expected string/text but got: ${node.toPrettyString}"
+          )
+        )
+    }
+
+  def parseNodeAsInt(valueNode: JsonNode): ParseResult[Int] =
+    valueNode match {
+      case numericNode: IntNode => Right(numericNode.asInt)
+      case node =>
+        Left(
+          MetadataError(
+            s"Unexpected value, expected integer but got: ${node.toPrettyString}"
+          )
+        )
+    }
+
+  def parseNodeAsBool(valueNode: JsonNode): ParseResult[Boolean] =
+    valueNode match {
+      case booleanNode: BooleanNode => Right(booleanNode.asBoolean())
+      case node =>
+        Left(
+          MetadataError(
+            s"Unexpected value, expected boolean but got: ${node.toPrettyString}"
+          )
+        )
+    }
+
+  private def parseNullProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     {
@@ -213,7 +244,7 @@ object PropertyChecker {
     }
   }
 
-  def parseSeparatorProperty(
+  private def parseSeparatorProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     {
@@ -232,7 +263,7 @@ object PropertyChecker {
     }
   }
 
-  def parseLanguageProperty(
+  private def parseLanguageProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     {
@@ -252,7 +283,7 @@ object PropertyChecker {
     }
   }
 
-  def parseDataTypeObject(
+  private def parseDataTypeObject(
       objectNode: ObjectNode,
       baseUrl: String,
       lang: String
@@ -264,9 +295,7 @@ object PropertyChecker {
 
         key match {
           case "@id" =>
-            parseDataTypeObjectIdNode(baseUrl, lang, valueNode).map({
-              case (idNode, warns) => ("@id", idNode, warns)
-            })
+            parseDataTypeObjectIdNode(baseUrl, lang, valueNode).map("@id" +: _)
           case "base" =>
             val baseValue = valueNode.asText()
             if (XsdDataTypes.types.contains(baseValue)) {
@@ -310,7 +339,7 @@ object PropertyChecker {
       })
   }
 
-  def parseDataTypeMinMaxValues(
+  private def parseDataTypeMinMaxValues(
       inputs: (ObjectNode, StringWarnings)
   ): ParseResult[(ObjectNode, StringWarnings)] = {
     val (dataTypeNode, stringWarnings) = inputs
@@ -372,7 +401,7 @@ object PropertyChecker {
     }
   }
 
-  def validateRegEx(regexCandidate: String): Either[Exception, Unit] =
+  private def validateRegEx(regexCandidate: String): Either[Exception, Unit] =
     try {
       regexCandidate.r
       Right()
@@ -381,7 +410,7 @@ object PropertyChecker {
         Left(e)
     }
 
-  def parseDataTypeFormat(
+  private def parseDataTypeFormat(
       formatNode: JsonNode,
       baseDataType: String
   ): (Option[JsonNode], StringWarnings) = {
@@ -435,7 +464,7 @@ object PropertyChecker {
     }
   }
 
-  def parseDataTypeProperty(
+  private def parseDataTypeProperty(
       csvwPropertyType: PropertyType.Value
   ): (JsonNode, String, String) => ParseResult[
     (
@@ -474,7 +503,7 @@ object PropertyChecker {
     }
   }
 
-  def parseUrlLinkProperty(
+  private def parseUrlLinkProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (v, baseUrl, _) =>
     {
@@ -504,7 +533,7 @@ object PropertyChecker {
     }
   }
 
-  def parseDataTypeFormatNumeric(
+  private def parseDataTypeFormatNumeric(
       formatNode: JsonNode
   ): (ObjectNode, StringWarnings) = {
     formatNode match {
@@ -548,7 +577,7 @@ object PropertyChecker {
     }
   }
 
-  def parseTableSchemaProperty(
+  private def parseTableSchemaProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = {
     def tableSchemaPropertyInternal(
@@ -621,7 +650,7 @@ object PropertyChecker {
     tableSchemaPropertyInternal
   }
 
-  def parseTableSchemaObjectProperty(
+  private def parseTableSchemaObjectProperty(
       propertyName: String,
       value: JsonNode,
       baseUrl: URL,
@@ -666,7 +695,7 @@ object PropertyChecker {
     }
   }
 
-  def parseTableSchemaContextBaseUrlAndLang(
+  private def parseTableSchemaContextBaseUrlAndLang(
       schemaJsonNode: ObjectNode,
       inheritedBaseUrl: URL,
       inheritedLang: String
@@ -699,7 +728,7 @@ object PropertyChecker {
       .getOrElse(Right((inheritedBaseUrl, inheritedLang)))
   }
 
-  def parseForeignKeysProperty(
+  private def parseForeignKeysProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, baseUrl, lang) =>
     {
@@ -724,7 +753,7 @@ object PropertyChecker {
     }
   }
 
-  def parseForeignKeyValue(
+  private def parseForeignKeyValue(
       foreignKey: JsonNode,
       baseUrl: String,
       lang: String
@@ -763,7 +792,7 @@ object PropertyChecker {
     }
   }
 
-  def parseForeignKeyReferenceProperty(
+  private def parseForeignKeyReferenceProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, baseUrl, language) =>
     value match {
@@ -780,7 +809,7 @@ object PropertyChecker {
     }
   }
 
-  def parseUriTemplateProperty(
+  private def parseUriTemplateProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     {
@@ -798,7 +827,7 @@ object PropertyChecker {
     }
   }
 
-  def parseTextDirectionProperty(
+  private def parseTextDirectionProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     {
@@ -818,7 +847,7 @@ object PropertyChecker {
     }
   }
 
-  def parseNaturalLanguageProperty(
+  private def parseNaturalLanguageProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, lang) =>
     {
@@ -850,7 +879,7 @@ object PropertyChecker {
     }
   }
 
-  def processNaturalLanguagePropertyObject(
+  private def processNaturalLanguagePropertyObject(
       value: ObjectNode
   ): ParseResult[(ObjectNode, StringWarnings)] =
     value.fields.asScala
@@ -878,7 +907,7 @@ object PropertyChecker {
       })
       .toObjectNodeAndStringWarnings
 
-  def getValidTextualElementsFromArray(
+  private def getValidTextualElementsFromArray(
       a: ArrayNode
   ): (Array[String], StringWarnings) =
     a.elements()
@@ -895,7 +924,7 @@ object PropertyChecker {
           (validColumnNames, stringWarnings :+ stringWarning)
       })
 
-  def parseNameProperty(
+  private def parseNameProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     {
@@ -924,7 +953,7 @@ object PropertyChecker {
     }
   }
 
-  def parseEncodingProperty(
+  private def parseEncodingProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     {
@@ -944,7 +973,7 @@ object PropertyChecker {
     }
   }
 
-  def parseArrayProperty(
+  private def parseArrayProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     value match {
@@ -960,7 +989,7 @@ object PropertyChecker {
     }
   }
 
-  def parseTrimProperty(
+  private def parseTrimProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     value match {
@@ -983,7 +1012,7 @@ object PropertyChecker {
     }
   }
 
-  def parseColumnsProperty(
+  private def parseColumnsProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     {
@@ -991,7 +1020,7 @@ object PropertyChecker {
     }
   }
 
-  def parseColumnReferenceProperty(
+  private def parseColumnReferenceProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     {
@@ -1012,31 +1041,31 @@ object PropertyChecker {
     }
   }
 
-  def parseTargetFormatProperty(
+  private def parseTargetFormatProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     Right((value, Array[String](), csvwPropertyType))
   }
 
-  def parseScriptFormatProperty(
+  private def parseScriptFormatProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     Right((value, Array[String](), csvwPropertyType))
   }
 
-  def parseSourceProperty(
+  private def parseSourceProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     Right((value, Array[String](), csvwPropertyType))
   }
 
-  def parseResourceProperty(
+  private def parseResourceProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, _, _) =>
     Right((value, Array[String](), csvwPropertyType))
   }
 
-  def parseSchemaReferenceProperty(
+  private def parseSchemaReferenceProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, baseUrl, _) =>
     value match {
@@ -1048,7 +1077,7 @@ object PropertyChecker {
     }
   }
 
-  def parseDialectProperty(
+  private def parseDialectProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, baseUrl, lang) =>
     {
@@ -1081,7 +1110,7 @@ object PropertyChecker {
     }
   }
 
-  def parseTransformationsProperty(
+  private def parseTransformationsProperty(
       csvwPropertyType: PropertyType.Value
   ): JsonNodeParser = { (value, baseUrl, lang) =>
     {
@@ -1116,7 +1145,7 @@ object PropertyChecker {
     }
   }
 
-  def parseTransformationElement(
+  private def parseTransformationElement(
       transformationElement: ObjectNode,
       index: Int,
       baseUrl: String,
@@ -1662,10 +1691,9 @@ object PropertyChecker {
               })
           )
           .toArrayNodeAndStringWarnings
-      case _ =>
-        throw new IllegalArgumentException(
-          s"Unexpected input of type ${commonPropertyValueNode.getClass}"
-        )
+      case _ => Left(MetadataError(
+          s"Unexpected common property value ${commonPropertyValueNode.toPrettyString}"
+        ))
     }
   }
 
@@ -1727,25 +1755,19 @@ object PropertyChecker {
     if (baseUrl.isBlank) {
       Right(v)
     } else {
-      val textValue = v.asText()
-      if (PropertyChecker.startsWithUnderscore.matches(textValue)) {
-        Left(
-          MetadataError(
-            s"@id must not start with '_:'  -  $textValue"
-          )
-        )
-      }
-      try {
-        val newValue = new URL(new URL(baseUrl), textValue)
-        Right(new TextNode(newValue.toString))
-      } catch {
-        case _: Exception =>
-          Left(
-            MetadataError(
-              s"common property has invalid @id ($textValue)"
+      parseNodeAsText(v)
+        .flatMap(idValue => {
+          if (PropertyChecker.startsWithUnderscore.matches(idValue)) {
+            Left(
+              MetadataError(
+                s"@id must not start with '_:'  -  $idValue"
+              )
             )
-          )
-      }
+          } else {
+            val absoluteIdUrl = new URL(new URL(baseUrl), idValue)
+            Right(new TextNode(absoluteIdUrl.toString))
+          }
+        })
     }
   }
 
@@ -1931,7 +1953,7 @@ object PropertyChecker {
           .toArrayNodeAndStringWarnings
     }
   }
-  implicit class MetadataErrorsOrParsedArrayElements(
+  private implicit class MetadataErrorsOrParsedArrayElements(
       iterator: Iterator[ArrayElementParseResult]
   ) {
     def toArrayNodeAndStringWarnings
@@ -1961,7 +1983,7 @@ object PropertyChecker {
 
   }
 
-  implicit class MetadataErrorsOrParsedObjectProperties(
+  private implicit class MetadataErrorsOrParsedObjectProperties(
       iterator: Iterator[ObjectPropertyParseResult]
   ) {
     def toObjectNodeAndStringWarnings

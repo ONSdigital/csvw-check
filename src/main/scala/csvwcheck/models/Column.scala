@@ -18,11 +18,8 @@ import csvwcheck.traits.ObjectNodeExtentions.{
   IteratorHasGetKeysAndValues,
   ObjectNodeGetMaybeNode
 }
-import csvwcheck.traits.ParseResultExtensions.{
-  ParseResultExtensions,
-  TupleParseResultExtensions
-}
 import csvwcheck.{PropertyChecker, models}
+import csvwcheck.PropertyChecker.{parseNodeAsBool, parseNodeAsText, parseNodeAsInt}
 import org.joda.time.{DateTime, DateTimeZone}
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -363,43 +360,6 @@ object Column {
       None
     else
       Some(n)
-
-  private def parseNodeAsText(
-      valueNode: JsonNode,
-      coerceToText: Boolean = false
-  ): ParseResult[String] =
-    valueNode match {
-      case textNode: TextNode   => Right(textNode.asText)
-      case node if coerceToText => Right(node.asText)
-      case node =>
-        Left(
-          MetadataError(
-            s"Unexpected value, expected string/text but got: ${node.toPrettyString}"
-          )
-        )
-    }
-
-  private def parseNodeAsInt(valueNode: JsonNode): ParseResult[Int] =
-    valueNode match {
-      case numericNode: IntNode => Right(numericNode.asInt)
-      case node =>
-        Left(
-          MetadataError(
-            s"Unexpected value, expected integer but got: ${node.toPrettyString}"
-          )
-        )
-    }
-
-  private def parseNodeAsBool(valueNode: JsonNode): ParseResult[Boolean] =
-    valueNode match {
-      case booleanNode: BooleanNode => Right(booleanNode.asBoolean())
-      case node =>
-        Left(
-          MetadataError(
-            s"Unexpected value, expected boolean but got: ${node.toPrettyString}"
-          )
-        )
-    }
 
   private def getMaybeFormatForColumn(formatNode: JsonNode): Option[Format] = {
     if (formatNode.isMissingNode || formatNode.isNull) {
