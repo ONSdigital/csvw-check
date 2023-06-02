@@ -1,10 +1,12 @@
 package csvwcheck.numberformatparser
 
 import com.typesafe.scalalogging.Logger
-import csvwcheck.errors.NumberFormatError
+import csvwcheck.errors.MetadataError
 import csvwcheck.models.ArrayCursor
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.NumberParser
+import csvwcheck.models.ParseResult.{ParseResult => CsvwCheckParseResult}
+
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -116,7 +118,7 @@ case class LdmlNumberFormatParser(
       format.next() match {
         case '0' =>
           if (nonPaddingDigits > 0 && isFractionalPart) {
-            throw NumberFormatError(
+            throw MetadataError(
               "Zero-padding digits defined after optional digits in fractional part."
             )
           }
@@ -124,18 +126,18 @@ case class LdmlNumberFormatParser(
           if (groupsPresent) currentGroupSize += 1
         case '#' =>
           if (zeroPaddingDigits > 0 && !isFractionalPart) {
-            throw NumberFormatError(
+            throw MetadataError(
               "Optional digits defined after zero-padding digits in integer part."
             )
           }
           nonPaddingDigits += 1
           if (groupsPresent) currentGroupSize += 1
         case char @ '@' =>
-          throw NumberFormatError(
+          throw MetadataError(
             s"Found significant figures character '$char'. Significant figures functionality not implemented."
           )
         case char @ ('1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9') =>
-          throw NumberFormatError(
+          throw MetadataError(
             s"Found rounding character '$char'. Rounding functionality not implemented."
           )
         case ',' =>
@@ -225,8 +227,17 @@ case class LdmlNumberFormatParser(
     groupingParser.getOrElse("[0-9]*".r)
   }
 
-  def getParserForFormat(format: String): LdmlNumericParserForFormat =
-    LdmlNumericParserForFormat(getParser(format))
+  def getParserForFormat(format: String): CsvwCheckParseResult[LdmlNumericParserForFormat] = {
+    try {
+      Right(LdmlNumericParserForFormat(getParser(format)))
+    } catch {
+      case e: MetadataError => Left(e)
+      case e: Throwable =>
+        logger.debug(e)
+        Left(MetadataError(s"Unhandled error occurred parsing LDML number format: ${e.getMessage}", e))
+    }
+  }
+
 
   def extractSubPatternParsers(
       format: ArrayCursor[Char]
@@ -244,7 +255,7 @@ case class LdmlNumberFormatParser(
         case '\'' =>
           parseQuote(format) match {
             case Right(quoteParser) => parsers.append(quoteParser)
-            case Left(err)          => throw NumberFormatError(err)
+            case Left(err)          => throw MetadataError(err)
           }
         case c if numericDigitChars.contains(c) =>
           format.stepBack()
@@ -269,7 +280,7 @@ case class LdmlNumberFormatParser(
                 case Array(char) if minusSignChars.contains(char) =>
                   Some(SignPart(false))
                 case _ =>
-                  throw NumberFormatError(s"Unmatched sign character '$sign'")
+                  throw MetadataError(s"Unmatched sign character '$sign'")
               }
             ) | failure("Expected explicit sign character [+-] missing")
           )
@@ -298,7 +309,7 @@ case class LdmlNumberFormatParser(
     }
 
     if (numericPartParsers.isEmpty) {
-      throw NumberFormatError(
+      throw MetadataError(
         "Number format does not contain any digit characters."
       )
     }
@@ -400,7 +411,7 @@ case class LdmlNumberFormatParser(
     ): String = {
       (isFractionalPart, input.length) match {
         case (_, l) if l < minimumDigits =>
-          throw NumberFormatError(
+          throw MetadataError(
             s"Expected a minimum of $minimumDigits $numberPartDescription digits."
           )
 
@@ -409,7 +420,7 @@ case class LdmlNumberFormatParser(
         https://www.unicode.org/reports/tr35/tr35-31/tr35-numbers.html#Number_Patterns
          */
         case (true, l) if l > maximumDigits =>
-          throw NumberFormatError(
+          throw MetadataError(
             s"Expected a maximum of $maximumDigits $numberPartDescription digits."
           )
         case _ => input
@@ -545,11 +556,11 @@ case class LdmlNumberFormatParser(
       positivePattern: LdmlNumericSubPattern,
       negativePattern: Option[LdmlNumericSubPattern]
     ) = subPatterns match {
-      case Array()         => throw NumberFormatError("No pattern provided.")
+      case Array()         => throw MetadataError("No pattern provided.")
       case Array(pos)      => (pos, None)
       case Array(pos, neg) => (pos, Some(neg))
       case _ =>
-        throw NumberFormatError(
+        throw MetadataError(
           s"Found ${subPatterns.length} sub-patterns. Expected at most two (positive;negative)."
         )
     }
@@ -650,12 +661,12 @@ case class LdmlNumberFormatParser(
 
   case class LdmlNumericParserForFormat(private val parser: Parser[BigDecimal])
       extends NumberParser {
-    def parse(number: String): Either[String, BigDecimal] = {
+
+    def parse(number: String): CsvwCheckParseResult[BigDecimal] =
       parseAll(parser, number) match {
         case Success(result, _)      => Right(result)
-        case failure @ Failure(_, _) => Left(failure.toString())
-        case error @ Error(_, _)     => Left(error.toString())
+        case failure @ Failure(_, _) => Left(MetadataError(failure.toString()))
+        case error @ Error(_, _)     => Left(MetadataError(error.toString()))
       }
-    }
   }
 }

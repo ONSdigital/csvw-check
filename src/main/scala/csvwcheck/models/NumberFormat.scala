@@ -1,7 +1,7 @@
 package csvwcheck.models
 
 import com.ibm.icu.text.DecimalFormat
-import csvwcheck.errors.{MetadataError, NumberFormatError}
+import csvwcheck.errors.MetadataError
 
 case class NumberFormat(
     pattern: Option[String],
@@ -41,7 +41,7 @@ case class NumberFormat(
         // Figure out what the default pattern should be
     }
   } catch {
-    case e: Exception => throw NumberFormatError(e.getMessage, e)
+    case e: Exception => throw MetadataError(e.getMessage, e)
   }
 
   def parse(value: String): Number = {

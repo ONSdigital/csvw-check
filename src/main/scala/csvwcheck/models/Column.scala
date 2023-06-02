@@ -4,22 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node._
 import com.typesafe.scalalogging.Logger
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{
-  ErrorWithCsvContext,
-  ErrorWithoutContext,
-  MetadataError
-}
+import csvwcheck.errors.{ErrorWithCsvContext, ErrorWithoutContext, MetadataError}
 import csvwcheck.models.Column._
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.NumberParser
-import csvwcheck.traits.ObjectNodeExtentions.{
-  IteratorHasGetKeysAndValues,
-  ObjectNodeGetMaybeNode
-}
+import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import csvwcheck.{PropertyChecker, models}
-import csvwcheck.PropertyChecker.{parseNodeAsBool, parseNodeAsText, parseNodeAsInt}
+import csvwcheck.PropertyChecker.{parseNodeAsBool, parseNodeAsInt, parseNodeAsText, undefinedLanguage}
 import org.joda.time.{DateTime, DateTimeZone}
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -80,6 +73,9 @@ object Column {
       baseDataType <- parseBaseDataType(dataTypeObjectNode)
       name <- parseTextProperty(parsedColumnProperties.column, "name")
       default <- parseTextProperty(parsedColumnProperties.inherited, "default")
+      format <- dataTypeObjectNode.getMaybeNode("format")
+        .map(getFormat(_).map(Some(_)))
+        .getOrElse(Right(None))
       lang <- parseTextProperty(parsedColumnProperties.inherited, "lang")
       id <- parseTextProperty(parsedColumnProperties.inherited, "id")
       ordered <-
@@ -94,18 +90,16 @@ object Column {
         parseTextProperty(parsedColumnProperties.inherited, "textDirection")
       virtual <- parseBooleanProperty(parsedColumnProperties.column, "virtual")
     } yield {
-      val formatNode = dataTypeObjectNode.path("format")
-
       val column = new Column(
         annotations = parsedColumnProperties.annotation,
         baseDataType = baseDataType,
         columnOrdinal = columnOrdinal,
         default = default.getOrElse(""),
-        format = getMaybeFormatForColumn(formatNode),
+        format = format,
         name = name,
         id = id,
         lengthRestrictions = lengthRestrictions,
-        lang = lang.getOrElse("und"),
+        lang = lang.getOrElse(undefinedLanguage),
         nullParam = nullParam,
         numericAndDateRangeRestrictions = numericAndDateRangeRestrictions,
         ordered = ordered.getOrElse(false),
@@ -259,7 +253,7 @@ object Column {
 
   def languagesMatch(l1: String, l2: String): Boolean = {
     val languagesMatchOrEitherIsUndefined =
-      l1 == l2 || l1 == "und" || l2 == "und"
+      l1 == l2 || l1 == undefinedLanguage || l2 == undefinedLanguage
     val oneLanguageIsSubClassOfAnother =
       l1.startsWith(s"$l2-") || l2.startsWith(s"$l1-")
 
@@ -361,32 +355,25 @@ object Column {
     else
       Some(n)
 
-  private def getMaybeFormatForColumn(formatNode: JsonNode): Option[Format] = {
-    if (formatNode.isMissingNode || formatNode.isNull) {
-      None
-    } else {
-      formatNode match {
-        case s: TextNode => Some(Format(Some(s.asText()), None, None))
-        case _ =>
-          val formatObjectNode = formatNode.asInstanceOf[ObjectNode]
+  private def getFormat(formatNode: JsonNode): ParseResult[Format] = {
+    formatNode match {
+      case s: TextNode => Right(Format(Some(s.asText()), None, None))
+      case formatObjectNode: ObjectNode =>
+        def getMaybeValue(propertyName: String): ParseResult[Option[String]] =
+          formatObjectNode.getMaybeNode(propertyName)
+          .map(parseNodeAsText(_, false).map(Some(_)))
+          .getOrElse(Right(None))
 
-          def getMaybeValueFromNode(
-              node: ObjectNode,
-              propertyName: String
-          ): Option[String] = {
-            if (node.isMissingNode) None
-            else node.getMaybeNode(propertyName).map(_.asText())
-          }
-
-          val pattern = getMaybeValueFromNode(formatObjectNode, "pattern")
-          val decimalChar =
-            getMaybeValueFromNode(formatObjectNode, "decimalChar")
-              .map(d => d(0))
-          val groupChar = getMaybeValueFromNode(formatObjectNode, "groupChar")
-            .map(d => d(0))
-
-          Some(Format(pattern, decimalChar, groupChar))
-      }
+        for {
+          pattern <- getMaybeValue("pattern")
+          decimalChar <- getMaybeValue("decimalChar")
+            .map(_.map(d => d(0)))
+          groupChar <- getMaybeValue("groupChar")
+            .map(_.map(d => d(0)))
+        } yield {
+          Format(pattern, decimalChar, groupChar)
+        }
+      case node => Left(MetadataError(s"Unexpected format node value: {${node.toPrettyString}"))
     }
   }
 
@@ -484,19 +471,12 @@ case class Column private (
     numericAndDateRangeRestrictions.maxExclusive.map(v =>
       mapJodaDateTimeToZonedDateTime(DateTime.parse(v))
     )
-  lazy val numberParserForFormat: Either[String, NumberParser] =
-    try {
-      Right(
-        LdmlNumberFormatParser(
-          format.flatMap(f => f.groupChar).getOrElse(','),
-          format.flatMap(f => f.decimalChar).getOrElse('.')
-        ).getParserForFormat(format.flatMap(f => f.pattern).get)
-      )
-    } catch {
-      case e: Throwable =>
-        logger.debug(e)
-        Left(e.getMessage)
-    }
+  lazy val numberParserForFormat: ParseResult[NumberParser] =
+    LdmlNumberFormatParser(
+        format.flatMap(f => f.groupChar).getOrElse(','),
+        format.flatMap(f => f.decimalChar).getOrElse('.')
+    ).getParserForFormat(format.flatMap(f => f.pattern).get)
+
   val datatypeParser: Map[String, String => Either[
     ErrorWithoutContext,
     Any
@@ -675,7 +655,8 @@ case class Column private (
       parseNumberAgainstFormat(value) match {
         case Right(parsedValue) => Right(parsedValue)
         case Left(warning) =>
-          Left(ErrorWithoutContext("invalid_decimal", warning))
+          logger.debug(warning)
+          Left(ErrorWithoutContext("invalid_decimal", warning.message))
       }
     }
   }
@@ -707,7 +688,9 @@ case class Column private (
       }
     } else {
       parseNumberAgainstFormat(value) match {
-        case Left(w)            => Left(ErrorWithoutContext("invalid_double", w))
+        case Left(w)            =>
+          logger.debug(w)
+          Left(ErrorWithoutContext("invalid_double", w.message))
         case Right(parsedValue) => Right(parsedValue.doubleValue)
       }
     }
@@ -730,7 +713,9 @@ case class Column private (
       }
     } else {
       parseNumberAgainstFormat(value) match {
-        case Left(w)            => Left(ErrorWithoutContext("invalid_float", w))
+        case Left(w)            =>
+          logger.debug(w)
+          Left(ErrorWithoutContext("invalid_float", w.message))
         case Right(parsedValue) => Right(parsedValue.floatValue)
       }
     }
@@ -770,7 +755,9 @@ case class Column private (
       }
     } else {
       parseNumberAgainstFormat(value) match {
-        case Left(w) => Left(ErrorWithoutContext("invalid_long", w))
+        case Left(w) =>
+          logger.debug(w)
+          Left(ErrorWithoutContext("invalid_long", w.message))
         case Right(parsedValue) =>
           try {
             Right(parsedValue.longValue)
@@ -814,7 +801,9 @@ case class Column private (
       }
     } else {
       parseNumberAgainstFormat(value) match {
-        case Left(w) => Left(ErrorWithoutContext("invalid_int", w))
+        case Left(w) =>
+          logger.debug(w)
+          Left(ErrorWithoutContext("invalid_int", w.message))
         case Right(parsedNumber) =>
           val parsedValue = parsedNumber.longValue
           if (parsedValue > Int.MaxValue || parsedValue < Int.MinValue)
@@ -856,7 +845,9 @@ case class Column private (
       }
     } else {
       parseNumberAgainstFormat(value) match {
-        case Left(w) => Left(ErrorWithoutContext("invalid_short", w))
+        case Left(w) =>
+          logger.debug(w)
+          Left(ErrorWithoutContext("invalid_short", w.message))
         case Right(parsedNumber) =>
           val parsedValue = parsedNumber.longValue
           if (parsedValue > Short.MaxValue || parsedValue < Short.MinValue)
@@ -897,7 +888,9 @@ case class Column private (
       }
     } else {
       parseNumberAgainstFormat(value) match {
-        case Left(w) => Left(ErrorWithoutContext("invalid_byte", w))
+        case Left(w) =>
+          logger.debug(w)
+          Left(ErrorWithoutContext("invalid_byte", w.message))
         case Right(parsedNumber) =>
           val parsedValue = parsedNumber.byteValue
           if (parsedValue > Byte.MaxValue || parsedValue < Byte.MinValue)
@@ -919,11 +912,8 @@ case class Column private (
 
   def parseNumberAgainstFormat(
       value: String
-  ): Either[String, BigDecimal] =
-    numberParserForFormat match {
-      case Right(numericParser) => numericParser.parse(value)
-      case Left(err)            => Left(err)
-    }
+  ): ParseResult[BigDecimal] =
+    numberParserForFormat.flatMap(_.parse(value))
 
   def processPositiveInteger(
       value: String
@@ -1063,7 +1053,8 @@ case class Column private (
       parseNumberAgainstFormat(value) match {
         case Right(parsedValue) => convertToBigIntegerValue(parsedValue)
         case Left(warning) =>
-          Left(ErrorWithoutContext("invalid_integer", warning))
+          logger.debug(warning)
+          Left(ErrorWithoutContext("invalid_integer", warning.message))
       }
     }
   }

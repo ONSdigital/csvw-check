@@ -2,11 +2,13 @@ package csvwcheck
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node._
 import csvwcheck.ConfiguredObjectMapper.objectMapper
+import csvwcheck.PropertyChecker.parseNodeAsText
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{DateFormatError, MetadataError, NumberFormatError}
+import csvwcheck.errors.{DateFormatError, MetadataError}
 import csvwcheck.models.DateFormat
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
+import csvwcheck.traits.NumberParser
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import org.joda.time.DateTime
 import shapeless.syntax.std.tuple.productTupleOps
@@ -63,6 +65,7 @@ object PropertyChecker {
     "Template",
     "Datatype"
   )
+  val undefinedLanguage: String = "und"
   private val NameRegExp =
     "^([A-Za-z0-9]|(%[A-F0-9][A-F0-9]))([A-Za-z0-9_]|(%[A-F0-9][A-F0-9]))*$".r
   private val PropertyParsers: Map[String, JsonNodeParser] = Map(
@@ -413,31 +416,30 @@ object PropertyChecker {
   private def parseDataTypeFormat(
       formatNode: JsonNode,
       baseDataType: String
-  ): (Option[JsonNode], StringWarnings) = {
+  ): ParseResult[(Option[JsonNode], StringWarnings)] = {
     if (PropertyCheckerConstants.RegExpFormatDataTypes.contains(baseDataType)) {
       val regExFormat = formatNode.asText
       validateRegEx(regExFormat) match {
-        case Right(()) => (Some(formatNode), Array.empty)
-        case Left(e) =>
-          (None, Array(s"invalid_regex '$regExFormat' - ${e.getMessage}"))
+        case Right(()) => Right((Some(formatNode), Array.empty))
+        case Left(e) => Right((None, Array(s"invalid_regex '$regExFormat' - ${e.getMessage}")))
       }
     } else if (
       PropertyCheckerConstants.NumericFormatDataTypes.contains(baseDataType)
     ) {
-      val (parsedNode, stringWarnings) = parseDataTypeFormatNumeric(formatNode)
-      (Some(parsedNode), stringWarnings)
+      parseDataTypeFormatNumeric(formatNode)
+        .map({ case (parsedNode, stringWarnings) => (Some(parsedNode), stringWarnings)})
     } else if (baseDataType == "http://www.w3.org/2001/XMLSchema#boolean") {
       formatNode match {
         case formatTextNode: TextNode =>
           val formatValues = formatNode.asText.split("""\|""")
           if (formatValues.length != 2) {
-            (None, Array(s"invalid_boolean_format '$formatNode'"))
+            Right((None, Array(s"invalid_boolean_format '$formatNode'")))
           } else {
-            (Some(formatTextNode), Array.empty)
+            Right((Some(formatTextNode), Array.empty))
           }
         case _ =>
           // Boolean formats should always be textual
-          (None, Array(s"invalid_boolean_format '$formatNode'"))
+          Right((None, Array(s"invalid_boolean_format '$formatNode'")))
       }
     } else if (
       PropertyCheckerConstants.DateFormatDataTypes.contains(baseDataType)
@@ -448,19 +450,19 @@ object PropertyChecker {
           try {
             val format = DateFormat(Some(dateFormatString), baseDataType).format
             if (format.isDefined) {
-              (Some(new TextNode(format.get)), Array.empty)
+              Right((Some(new TextNode(format.get)), Array.empty))
             } else {
-              (None, Array(s"invalid_date_format '$dateFormatString'"))
+              Right((None, Array(s"invalid_date_format '$dateFormatString'")))
             }
           } catch {
             case _: DateFormatError =>
-              (None, Array(s"invalid_date_format '$dateFormatString'"))
+              Right((None, Array(s"invalid_date_format '$dateFormatString'")))
           }
         case _ =>
-          (None, Array(s"invalid_date_format '$formatNode'"))
+          Right((None, Array(s"invalid_date_format '$formatNode'")))
       }
     } else {
-      throw new IllegalArgumentException(s"Unhandled format node $formatNode")
+      Left(MetadataError(s"Unhandled format node ${formatNode.toPrettyString}"))
     }
   }
 
@@ -477,30 +479,36 @@ object PropertyChecker {
       initialDataTypePropertyParse(value, baseUrl, lang)
         .flatMap(parseDataTypeLengths)
         .flatMap(parseDataTypeMinMaxValues)
-        .map({
-          case (dataTypeNode, stringWarnings) =>
-            dataTypeNode
-              .getMaybeNode("format")
-              .map(formatNode => {
-                val baseDataType = dataTypeNode.get("base").asText()
-                val (formatNodeReplacement, newStringWarnings) =
-                  parseDataTypeFormat(formatNode, baseDataType)
-                val parsedDataTypeNode = formatNodeReplacement match {
-                  case Some(newNode) =>
-                    dataTypeNode.deepCopy().set("format", newNode)
-                  case None =>
-                    val modifiedDataTypeNode = dataTypeNode
-                      .deepCopy()
-                    modifiedDataTypeNode.remove("format")
-
-                    modifiedDataTypeNode
-                }
-                (parsedDataTypeNode, stringWarnings ++ newStringWarnings)
-              })
-              .getOrElse((dataTypeNode, stringWarnings))
-        })
+        .flatMap(parseDataTypeFormat)
         .map(_ :+ csvwPropertyType)
     }
+  }
+
+  private def parseDataTypeFormat(input: (ObjectNode, StringWarnings)): ParseResult[(ObjectNode, StringWarnings)] = input match {
+    case (dataTypeNode: ObjectNode, stringWarnings: StringWarnings) =>
+      dataTypeNode
+        .getMaybeNode("format")
+        .map(formatNode => {
+          for {
+            baseDataType <- parseNodeAsText(dataTypeNode.get("base"))
+            dataTypeFormatNodeAndWarnings <- parseDataTypeFormat(formatNode, baseDataType)
+          } yield {
+            val (formatNodeReplacement, newStringWarnings) = dataTypeFormatNodeAndWarnings
+
+            val parsedDataTypeNode = formatNodeReplacement match {
+              case Some(newNode) =>
+                dataTypeNode.deepCopy().set("format", newNode)
+              case None =>
+                val modifiedDataTypeNode = dataTypeNode
+                  .deepCopy()
+                modifiedDataTypeNode.remove("format")
+
+                modifiedDataTypeNode
+            }
+            (parsedDataTypeNode, stringWarnings ++ newStringWarnings)
+          }
+        })
+        .getOrElse(Right((dataTypeNode, stringWarnings)))
   }
 
   private def parseUrlLinkProperty(
@@ -535,45 +543,47 @@ object PropertyChecker {
 
   private def parseDataTypeFormatNumeric(
       formatNode: JsonNode
-  ): (ObjectNode, StringWarnings) = {
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
     formatNode match {
       case _: TextNode =>
         val formatObjectNode = JsonNodeFactory.instance.objectNode()
         parseDataTypeFormatNumeric(
           formatObjectNode.set("pattern", formatNode.deepCopy())
         )
-      case formatObjectNode: ObjectNode =>
-        val groupChar =
-          formatObjectNode.getMaybeNode("groupChar").map(_.asText.charAt(0))
-        val decimalChar =
-          formatObjectNode.getMaybeNode("decimalChar").map(_.asText.charAt(0))
-        try {
-          formatObjectNode
-            .getMaybeNode("pattern")
-            .map(_.asText)
-            .map(pattern =>
-              LdmlNumberFormatParser(
-                groupChar.getOrElse(','),
-                decimalChar.getOrElse('.')
-              ).getParserForFormat(pattern)
-            )
-            .get
+      case formatObjectNode: ObjectNode => Right(parseNumericFormatObjectNode(formatObjectNode))
+      case _ => Left(MetadataError(s"Unhandled numeric data type format ${formatNode.toPrettyString}"))
+    }
+  }
 
-          (formatObjectNode, Array.empty)
-        } catch {
-          case e: NumberFormatError =>
-            (
-              formatObjectNode
-                .deepCopy()
-                .remove("pattern")
-                .asInstanceOf[ObjectNode],
-              Array(s"invalid_number_format - ${e.getMessage}")
-            )
-        }
-      case _ =>
-        throw new IllegalArgumentException(
-          s"Unhandled numeric data type format $formatNode"
+  private def parseNumericFormatObjectNode(formatObjectNode: ObjectNode): (ObjectNode, StringWarnings) = {
+    def parseMaybeStringAt(propertyName: String): ParseResult[Option[String]] =
+      formatObjectNode
+        .getMaybeNode(propertyName)
+        .map(parseNodeAsText(_).map(Some(_)))
+        .getOrElse(Right(None))
+
+    val numberFormatParserResult: ParseResult[Option[NumberParser]] = for {
+      groupChar <- parseMaybeStringAt("groupChar")
+        .map(_.map(_.charAt(0)))
+      decimalChar <- parseMaybeStringAt("decimalChar")
+        .map(_.map(_.charAt(0)))
+      numberFormatParser <- parseMaybeStringAt("pattern")
+        .flatMap( // Either map
+          _.map(pattern => // Option map
+            LdmlNumberFormatParser(groupChar.getOrElse(','), decimalChar.getOrElse('.'))
+              .getParserForFormat(pattern)
+              .map(Some(_))
+          ).getOrElse(Right(None))
         )
+    } yield numberFormatParser
+
+    numberFormatParserResult match {
+      case Right(_) => (formatObjectNode, Array[String]())
+      case Left(err) =>
+        val formatNodeWithoutPattern = formatObjectNode.deepCopy()
+        formatNodeWithoutPattern.remove("pattern")
+
+        (formatNodeWithoutPattern, Array(s"invalid_number_format - ${err.message}"))
     }
   }
 
@@ -1673,7 +1683,7 @@ object PropertyChecker {
       case o: ObjectNode => parseCommonPropertyObject(o, baseUrl, defaultLang)
       case _: TextNode =>
         defaultLang match {
-          case "und" => Right((commonPropertyValueNode, Array()))
+          case lang if lang == undefinedLanguage => Right((commonPropertyValueNode, Array()))
           case _ =>
             val objectNodeToReturn = JsonNodeFactory.instance.objectNode()
             objectNodeToReturn.set("@value", commonPropertyValueNode)

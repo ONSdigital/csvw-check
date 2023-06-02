@@ -5,6 +5,7 @@ import akka.stream.scaladsl.Source
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
 import csvwcheck.PropertyChecker
+import csvwcheck.PropertyChecker.undefinedLanguage
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.models.ParseResult.ParseResult
@@ -38,7 +39,7 @@ object TableGroup {
     val tableGroupNode = restructureIfNodeIsSingleTable(tableGroupNodeIn)
 
     parseTableGroupType(tableGroupNode)
-      .flatMap(_ => parseContext(tableGroupNodeIn, baseUrl, "und"))
+      .flatMap(_ => parseContext(tableGroupNodeIn, baseUrl, undefinedLanguage))
       .flatMap({
         case (baseUrl, lang, warnings) =>
           partitionTableGroupProperties(
