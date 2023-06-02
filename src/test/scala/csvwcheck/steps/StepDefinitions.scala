@@ -17,8 +17,8 @@ import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import scala.io.Source
 
-object StepDefinitions extends ScalaDsl with EN {
-  private val fixturesPath = File(System.getProperty("user.dir"))
+object EnsureFixtureFilesExist {
+  val fixturesPath: File = File(System.getProperty("user.dir"))
     ./("src")
     ./("test")
     ./("resources")
@@ -74,7 +74,7 @@ object StepDefinitions extends ScalaDsl with EN {
 }
 
 class StepDefinitions extends ScalaDsl with EN {
-  import csvwcheck.steps.StepDefinitions.fixturesPath
+  import csvwcheck.steps.EnsureFixtureFilesExist.fixturesPath
 
   private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
   private var schemaUrl: Option[String] = None
