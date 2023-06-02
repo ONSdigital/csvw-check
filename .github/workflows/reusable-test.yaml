@@ -1,0 +1,48 @@
+name: Test csvw-check
+on:
+  workflow_call:
+    inputs:
+      os:
+        required: true
+        type: string
+
+jobs:
+  test_in_environments:
+    runs-on: ${{ inputs.os }}
+    container:
+      image: sbtscala/scala-sbt:graalvm-ce-22.3.0-b2-java17_1.8.3_2.13.10
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Compile
+        run: sbt compile
+
+      - name: Run tests
+        run: sbt test
+
+      - name: Archive test results from xml files
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ inputs.os }} test results
+          path: |
+            target/test-reports/*.xml
+
+  publish_test_results:
+    needs: [test_in_environments]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: ${{ inputs.os }} test results
+
+      - name: Publish Unit & Behave Test Results
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          check_name: ${{ inputs.os }} test results
+          junit_files: |
+            target/test-reports/*.xml

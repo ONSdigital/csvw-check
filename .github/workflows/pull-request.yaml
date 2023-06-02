@@ -1,0 +1,14 @@
+name: Test csvw-check on pull request
+on:
+  pull_request:
+
+jobs:
+  test_in_environments:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+
+    uses: ./.github/workflows/reusable-test.yaml
+    with:
+      os: ${{ matrix.os }}
+  
