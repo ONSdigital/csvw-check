@@ -10,26 +10,27 @@ import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
+import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import csvwcheck.{PropertyChecker, models}
-import csvwcheck.traits.LoggerExtensions.LogDebugException
-
-import scala.jdk.CollectionConverters.{IterableHasAsScala, MapHasAsScala}
 import org.apache.commons.csv.{CSVFormat, CSVParser, CSVRecord}
 import shapeless.syntax.std.tuple.productTupleOps
 
 import java.io.File
 import java.net.URI
 import java.nio.charset.Charset
-import scala.collection.JavaConverters.asScalaIteratorConverter
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
+import scala.jdk.CollectionConverters.{IterableHasAsScala, MapHasAsScala}
 import scala.util.control.NonFatal
 object Table {
-  type MapForeignKeyDefinitionToValues = Map[ForeignKeyDefinition, Set[KeyWithContext]]
-  type MapForeignKeyReferenceToValues = Map[ReferencedTableForeignKeyReference, Set[KeyWithContext]]
-  type PrimaryKeysAndErrors = (mutable.Set[List[Any]], ArrayBuffer[ErrorWithCsvContext])
+  type MapForeignKeyDefinitionToValues =
+    Map[ForeignKeyDefinition, Set[KeyWithContext]]
+  type MapForeignKeyReferenceToValues =
+    Map[ReferencedTableForeignKeyReference, Set[KeyWithContext]]
+  type PrimaryKeysAndErrors =
+    (mutable.Set[List[Any]], ArrayBuffer[ErrorWithCsvContext])
 
   private val tablePermittedProperties = Array[String](
     "columns",
@@ -233,8 +234,7 @@ object Table {
           id = tableProperties.get("@id").map(_.asText()),
           suppressOutput = tableProperties
             .get("suppressOutput")
-            .map(_.asBoolean)
-            .getOrElse(false),
+            .exists(_.asBoolean),
           annotations = annotations
         )
 
@@ -325,14 +325,12 @@ object Table {
       .getMaybeNode("rowTitles")
       .map({
         case arrayNode: ArrayNode =>
-          arrayNode
-            .elements()
-            .asScala
+          arrayNode.asScala
             .map({
               case rowTitleElement: TextNode =>
                 val rowTitle = rowTitleElement.asText
                 columns
-                  .find(col => col.name.exists(_ == rowTitle))
+                  .find(col => col.name.contains(rowTitle))
                   .map(Right(_))
                   .getOrElse(
                     Left(
@@ -372,9 +370,7 @@ object Table {
       .getMaybeNode("foreignKeys")
       .map({
         case foreignKeysNode: ArrayNode =>
-          foreignKeysNode
-            .elements()
-            .asScala
+          foreignKeysNode.asScala
             .map({
               case foreignKeyObjectNode: ObjectNode =>
                 parseForeignKeyObjectNode(foreignKeyObjectNode, columns)
@@ -435,14 +431,12 @@ object Table {
       columnReferenceArrayNode: ArrayNode,
       columns: Array[Column]
   ): ParseResult[ForeignKeyDefinition] = {
-    columnReferenceArrayNode
-      .elements()
-      .asScala
+    columnReferenceArrayNode.asScala
       .map({
         case columnReferenceElementTextNode: TextNode =>
           val columnReference = columnReferenceElementTextNode.asText
           columns
-            .find(col => col.name.exists(_ == columnReference))
+            .find(col => col.name.contains(columnReference))
             .map(Right(_))
             .getOrElse(
               Left(
@@ -476,9 +470,7 @@ object Table {
     tableSchemaObject
       .getMaybeNode("primaryKey")
       .map(primaryKeyNode =>
-        primaryKeyNode
-          .elements()
-          .asScala
+        primaryKeyNode.asScala
           .map(parsePrimaryKeyColumnReference(_, columns))
           .foldLeft[(Option[Array[Column]], Array[WarningWithCsvContext])](
             Some(Array[Column]()),
@@ -522,7 +514,7 @@ object Table {
       case primaryKeyElement: TextNode =>
         val primaryKeyColNameReference = primaryKeyElement.asText()
         columns
-          .find(col => col.name.exists(_ == primaryKeyColNameReference))
+          .find(col => col.name.contains(primaryKeyColNameReference))
           .map(Right(_))
           .getOrElse(
             Left(
@@ -787,11 +779,11 @@ object Table {
 }
 
 case class TableSchema private (
-                        columns: Array[Column],
-                        primaryKey: Array[Column],
-                        rowTitleColumns: Array[Column],
-                        foreignKeys: Array[ForeignKeyDefinition],
-                        schemaId: Option[String]
+    columns: Array[Column],
+    primaryKey: Array[Column],
+    rowTitleColumns: Array[Column],
+    foreignKeys: Array[ForeignKeyDefinition],
+    schemaId: Option[String]
 )
 
 case class Table private (
@@ -806,31 +798,28 @@ case class Table private (
     foreignKeyReferences: Array[ReferencedTableForeignKeyReference] = Array()
 ) {
   import csvwcheck.models.Table.{MapForeignKeyDefinitionToValues, MapForeignKeyReferenceToValues, PrimaryKeysAndErrors}
-
+  val mapAvailableCharsets: mutable.Map[String, Charset] =
+    Charset.availableCharsets().asScala
   private val logger = Logger(this.getClass.getName)
 
   override def toString: String = s"Table($url)"
 
   override def hashCode(): Int = url.hashCode
 
-  override def equals(obj: Any): Boolean =
-    if (obj.isInstanceOf[Table]) {
-      obj.asInstanceOf[Table].url == this.url
-    } else {
-      false
-    }
-
   implicit val ec: scala.concurrent.ExecutionContext =
     scala.concurrent.ExecutionContext.global
 
-  val mapAvailableCharsets: mutable.Map[String, Charset] =
-    Charset.availableCharsets().asScala
+  override def equals(obj: Any): Boolean =
+    obj match {
+      case table: Table => table.url == this.url
+      case _            => false
+    }
 
   def parseCsv(degreeOfParallelism: Int, rowGrouping: Int): Source[
     (
-      WarningsAndErrors,
-      MapForeignKeyDefinitionToValues,
-      MapForeignKeyReferenceToValues
+        WarningsAndErrors,
+        MapForeignKeyDefinitionToValues,
+        MapForeignKeyReferenceToValues
     ),
     NotUsed
   ] = {
@@ -866,13 +855,15 @@ case class Table private (
             )
         }
       case Left(warningsAndErrors) =>
-        Source(List(
-          (
-            warningsAndErrors,
-            Map[ForeignKeyDefinition, Set[KeyWithContext]](),
-            Map[ReferencedTableForeignKeyReference, Set[KeyWithContext]]()
+        Source(
+          List(
+            (
+              warningsAndErrors,
+              Map[ForeignKeyDefinition, Set[KeyWithContext]](),
+              Map[ReferencedTableForeignKeyReference, Set[KeyWithContext]]()
+            )
           )
-        ))
+        )
     }
   }
 
@@ -896,6 +887,58 @@ case class Table private (
     formatBuilder.build()
   }
 
+  def validateHeader(
+      header: CSVRecord
+  ): WarningsAndErrors = {
+    var warnings: Array[WarningWithCsvContext] = Array()
+    var errors: Array[ErrorWithCsvContext] = Array()
+    var columnIndex = 0
+    var columnNames: Array[String] = Array()
+    while (columnIndex < header.size()) {
+      val columnName = header.get(columnIndex).trim
+      if (columnName == "") {
+        warnings :+= WarningWithCsvContext(
+          "Empty column name",
+          "Schema",
+          "",
+          (columnIndex + 1).toString,
+          "",
+          ""
+        )
+      }
+      if (columnNames.contains(columnName)) {
+        warnings :+= WarningWithCsvContext(
+          "Duplicate column name",
+          "Schema",
+          "",
+          (columnIndex + 1).toString,
+          columnName,
+          ""
+        )
+      } else columnNames :+= columnName
+      // Only validate columns are defined if a tableSchema has been defined.
+      schema.foreach(s => {
+        if (columnIndex < s.columns.length) {
+          val column = s.columns(columnIndex)
+          val WarningsAndErrors(w, e) = column.validateHeader(columnName)
+          warnings = warnings.concat(w)
+          errors = errors.concat(e)
+        } else {
+          errors :+= ErrorWithCsvContext(
+            "Malformed header",
+            "Schema",
+            "1",
+            "",
+            "Unexpected column not defined in metadata",
+            ""
+          )
+        }
+
+      })
+      columnIndex += 1
+    }
+    models.WarningsAndErrors(warnings, errors)
+  }
 
   private def readAndValidateTableWithParser(
       format: CSVFormat,
@@ -905,10 +948,10 @@ case class Table private (
       rowGrouping: Int
   ): Source[
     (
-      WarningsAndErrors,
+        WarningsAndErrors,
         MapForeignKeyDefinitionToValues,
         MapForeignKeyReferenceToValues
-      ),
+    ),
     NotUsed
   ] = {
     Source
@@ -939,7 +982,9 @@ case class Table private (
       .flatMapConcat(accumulatedTableKeyValues => {
         val parser: CSVParser = getParser(dialect, format)
           .getOrElse(
-            throw new Exception("Could not fetch CSV parser. This should never happen.")
+            throw new Exception(
+              "Could not fetch CSV parser. This should never happen."
+            )
           )
 
         checkPossiblePrimaryKeyDuplicates(
@@ -953,7 +998,10 @@ case class Table private (
       })
   }
 
-  private def getParser(dialect: Dialect, format: CSVFormat): Either[WarningsAndErrors, CSVParser] = {
+  private def getParser(
+      dialect: Dialect,
+      format: CSVFormat
+  ): Either[WarningsAndErrors, CSVParser] = {
     val tableUri = new URI(url)
     if (tableUri.getScheme == "file") {
       val tableCsvFile = new File(tableUri)
@@ -1011,11 +1059,10 @@ case class Table private (
     }
   }
 
-
   private def accumulateTableKeyValuesForRowGroup(
-                                                   accumulatedTableKeyValues: AccumulatedTableKeyValues,
-                                                   rowGroup: Seq[ValidateRowOutput]
-                                                 ): AccumulatedTableKeyValues =
+      accumulatedTableKeyValues: AccumulatedTableKeyValues,
+      rowGroup: Seq[ValidateRowOutput]
+  ): AccumulatedTableKeyValues =
     rowGroup.foldLeft(accumulatedTableKeyValues)({
       case (acc, rowOutput) =>
         acc.copy(
@@ -1046,11 +1093,11 @@ case class Table private (
     * at this point. During this checking the actual values of primary keys of these rows are compared.
     */
   private def checkPossiblePrimaryKeyDuplicates(
-                                                 accumulatedTableKeyValues: AccumulatedTableKeyValues,
-                                                 parser: CSVParser,
-                                                 rowGrouping: Int,
-                                                 parallelism: Int
-                                               ): Source[
+      accumulatedTableKeyValues: AccumulatedTableKeyValues,
+      parser: CSVParser,
+      rowGrouping: Int,
+      parallelism: Int
+  ): Source[
     WarningsAndErrors,
     NotUsed
   ] = {
@@ -1084,15 +1131,15 @@ case class Table private (
         (mutable.Set[List[Any]](), ArrayBuffer.empty[ErrorWithCsvContext])
       ) {
         case (
-          (
-            primaryKeyValues,
-            errorsInAkkaStreams
-            ),
-          rowOutputs: Seq[ValidateRowOutput]
-          ) =>
+              (
+                primaryKeyValues,
+                errorsInAkkaStreams
+              ),
+              rowOutputs: Seq[ValidateRowOutput]
+            ) =>
           for (rowOutput <- rowOutputs) {
             ensurePrimaryKeyValueIsNotDuplicate(primaryKeyValues, rowOutput)
-              .foreach(errorsInAkkaStreams.addOne(_))
+              .foreach(errorsInAkkaStreams.addOne)
           }
           (primaryKeyValues, errorsInAkkaStreams)
       }
@@ -1106,9 +1153,9 @@ case class Table private (
   }
 
   private def ensurePrimaryKeyValueIsNotDuplicate(
-                                                   existingPrimaryKeyValues: mutable.Set[List[Any]],
-                                                   validateRowOutput: ValidateRowOutput
-                                                 ): Option[ErrorWithCsvContext] = {
+      existingPrimaryKeyValues: mutable.Set[List[Any]],
+      validateRowOutput: ValidateRowOutput
+  ): Option[ErrorWithCsvContext] = {
     val primaryKeyValues = validateRowOutput.primaryKeyValues
     if (
       validateRowOutput.primaryKeyValues.nonEmpty && existingPrimaryKeyValues
@@ -1193,9 +1240,9 @@ case class Table private (
     * key violations or hash collisions.
     */
   private def accumulatePossiblePrimaryKeyDuplicates(
-                                                      mapPrimaryKeyHashToRowNumbers: Map[Int, Array[Long]],
-                                                      validateRowOutput: ValidateRowOutput
-                                                    ): Map[Int, Array[Long]] = {
+      mapPrimaryKeyHashToRowNumbers: Map[Int, Array[Long]],
+      validateRowOutput: ValidateRowOutput
+  ): Map[Int, Array[Long]] = {
     val primaryKeyValueHash = validateRowOutput.primaryKeyValues.hashCode()
     if (validateRowOutput.primaryKeyValues.nonEmpty) {
       val existingRowsMatchingHash = mapPrimaryKeyHashToRowNumbers.getOrElse(
@@ -1212,13 +1259,13 @@ case class Table private (
   }
 
   private def accumulateReferencedTableForeignKeyValues(
-                                                         validateRowOutput: ValidateRowOutput,
-                                                         mapReferencedTableToForeignKeyValues: MapForeignKeyReferenceToValues
-                                                       ): MapForeignKeyReferenceToValues =
+      validateRowOutput: ValidateRowOutput,
+      mapReferencedTableToForeignKeyValues: MapForeignKeyReferenceToValues
+  ): MapForeignKeyReferenceToValues =
     validateRowOutput.parentTableForeignKeyReferences
       .foldLeft(mapReferencedTableToForeignKeyValues)({
         case (acc, (keyReference, keyValues)) =>
-          val existingValues = acc.get(keyReference).getOrElse(Set())
+          val existingValues = acc.getOrElse(keyReference, Set())
           if (existingValues.contains(keyValues)) {
             acc.updated(
               keyReference,
@@ -1230,19 +1277,17 @@ case class Table private (
       })
 
   private def accumulateOriginTableForeignKeyValues(
-                                                     validateRowOutput: ValidateRowOutput,
-                                                     foreignKeyDefinitionsWithValues: MapForeignKeyDefinitionToValues
-                                                   ): MapForeignKeyDefinitionToValues =
+      validateRowOutput: ValidateRowOutput,
+      foreignKeyDefinitionsWithValues: MapForeignKeyDefinitionToValues
+  ): MapForeignKeyDefinitionToValues =
     validateRowOutput.childTableForeignKeys.foldLeft(
       foreignKeyDefinitionsWithValues
     ) {
       case (acc, (keyDefinition, keyValues)) =>
         val valuesForKey = acc
-          .get(keyDefinition)
-          .getOrElse(Set())
+          .getOrElse(keyDefinition, Set())
         acc.updated(keyDefinition, valuesForKey + keyValues)
     }
-
 
   private def validateRow(row: CSVRecord): ValidateRowOutput = {
     var errors = Array[ErrorWithCsvContext]()
@@ -1257,7 +1302,7 @@ case class Table private (
       ] // to store the validated foreign key values in each row
     }
 
-    schema.map(s => {
+    schema.foreach(s => {
       for ((value, column) <- row.iterator.asScalaArray.zip(s.columns)) {
         //catch any exception here, possibly outOfBounds  and set warning too many values
         val (es, newValue) = column.validate(value)
@@ -1299,14 +1344,17 @@ case class Table private (
       row.getRecordNumber,
       WarningsAndErrors(Array(), errors),
       primaryKeyValues.toList,
-      getForeignKeyReferencesWithPossibleValues(foreignKeyReferenceValues.toList, row),
+      getForeignKeyReferencesWithPossibleValues(
+        foreignKeyReferenceValues.toList,
+        row
+      ),
       getForeignKeyDefinitionsWithValues(foreignKeyValues.toList, row)
     )
   }
 
   private def getForeignKeyDefinitionsWithValues(
-                                   foreignKeyValues: List[(ForeignKeyDefinition, List[Any])],
-                                   row: CSVRecord
+      foreignKeyValues: List[(ForeignKeyDefinition, List[Any])],
+      row: CSVRecord
   ): Predef.Map[ForeignKeyDefinition, KeyWithContext] = {
     foreignKeyValues
       .groupBy {
@@ -1334,60 +1382,6 @@ case class Table private (
       }
   }
 
-  def validateHeader(
-      header: CSVRecord
-  ): WarningsAndErrors = {
-    var warnings: Array[WarningWithCsvContext] = Array()
-    var errors: Array[ErrorWithCsvContext] = Array()
-    var columnIndex = 0
-    var columnNames: Array[String] = Array()
-    while (columnIndex < header.size()) {
-      val columnName = header.get(columnIndex).trim
-      if (columnName == "") {
-        warnings :+= WarningWithCsvContext(
-          "Empty column name",
-          "Schema",
-          "",
-          (columnIndex + 1).toString,
-          "",
-          ""
-        )
-      }
-      if (columnNames.contains(columnName)) {
-        warnings :+= WarningWithCsvContext(
-          "Duplicate column name",
-          "Schema",
-          "",
-          (columnIndex + 1).toString,
-          columnName,
-          ""
-        )
-      } else columnNames :+= columnName
-      // Only validate columns are defined if a tableSchema has been defined.
-      schema.map(s => {
-        if (columnIndex < s.columns.length) {
-          val column = s.columns(columnIndex)
-          val WarningsAndErrors(w, e) = column.validateHeader(columnName)
-          warnings = warnings.concat(w)
-          errors = errors.concat(e)
-        } else {
-          errors :+= ErrorWithCsvContext(
-            "Malformed header",
-            "Schema",
-            "1",
-            "",
-            "Unexpected column not defined in metadata",
-            ""
-          )
-        }
-
-      })
-      columnIndex += 1
-    }
-    models.WarningsAndErrors(warnings, errors)
-  }
-
-
   /**
     *
     * @param warnings
@@ -1407,11 +1401,11 @@ case class Table private (
     *     234234234234: {345}
     *   }
     */
-  case class AccumulatedTableKeyValues(
-                                        warnings: Array[WarningWithCsvContext] = Array[WarningWithCsvContext](),
-                                        errors: Array[ErrorWithCsvContext] = Array[ErrorWithCsvContext](),
-                                        mapForeignKeyDefinitionToKeys: MapForeignKeyDefinitionToValues = Map(),
-                                        mapForeignKeyReferenceToKeys: MapForeignKeyReferenceToValues = Map(),
-                                        mapPrimaryKeyHashToRowNums: Map[Int, Array[Long]] = Map()
-                                      )
+  private case class AccumulatedTableKeyValues(
+      warnings: Array[WarningWithCsvContext] = Array[WarningWithCsvContext](),
+      errors: Array[ErrorWithCsvContext] = Array[ErrorWithCsvContext](),
+      mapForeignKeyDefinitionToKeys: MapForeignKeyDefinitionToValues = Map(),
+      mapForeignKeyReferenceToKeys: MapForeignKeyReferenceToValues = Map(),
+      mapPrimaryKeyHashToRowNums: Map[Int, Array[Long]] = Map()
+  )
 }

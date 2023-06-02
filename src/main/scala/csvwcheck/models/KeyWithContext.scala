@@ -27,5 +27,4 @@ case class KeyWithContext(
     stringList.mkString(",")
   }
 
-
 }

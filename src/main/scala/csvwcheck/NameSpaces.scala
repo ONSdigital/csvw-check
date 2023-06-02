@@ -1,6 +1,5 @@
 package csvwcheck
 import scala.collection.mutable
-import scala.collection.mutable.HashMap
 
 //noinspection HttpUrlsUsage
 object NameSpaces {

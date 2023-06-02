@@ -3,6 +3,7 @@ name := "csvwcheck"
 organization := "ONS"
 version := "0.1"
 scalaVersion := "2.13.4"
+scalacOptions ++= Seq("-deprecation", "-feature")
 autoCompilerPlugins := true
 
 // Want to use a published library in your project?

@@ -254,10 +254,13 @@ class ValidatorTest extends AnyFunSuite {
   test(
     "it should cope with @language properties on strings (Issue #101)"
   ) {
-    val testCaseFile = new File(s"${csvwExamplesBaseDir}/languagetagbroken101/goverment-year.csv-metadata.json")
+    val testCaseFile = new File(
+      s"$csvwExamplesBaseDir/languagetagbroken101/goverment-year.csv-metadata.json"
+    )
     assert(testCaseFile.exists())
 
-    val validator = new Validator(Some(s"file://${testCaseFile.getAbsolutePath}"))
+    val validator =
+      new Validator(Some(s"file://${testCaseFile.getAbsolutePath}"))
     var warningsAndErrors = WarningsAndErrors()
     val akkaStream =
       validator.validate().map(wAndE => warningsAndErrors = wAndE)
@@ -266,4 +269,3 @@ class ValidatorTest extends AnyFunSuite {
     assert(errors.isEmpty)
   }
 }
-

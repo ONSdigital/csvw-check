@@ -3,10 +3,9 @@ package csvwcheck.numberformatparser
 import com.typesafe.scalalogging.Logger
 import csvwcheck.errors.MetadataError
 import csvwcheck.models.ArrayCursor
+import csvwcheck.models.ParseResult.{ParseResult => CsvwCheckParseResult}
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.NumberParser
-import csvwcheck.models.ParseResult.{ParseResult => CsvwCheckParseResult}
-
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -19,6 +18,7 @@ case class LdmlNumberFormatParser(
 ) extends RegexParsers {
 
   type NumberPartParser = Parser[Option[ParsedNumberPart]]
+
   /**
     * Don't automatically consume/skip any whitespace characters.
     */
@@ -31,13 +31,6 @@ case class LdmlNumberFormatParser(
   def plusSignChars = Set('+', '\uFF0B', '\u2795')
 
   def minusSignChars = Set('-')
-
-  private def signChars = plusSignChars.union(minusSignChars)
-
-  // https://www.unicode.org/reports/tr35/tr35.html#Loose_Matching
-  private def quoteCharsRegEx = "[\u0027\u2018\u02BB\u02BC\u2019\u05F3]".r
-
-  private def signCharsRegEx = s"[${signChars.mkString}]".r
 
   def parseQuote(
       format: ArrayCursor[Char]
@@ -187,57 +180,23 @@ case class LdmlNumberFormatParser(
     )
   }
 
-  /**
-    * Enforces that the primary/secondary group characters must be correctly used within a number.
-    *
-    * @param firstGroupSize - the number of chars in the first group
-    * @param secondGroupSize - the number of chars in the second group
-    * @param isInFractionalPart - whether or not these groups are in the fraction part of the number.
-    * @return
-    */
-  private def enforceGroupsRemoveGroupCharsParser(
-      firstGroupSize: Option[Int],
-      secondGroupSize: Option[Int],
-      isInFractionalPart: Boolean
-  ): Parser[String] = {
-    val groupingParser: Option[Parser[String]] =
-      (firstGroupSize, secondGroupSize) match {
-        case (Some(firstSize), Some(secondSize)) =>
-          val primaryGroupSize =
-            if (isInFractionalPart) firstSize else secondSize
-          val secondaryGroupSize =
-            if (isInFractionalPart) secondSize else firstSize
-          Some(
-            getGroupsParserForPrimarySecondaryGrouping(
-              primaryGroupSize,
-              secondaryGroupSize,
-              isInFractionalPart
-            )
-          )
-        case (Some(primaryGroupSize), None) =>
-          Some(
-            getGroupsParserForPrimaryGrouping(
-              primaryGroupSize,
-              isInFractionalPart
-            )
-          )
-        case (_, _) => None
-      }
-
-    groupingParser.getOrElse("[0-9]*".r)
-  }
-
-  def getParserForFormat(format: String): CsvwCheckParseResult[LdmlNumericParserForFormat] = {
+  def getParserForFormat(
+      format: String
+  ): CsvwCheckParseResult[LdmlNumericParserForFormat] = {
     try {
       Right(LdmlNumericParserForFormat(getParser(format)))
     } catch {
       case e: MetadataError => Left(e)
       case e: Throwable =>
         logger.debug(e)
-        Left(MetadataError(s"Unhandled error occurred parsing LDML number format: ${e.getMessage}", e))
+        Left(
+          MetadataError(
+            s"Unhandled error occurred parsing LDML number format: ${e.getMessage}",
+            e
+          )
+        )
     }
   }
-
 
   def extractSubPatternParsers(
       format: ArrayCursor[Char]
@@ -321,6 +280,53 @@ case class LdmlNumberFormatParser(
     )
   }
 
+  private def signChars = plusSignChars.union(minusSignChars)
+
+  // https://www.unicode.org/reports/tr35/tr35.html#Loose_Matching
+  private def quoteCharsRegEx = "[\u0027\u2018\u02BB\u02BC\u2019\u05F3]".r
+
+  private def signCharsRegEx = s"[${signChars.mkString}]".r
+
+  /**
+    * Enforces that the primary/secondary group characters must be correctly used within a number.
+    *
+    * @param firstGroupSize - the number of chars in the first group
+    * @param secondGroupSize - the number of chars in the second group
+    * @param isInFractionalPart - whether or not these groups are in the fraction part of the number.
+    * @return
+    */
+  private def enforceGroupsRemoveGroupCharsParser(
+      firstGroupSize: Option[Int],
+      secondGroupSize: Option[Int],
+      isInFractionalPart: Boolean
+  ): Parser[String] = {
+    val groupingParser: Option[Parser[String]] =
+      (firstGroupSize, secondGroupSize) match {
+        case (Some(firstSize), Some(secondSize)) =>
+          val primaryGroupSize =
+            if (isInFractionalPart) firstSize else secondSize
+          val secondaryGroupSize =
+            if (isInFractionalPart) secondSize else firstSize
+          Some(
+            getGroupsParserForPrimarySecondaryGrouping(
+              primaryGroupSize,
+              secondaryGroupSize,
+              isInFractionalPart
+            )
+          )
+        case (Some(primaryGroupSize), None) =>
+          Some(
+            getGroupsParserForPrimaryGrouping(
+              primaryGroupSize,
+              isInFractionalPart
+            )
+          )
+        case (_, _) => None
+      }
+
+    groupingParser.getOrElse("[0-9]*".r)
+  }
+
   private def extractExponentPartParser(
       format: ArrayCursor[Char]
   ): Parser[Some[ExponentPart]] = {
@@ -343,7 +349,8 @@ case class LdmlNumberFormatParser(
       }
     }
 
-    val exponentDigits = parseDigits(format, isFractionalPart = false) ^^ (_.get)
+    val exponentDigits =
+      parseDigits(format, isFractionalPart = false) ^^ (_.get)
 
     exponentWithSignParser ~ exponentDigits ^^ {
       case sign ~ digits =>
@@ -443,7 +450,7 @@ case class LdmlNumberFormatParser(
               case Success(digitsWithoutGroupingChar, _) =>
                 Success(digitsWithoutGroupingChar, currentPosition)
               case Failure(err, _) => Failure(err, currentPosition)
-              case Error(err, _) => Error(err, currentPosition)
+              case Error(err, _)   => Error(err, currentPosition)
             }
           } catch {
             case e: Throwable =>
@@ -451,7 +458,7 @@ case class LdmlNumberFormatParser(
               Failure(e.getMessage, currentPosition)
           }
         case failure @ Failure(_, _) => failure
-        case error @  Error(_, _) => error
+        case error @ Error(_, _)     => error
       }
     }
   }

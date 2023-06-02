@@ -1,12 +1,10 @@
 package csvwcheck.models
 
-import com.fasterxml.jackson.databind.node.{JsonNodeFactory, ObjectNode, TextNode}
+import com.fasterxml.jackson.databind.node.{ObjectNode, TextNode}
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors.MetadataError
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import org.scalatest.funsuite.AnyFunSuite
-
-import scala.collection.mutable
 
 //noinspection HttpUrlsUsage
 class TableTest extends AnyFunSuite {
@@ -98,7 +96,9 @@ class TableTest extends AnyFunSuite {
     assert(table1.schema.get.columns.length === 4)
     assert(table1.dialect.get.encoding === "utf-8")
     assert(table2.schema.get.foreignKeys.length === 1)
-    assert(table2.schema.get.foreignKeys(0).localColumns(0).name.get === "countryRef")
+    assert(
+      table2.schema.get.foreignKeys(0).localColumns(0).name.get === "countryRef"
+    )
     assert(table1.notes.isDefined)
     assert(
       table1.notes.get.elements().asScalaArray(0) === new TextNode(

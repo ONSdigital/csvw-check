@@ -38,7 +38,7 @@ case class NumberFormat(
         df.applyPattern(p)
         df.setParseStrict(true)
       case _ =>
-        // Figure out what the default pattern should be
+      // Figure out what the default pattern should be
     }
   } catch {
     case e: Exception => throw MetadataError(e.getMessage, e)

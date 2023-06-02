@@ -6,6 +6,7 @@ case class ForeignKeyDefinition(
     jsonObject: ObjectNode,
     localColumns: Array[Column]
 ) {
-  override def toString: String = s"ForeignKeyDefinition([${localColumns.map(_.name.getOrElse("unnamed column")).mkString(", ")}])"
+  override def toString: String =
+    s"ForeignKeyDefinition([${localColumns.map(_.name.getOrElse("unnamed column")).mkString(", ")}])"
 
 }

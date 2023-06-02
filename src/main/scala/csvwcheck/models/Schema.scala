@@ -3,7 +3,6 @@ package csvwcheck.models
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import csvwcheck.ConfiguredObjectMapper.objectMapper
-import csvwcheck.errors.MetadataError
 import csvwcheck.models.ParseResult.ParseResult
 
 import java.io.{File, PrintWriter, StringWriter}
@@ -24,7 +23,7 @@ object Schema {
         schemaUri.toString,
         jsonNode.asInstanceOf[ObjectNode]
       ) match {
-        case Right(tableGroup) => Right(tableGroup)
+        case Right(tableGroup)   => Right(tableGroup)
         case Left(metadataError) => Left(metadataError.getMessage)
       }
     } catch {

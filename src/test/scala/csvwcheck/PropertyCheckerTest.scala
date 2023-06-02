@@ -11,12 +11,13 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 //noinspection HttpUrlsUsage
 class PropertyCheckerTest extends AnyFunSuite {
   test("boolean property checker should return correct types") {
-    val Right((value, warnings, propertyType)) = PropertyChecker.parseJsonProperty(
-      "suppressOutput",
-      new TextNode("w3c"),
-      "https://www.w3.org/",
-      "und"
-    )
+    val Right((value, warnings, propertyType)) =
+      PropertyChecker.parseJsonProperty(
+        "suppressOutput",
+        new TextNode("w3c"),
+        "https://www.w3.org/",
+        "und"
+      )
     assert(value.isInstanceOf[BooleanNode])
     assert(warnings.isInstanceOf[Array[String]])
     assert(propertyType.isInstanceOf[PropertyType.Value])
@@ -146,7 +147,12 @@ class PropertyCheckerTest extends AnyFunSuite {
     "string property checker returns invalid warning if passed value is not string"
   ) {
     val Right((_, warnings, _)) =
-      PropertyChecker.parseJsonProperty("default", BooleanNode.getFalse, "", "und")
+      PropertyChecker.parseJsonProperty(
+        "default",
+        BooleanNode.getFalse,
+        "",
+        "und"
+      )
     assert(warnings === Array[String]("invalid_value"))
   }
 
@@ -175,7 +181,12 @@ class PropertyCheckerTest extends AnyFunSuite {
 
   test("numeric property returns value without warnings on valid value") {
     val Right((value, warnings, _)) =
-      PropertyChecker.parseJsonProperty("headerRowCount", new IntNode(5), "", "und")
+      PropertyChecker.parseJsonProperty(
+        "headerRowCount",
+        new IntNode(5),
+        "",
+        "und"
+      )
     assert(warnings === Array[String]())
     assert(value === new IntNode(5))
   }
@@ -283,7 +294,8 @@ class PropertyCheckerTest extends AnyFunSuite {
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
 
-    val Left(MetadataError(errorMessage, _)) = PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
+    val Left(MetadataError(errorMessage, _)) =
+      PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       errorMessage === "datatype @id must not be the id of a built-in datatype (http://www.w3.org/2001/XMLSchema#string)"
     )
@@ -314,12 +326,13 @@ class PropertyCheckerTest extends AnyFunSuite {
     val expectedJsonNode = JsonNodeFactory.instance.objectNode()
     expectedJsonNode.put("@id", "http://www.w3.org/2001/XMLSchema#string")
 
-    val Right((returnedValue, warnings, typeString)) = PropertyChecker.parseJsonProperty(
-      "datatype",
-      new TextNode("InvalidDataTypeSupplied"),
-      "",
-      "und"
-    )
+    val Right((returnedValue, warnings, typeString)) =
+      PropertyChecker.parseJsonProperty(
+        "datatype",
+        new TextNode("InvalidDataTypeSupplied"),
+        "",
+        "und"
+      )
     assert(returnedValue === expectedJsonNode)
     assert(warnings === Array[String]("invalid_value"))
     assert(typeString === PropertyType.Inherited)
@@ -513,7 +526,8 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     for (json <- jsonArray) {
       val jsonNode = objectMapper.readTree(json)
-      val Left(MetadataError(_, _)) = PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
+      val Left(MetadataError(_, _)) =
+        PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
     }
   }
 
@@ -544,7 +558,8 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     for (json <- jsonArray) {
       val jsonNode = objectMapper.readTree(json)
-      val Left(MetadataError(_, _)) = PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
+      val Left(MetadataError(_, _)) =
+        PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
     }
   }
 
@@ -558,7 +573,9 @@ class PropertyCheckerTest extends AnyFunSuite {
     val jsonNode = objectMapper.readTree(json)
     val Right((_, warnings, _)) =
       PropertyChecker.parseJsonProperty("datatype", jsonNode, "", "und")
-    assert(warnings === Array[String]("invalid_boolean_format '\"YES|NO|MAYBE\"'"))
+    assert(
+      warnings === Array[String]("invalid_boolean_format '\"YES|NO|MAYBE\"'")
+    )
   }
 
   // Format for boolean datatype is not being split into parts and kept in array anymore. Commenting this test for now
@@ -681,7 +698,9 @@ class PropertyCheckerTest extends AnyFunSuite {
         "http://www.w3.org/",
         "und"
       )
-    assert(errorMessage === "@type of schema is not 'Schema' (\"someValueOtherThanSchema\")")
+    assert(
+      errorMessage === "@type of schema is not 'Schema' (\"someValueOtherThanSchema\")"
+    )
   }
 
   test(
@@ -995,7 +1014,9 @@ class PropertyCheckerTest extends AnyFunSuite {
     val Right((values, warnings, _)) =
       PropertyChecker.parseJsonProperty("transformations", jsonNode, "", "und")
 
-    assert(warnings.contains("invalid_property 'textDirection' with type Inherited"))
+    assert(
+      warnings.contains("invalid_property 'textDirection' with type Inherited")
+    )
     assert(warnings.contains("invalid_value"))
     assert(!values.asInstanceOf[ArrayNode].has("source"))
     // After processing TextDirection will be removed from json or should not be present in json
@@ -1012,7 +1033,8 @@ class PropertyCheckerTest extends AnyFunSuite {
         |  }]
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val Left(MetadataError(errorMessage, _)) = PropertyChecker.parseJsonProperty("transformations", jsonNode, "", "und")
+    val Left(MetadataError(errorMessage, _)) =
+      PropertyChecker.parseJsonProperty("transformations", jsonNode, "", "und")
 
     assert(errorMessage === "transformations[0].@id starts with _:")
   }

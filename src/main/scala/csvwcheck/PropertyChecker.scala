@@ -2,7 +2,6 @@ package csvwcheck
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node._
 import csvwcheck.ConfiguredObjectMapper.objectMapper
-import csvwcheck.PropertyChecker.parseNodeAsText
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{DateFormatError, MetadataError}
 import csvwcheck.models.DateFormat
@@ -31,6 +30,7 @@ object PropertyChecker {
     ParseResult[(String, Option[JsonNode], StringWarnings)]
   private type ArrayElementParseResult =
     ParseResult[(Option[JsonNode], StringWarnings)]
+  val undefinedLanguage: String = "und"
   private val startsWithUnderscore = "^_:.*$".r
   private val containsColon = ".*:.*".r
   private val invalidValueWarning = "invalid_value"
@@ -64,7 +64,6 @@ object PropertyChecker {
     "Template",
     "Datatype"
   )
-  val undefinedLanguage: String = "und"
   private val NameRegExp =
     "^([A-Za-z0-9]|(%[A-F0-9][A-F0-9]))([A-Za-z0-9_]|(%[A-F0-9][A-F0-9]))*$".r
   private val PropertyParsers: Map[String, JsonNodeParser] = Map(
@@ -177,9 +176,9 @@ object PropertyChecker {
   }
 
   def parseNodeAsText(
-                               valueNode: JsonNode,
-                               coerceToText: Boolean = false
-                             ): ParseResult[String] =
+      valueNode: JsonNode,
+      coerceToText: Boolean = false
+  ): ParseResult[String] =
     valueNode match {
       case textNode: TextNode   => Right(textNode.asText)
       case node if coerceToText => Right(node.asText)
@@ -223,16 +222,13 @@ object PropertyChecker {
           arrayNode
             .elements()
             .asScala
-            .map(_ match {
+            .map({
               case element: TextNode => Right((Some(element), Array[String]()))
               case _ =>
                 Right((None, Array(PropertyChecker.invalidValueWarning)))
             })
             .toArrayNodeAndStringWarnings
-            .map({
-              case (arrayNode, stringWarnings) =>
-                (arrayNode, stringWarnings, csvwPropertyType)
-            })
+            .map(_ :+ csvwPropertyType)
         case _ =>
           Right(
             (
@@ -345,15 +341,30 @@ object PropertyChecker {
       inputs: (ObjectNode, StringWarnings)
   ): ParseResult[(ObjectNode, StringWarnings)] = {
     val (dataTypeNode, stringWarnings) = inputs
-    dataTypeNode.getMaybeNode("base")
+    dataTypeNode
+      .getMaybeNode("base")
       .map({
-        case baseDataTypeNode: TextNode => parseDataTypeMinMaxValuesForBaseType(dataTypeNode, stringWarnings, baseDataTypeNode.asText)
-        case baseNode => Left(MetadataError(s"Unexpected base data type value: ${baseNode.toPrettyString}"))
+        case baseDataTypeNode: TextNode =>
+          parseDataTypeMinMaxValuesForBaseType(
+            dataTypeNode,
+            stringWarnings,
+            baseDataTypeNode.asText
+          )
+        case baseNode =>
+          Left(
+            MetadataError(
+              s"Unexpected base data type value: ${baseNode.toPrettyString}"
+            )
+          )
       })
       .getOrElse(Right(inputs))
   }
 
-  private def parseDataTypeMinMaxValuesForBaseType(dataTypeNode: ObjectNode, existingStringWarnings: StringWarnings, baseDataType: String): ParseResult[(ObjectNode, StringWarnings)] = {
+  private def parseDataTypeMinMaxValuesForBaseType(
+      dataTypeNode: ObjectNode,
+      existingStringWarnings: StringWarnings,
+      baseDataType: String
+  ): ParseResult[(ObjectNode, StringWarnings)] = {
     val minimumNode = dataTypeNode.getMaybeNode("minimum")
     val minInclusiveNode = dataTypeNode.getMaybeNode("minInclusive")
     val minExclusiveNode = dataTypeNode.getMaybeNode("minExclusive")
@@ -406,7 +417,7 @@ object PropertyChecker {
   private def validateRegEx(regexCandidate: String): Either[Exception, Unit] =
     try {
       regexCandidate.r
-      Right()
+      Right(())
     } catch {
       case e: Exception =>
         Left(e)
@@ -420,13 +431,19 @@ object PropertyChecker {
       val regExFormat = formatNode.asText
       validateRegEx(regExFormat) match {
         case Right(()) => Right((Some(formatNode), Array.empty))
-        case Left(e) => Right((None, Array(s"invalid_regex '$regExFormat' - ${e.getMessage}")))
+        case Left(e) =>
+          Right(
+            (None, Array(s"invalid_regex '$regExFormat' - ${e.getMessage}"))
+          )
       }
     } else if (
       PropertyCheckerConstants.NumericFormatDataTypes.contains(baseDataType)
     ) {
       parseDataTypeFormatNumeric(formatNode)
-        .map({ case (parsedNode, stringWarnings) => (Some(parsedNode), stringWarnings)})
+        .map({
+          case (parsedNode, stringWarnings) =>
+            (Some(parsedNode), stringWarnings)
+        })
     } else if (baseDataType == "http://www.w3.org/2001/XMLSchema#boolean") {
       formatNode match {
         case formatTextNode: TextNode =>
@@ -483,32 +500,37 @@ object PropertyChecker {
     }
   }
 
-  private def parseDataTypeFormat(input: (ObjectNode, StringWarnings)): ParseResult[(ObjectNode, StringWarnings)] = input match {
-    case (dataTypeNode: ObjectNode, stringWarnings: StringWarnings) =>
-      dataTypeNode
-        .getMaybeNode("format")
-        .map(formatNode => {
-          for {
-            baseDataType <- parseNodeAsText(dataTypeNode.get("base"))
-            dataTypeFormatNodeAndWarnings <- parseDataTypeFormat(formatNode, baseDataType)
-          } yield {
-            val (formatNodeReplacement, newStringWarnings) = dataTypeFormatNodeAndWarnings
+  private def parseDataTypeFormat(
+      input: (ObjectNode, StringWarnings)
+  ): ParseResult[(ObjectNode, StringWarnings)] =
+    input match {
+      case (dataTypeNode: ObjectNode, stringWarnings: StringWarnings) =>
+        dataTypeNode
+          .getMaybeNode("format")
+          .map(formatNode => {
+            for {
+              baseDataType <- parseNodeAsText(dataTypeNode.get("base"))
+              dataTypeFormatNodeAndWarnings <-
+                parseDataTypeFormat(formatNode, baseDataType)
+            } yield {
+              val (formatNodeReplacement, newStringWarnings) =
+                dataTypeFormatNodeAndWarnings
 
-            val parsedDataTypeNode = formatNodeReplacement match {
-              case Some(newNode) =>
-                dataTypeNode.deepCopy().set("format", newNode)
-              case None =>
-                val modifiedDataTypeNode = dataTypeNode
-                  .deepCopy()
-                modifiedDataTypeNode.remove("format")
+              val parsedDataTypeNode = formatNodeReplacement match {
+                case Some(newNode) =>
+                  dataTypeNode.deepCopy().set("format", newNode)
+                case None =>
+                  val modifiedDataTypeNode = dataTypeNode
+                    .deepCopy()
+                  modifiedDataTypeNode.remove("format")
 
-                modifiedDataTypeNode
+                  modifiedDataTypeNode
+              }
+              (parsedDataTypeNode, stringWarnings ++ newStringWarnings)
             }
-            (parsedDataTypeNode, stringWarnings ++ newStringWarnings)
-          }
-        })
-        .getOrElse(Right((dataTypeNode, stringWarnings)))
-  }
+          })
+          .getOrElse(Right((dataTypeNode, stringWarnings)))
+    }
 
   private def parseUrlLinkProperty(
       csvwPropertyType: PropertyType.Value
@@ -518,7 +540,7 @@ object PropertyChecker {
         case urlNode: TextNode =>
           val urlValue = urlNode.asText()
           if (PropertyChecker.startsWithUnderscore.matches(urlValue)) {
-            Left(MetadataError(s"URL ${urlValue} starts with _:"))
+            Left(MetadataError(s"URL $urlValue starts with _:"))
           } else {
             val baseUrlCopy = baseUrl match {
               case "" => urlValue
@@ -540,6 +562,7 @@ object PropertyChecker {
     }
   }
 
+  @tailrec
   private def parseDataTypeFormatNumeric(
       formatNode: JsonNode
   ): ParseResult[(ObjectNode, StringWarnings)] = {
@@ -549,12 +572,20 @@ object PropertyChecker {
         parseDataTypeFormatNumeric(
           formatObjectNode.set("pattern", formatNode.deepCopy())
         )
-      case formatObjectNode: ObjectNode => Right(parseNumericFormatObjectNode(formatObjectNode))
-      case _ => Left(MetadataError(s"Unhandled numeric data type format ${formatNode.toPrettyString}"))
+      case formatObjectNode: ObjectNode =>
+        Right(parseNumericFormatObjectNode(formatObjectNode))
+      case _ =>
+        Left(
+          MetadataError(
+            s"Unhandled numeric data type format ${formatNode.toPrettyString}"
+          )
+        )
     }
   }
 
-  private def parseNumericFormatObjectNode(formatObjectNode: ObjectNode): (ObjectNode, StringWarnings) = {
+  private def parseNumericFormatObjectNode(
+      formatObjectNode: ObjectNode
+  ): (ObjectNode, StringWarnings) = {
     def parseMaybeStringAt(propertyName: String): ParseResult[Option[String]] =
       formatObjectNode
         .getMaybeNode(propertyName)
@@ -569,8 +600,10 @@ object PropertyChecker {
       numberFormatParser <- parseMaybeStringAt("pattern")
         .flatMap( // Either map
           _.map(pattern => // Option map
-            LdmlNumberFormatParser(groupChar.getOrElse(','), decimalChar.getOrElse('.'))
-              .getParserForFormat(pattern)
+            LdmlNumberFormatParser(
+              groupChar.getOrElse(','),
+              decimalChar.getOrElse('.')
+            ).getParserForFormat(pattern)
               .map(Some(_))
           ).getOrElse(Right(None))
         )
@@ -582,7 +615,10 @@ object PropertyChecker {
         val formatNodeWithoutPattern = formatObjectNode.deepCopy()
         formatNodeWithoutPattern.remove("pattern")
 
-        (formatNodeWithoutPattern, Array(s"invalid_number_format - ${err.message}"))
+        (
+          formatNodeWithoutPattern,
+          Array(s"invalid_number_format - ${err.message}")
+        )
     }
   }
 
@@ -686,12 +722,14 @@ object PropertyChecker {
           Right((propertyName, Some(value), Array.empty))
         } else {
           Left(
-            MetadataError(s"@type of schema is not 'Schema' (${value.toPrettyString})")
+            MetadataError(
+              s"@type of schema is not 'Schema' (${value.toPrettyString})"
+            )
           )
         }
       case _ =>
         parseJsonProperty(propertyName, value, baseUrl.toString, language)
-          .map(_ match {
+          .map({
             case (parsedValue, stringWarnings @ Array(), propType)
                 if propType == PropertyType.Schema || propType == PropertyType.Inherited =>
               (propertyName, Some(parsedValue), stringWarnings)
@@ -711,7 +749,7 @@ object PropertyChecker {
   ): ParseResult[(URL, String)] = {
     schemaJsonNode
       .getMaybeNode("@context")
-      .map(_ match {
+      .map({
         case contextArrayNode: ArrayNode if contextArrayNode.size == 2 =>
           val contextElements = Array.from(contextArrayNode.elements().asScala)
           contextElements.apply(1) match {
@@ -895,18 +933,19 @@ object PropertyChecker {
       .map(fieldAndValue => {
         val elementKey = fieldAndValue.getKey
         if (PropertyChecker.Bcp47LanguagetagRegExp.matches(elementKey)) {
-          val (validStrings, warnings) = fieldAndValue.getValue match {
-            case s: TextNode  => (Array(s.asText()), Array[String]())
-            case a: ArrayNode => getValidTextualElementsFromArray(a)
-            case _ =>
-              (
-                Array.empty,
-                Array(
-                  fieldAndValue.getValue.toPrettyString + " is invalid, array or textual elements expected",
-                  PropertyChecker.invalidValueWarning
+          val (validStrings, warnings): (Array[String], StringWarnings) =
+            fieldAndValue.getValue match {
+              case s: TextNode  => (Array(s.asText()), Array[String]())
+              case a: ArrayNode => getValidTextualElementsFromArray(a)
+              case _ =>
+                (
+                  Array.empty,
+                  Array(
+                    fieldAndValue.getValue.toPrettyString + " is invalid, array or textual elements expected",
+                    PropertyChecker.invalidValueWarning
+                  )
                 )
-              )
-          }
+            }
           val validStringsArrayNode: ArrayNode =
             objectMapper.valueToTree(validStrings)
           Right((elementKey, Some(validStringsArrayNode), warnings))
@@ -1097,8 +1136,8 @@ object PropertyChecker {
               parseDialectObjectProperty(
                 baseUrl,
                 lang,
-                fieldAndValue.getKey(),
-                fieldAndValue.getValue()
+                fieldAndValue.getKey,
+                fieldAndValue.getValue
               )
             )
             .toObjectNodeAndStringWarnings
@@ -1186,7 +1225,8 @@ object PropertyChecker {
               )
             }
           // Hmm, really not sure about this random exclusion here.
-          case "url" | "titles" => Right((propertyName, Some(valueNode), Array[String]()))
+          case "url" | "titles" =>
+            Right((propertyName, Some(valueNode), Array[String]()))
           case _ =>
             parseJsonProperty(propertyName, valueNode, baseUrl, lang)
               .map({
@@ -1643,7 +1683,7 @@ object PropertyChecker {
                 val warnings =
                   if (propertyType != PropertyType.Dialect)
                     propertyWarnings :+ "invalid_property"
-                   else
+                  else
                     propertyWarnings
 
                 (key, None, warnings)
@@ -1654,7 +1694,7 @@ object PropertyChecker {
 
   private def asUri(property: String): Option[URI] =
     Option(new URI(property))
-      .filter(uri => uri.getScheme != null && !uri.getScheme.isEmpty)
+      .filter(uri => uri.getScheme != null && uri.getScheme.nonEmpty)
 
   private def parseBooleanProperty(
       csvwPropertyType: PropertyType.Value
@@ -1682,7 +1722,8 @@ object PropertyChecker {
       case o: ObjectNode => parseCommonPropertyObject(o, baseUrl, defaultLang)
       case _: TextNode =>
         defaultLang match {
-          case lang if lang == undefinedLanguage => Right((commonPropertyValueNode, Array()))
+          case lang if lang == undefinedLanguage =>
+            Right((commonPropertyValueNode, Array()))
           case _ =>
             val objectNodeToReturn = JsonNodeFactory.instance.objectNode()
             objectNodeToReturn.set("@value", commonPropertyValueNode)
@@ -1700,9 +1741,12 @@ object PropertyChecker {
               })
           )
           .toArrayNodeAndStringWarnings
-      case _ => Left(MetadataError(
-          s"Unexpected common property value ${commonPropertyValueNode.toPrettyString}"
-        ))
+      case _ =>
+        Left(
+          MetadataError(
+            s"Unexpected common property value ${commonPropertyValueNode.toPrettyString}"
+          )
+        )
     }
   }
 
@@ -1893,7 +1937,7 @@ object PropertyChecker {
         if (language.isEmpty || !Bcp47Language.r.matches(language)) {
           Left(
             MetadataError(
-              s"common property has invalid @language (${language})"
+              s"common property has invalid @language ($language)"
             )
           )
         } else {
@@ -1945,7 +1989,7 @@ object PropertyChecker {
                   .getOrElse(
                     Left(
                       MetadataError(
-                        s"common property has invalid @type (${dataType})"
+                        s"common property has invalid @type ($dataType)"
                       )
                     )
                   )
@@ -1953,7 +1997,7 @@ object PropertyChecker {
                 case _: Exception =>
                   Left(
                     MetadataError(
-                      s"common property has invalid @type (${dataType})"
+                      s"common property has invalid @type ($dataType)"
                     )
                   )
               }

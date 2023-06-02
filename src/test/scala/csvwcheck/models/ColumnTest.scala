@@ -6,8 +6,6 @@ import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors.{ErrorWithoutContext, WarningWithCsvContext}
 import org.scalatest.funsuite.AnyFunSuite
 
-import scala.collection.mutable
-
 //noinspection HttpUrlsUsage
 class ColumnTest extends AnyFunSuite {
   def getColumnWithFormat(formatJson: Option[String]): Column = {

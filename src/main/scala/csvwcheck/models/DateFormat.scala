@@ -13,7 +13,8 @@ import scala.util.matching.Regex
 object DateFormat {
   private val xmlSchemaBaseUrl = "http://www.w3.org/2001/XMLSchema#"
   private val digit = "[0-9]"
-  private val yearGrp = s"(?<${RegExGroups.years}>-?([1-9]$digit{3,}|0$digit{3}))"
+  private val yearGrp =
+    s"(?<${RegExGroups.years}>-?([1-9]$digit{3,}|0$digit{3}))"
   private val monthGrp = s"(?<${RegExGroups.months}>(0[1-9]|1[0-2]))"
   private val dayGrp = s"(?<${RegExGroups.days}>(0[1-9]|[12]$digit|3[01]))"
   private val hourGrp = s"(?<${RegExGroups.hours}>([01]$digit|2[0-3]))"
@@ -38,6 +39,7 @@ object DateFormat {
     s"${xmlSchemaBaseUrl}time" -> s"^($hourGrp:$minuteGrp:$secondGrp|$endOfDay)($timeZone)?$$".r
   )
   private val dateTimeFormatEndingWithX: Regex = ".*[^Xx][Xx]$".r
+
   /**
     * Each XSD date/time datatype has a default format. `mapDataTypeToDefaultValueRegEx` contains regular expressions
     * describing these default formats.
@@ -422,7 +424,9 @@ case class DateFormat(format: Option[String], dataType: String) {
     *
     * @param pattern - The date time format pattern
     */
-  private def ensureDateTimeFormatContainsRecognizedSymbols(pattern: String): Unit = {
+  private def ensureDateTimeFormatContainsRecognizedSymbols(
+      pattern: String
+  ): Unit = {
     var testPattern = pattern
     // Fractional sections are variable length so are dealt with outside of the `fields` map.
     testPattern = testPattern.replaceAll("S+", "")

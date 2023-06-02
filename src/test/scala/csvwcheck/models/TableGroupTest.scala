@@ -218,10 +218,11 @@ class TableGroupTest extends AnyFunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val Right(WithWarningsAndErrors(tableGroup, warningsAndErrors)) = TableGroup.fromJson(
-      jsonNode.asInstanceOf[ObjectNode],
-      "http://w3c.github.io/csvw/tests/test040-metadata.json"
-    )
+    val Right(WithWarningsAndErrors(tableGroup, warningsAndErrors)) =
+      TableGroup.fromJson(
+        jsonNode.asInstanceOf[ObjectNode],
+        "http://w3c.github.io/csvw/tests/test040-metadata.json"
+      )
     val table =
       tableGroup.tables("http://w3c.github.io/csvw/tests/test040.csv")
 

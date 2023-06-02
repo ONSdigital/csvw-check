@@ -3,7 +3,6 @@ package csvwcheck.helpers
 import com.fasterxml.jackson.databind.JsonNode
 
 import scala.collection.mutable
-import scala.collection.mutable.Map
 
 object MapHelpers {
   def deepCloneJsonPropertiesMap(

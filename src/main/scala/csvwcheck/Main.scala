@@ -43,7 +43,11 @@ object Main extends App {
         case None        => 1000
       }
 
-      val validator = new Validator(config.inputSchema, numParallelThreads = numParallelThreads, csvRowBatchSize = csvRowBatchSize)
+      val validator = new Validator(
+        config.inputSchema,
+        numParallelThreads = numParallelThreads,
+        csvRowBatchSize = csvRowBatchSize
+      )
       val akkaStream = validator
         .validate()
         .map(warningsAndErrors => {

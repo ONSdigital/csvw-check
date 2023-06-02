@@ -145,7 +145,7 @@ object TableGroup {
         firstItem: JsonNode
     ): ParseResult[Unit] = {
       firstItem match {
-        case s: TextNode if s.asText == csvwContextUri => Right()
+        case s: TextNode if s.asText == csvwContextUri => Right(())
         case _ =>
           Left(
             MetadataError(
@@ -381,7 +381,7 @@ object TableGroup {
               new URL(new URL(baseUrl), schemaReferenceNode.asText()).toString
             tables.values
               .filter(table =>
-                table.schema.exists(s => s.schemaId.exists(_ == schemaUrl))
+                table.schema.exists(s => s.schemaId.contains(schemaUrl))
               )
               .toList
               .headOption
@@ -649,7 +649,7 @@ object TableGroup {
               "metadata",
               "",
               "",
-              s"Table must be instance of object, found: ${tableElement}",
+              s"Table must be instance of object, found: $tableElement",
               ""
             )
           )
@@ -724,20 +724,26 @@ case class TableGroup private (
     Map[Table, MapForeignKeyReferenceToValues]
 
   type TableState = (
-    WarningsAndErrors,
+      WarningsAndErrors,
       MapTableToForeignKeyDefinitions,
       MapTableToForeignKeyReferences
-    )
+  )
 
-  def validateCsvsAgainstTables(parallelism: Int, rowGrouping: Int): Source[WarningsAndErrors, NotUsed] = {
-    val degreeOfParallelism = math.min(tables.size, sqrt(parallelism).floor.toInt)
+  def validateCsvsAgainstTables(
+      parallelism: Int,
+      rowGrouping: Int
+  ): Source[WarningsAndErrors, NotUsed] = {
+    val degreeOfParallelism =
+      math.min(tables.size, sqrt(parallelism).floor.toInt)
     val degreeOfParallelismInTable = parallelism / degreeOfParallelism
     Source
       .fromIterator(() => tables.values.iterator)
       .flatMapMerge(
         degreeOfParallelism,
-        table => table.parseCsv(degreeOfParallelismInTable, rowGrouping)
-          .map(_ :+ table)
+        table =>
+          table
+            .parseCsv(degreeOfParallelismInTable, rowGrouping)
+            .map(_ :+ table)
       )
       .fold[TableState](
         (
@@ -747,18 +753,18 @@ case class TableGroup private (
         )
       ) {
         case (
-          (
-            warningsAndErrorsAccumulator,
-            foreignKeysAccumulator,
-            foreignKeyReferencesAccumulator
-            ),
-          (
-            warningsAndErrorsSource,
-            foreignKeysSource,
-            foreignKeyReferencesSource,
-            table
-            )
-          ) =>
+              (
+                warningsAndErrorsAccumulator,
+                foreignKeysAccumulator,
+                foreignKeyReferencesAccumulator
+              ),
+              (
+                warningsAndErrorsSource,
+                foreignKeysSource,
+                foreignKeyReferencesSource,
+                table
+              )
+            ) =>
           (
             WarningsAndErrors(
               warningsAndErrorsAccumulator.warnings ++ warningsAndErrorsSource.warnings,
@@ -773,10 +779,10 @@ case class TableGroup private (
       }
       .map {
         case (
-          warningsAndErrors,
-          allForeignKeyDefinitions,
-          allForeignKeyReferences
-          ) =>
+              warningsAndErrors,
+              allForeignKeyDefinitions,
+              allForeignKeyReferences
+            ) =>
           WarningsAndErrors(
             errors = warningsAndErrors.errors ++ validateForeignKeyIntegrity(
               allForeignKeyDefinitions,
@@ -788,9 +794,9 @@ case class TableGroup private (
   }
 
   private def validateForeignKeyIntegrity(
-                foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
-                foreignKeyReferencesByTable: MapTableToForeignKeyReferences
-              ): TolerableErrors = {
+      foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+      foreignKeyReferencesByTable: MapTableToForeignKeyReferences
+  ): TolerableErrors = {
     // Origin/Definition Table : Referenced Table
     // Country, Year, Population  : Country, Name
     // UK, 2021, 67M  : UK, United Kingdom
@@ -801,17 +807,22 @@ case class TableGroup private (
 
       (parentTableForeignKeyReference, allPossibleParentTableValues) <-
         mapForeignKeyReferenceToAllPossibleValues
-    } yield validateForeignKeyIntegrity(foreignKeyDefinitionsByTable, referencedTable, parentTableForeignKeyReference, allPossibleParentTableValues)
+    } yield validateForeignKeyIntegrity(
+      foreignKeyDefinitionsByTable,
+      referencedTable,
+      parentTableForeignKeyReference,
+      allPossibleParentTableValues
+    )
 
-    errorsPerForeignKeyReference.flatMap(identity(_)).toArray
+    errorsPerForeignKeyReference.flatten.toArray
   }
 
   private def validateForeignKeyIntegrity(
-                                           foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
-                                           referencedTable: Table,
-                                           foreignKeyReference: ReferencedTableForeignKeyReference,
-                                           allValidValues: Set[KeyWithContext]
-                                         ): TolerableErrors = {
+      foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+      referencedTable: Table,
+      foreignKeyReference: ReferencedTableForeignKeyReference,
+      allValidValues: Set[KeyWithContext]
+  ): TolerableErrors = {
     val keysReferencesInOriginTable = getKeysReferencedInOriginTable(
       foreignKeyDefinitionsByTable,
       referencedTable,
@@ -828,9 +839,9 @@ case class TableGroup private (
       )
   }
   private def getDuplicateKeysInReferencedTable(
-                                                 allPossibleParentTableValues: Set[KeyWithContext],
-                                                 keysReferencesInOriginTable: Set[KeyWithContext]
-                                               ): TolerableErrors = {
+      allPossibleParentTableValues: Set[KeyWithContext],
+      keysReferencesInOriginTable: Set[KeyWithContext]
+  ): TolerableErrors = {
     val duplicateKeysInParent = allPossibleParentTableValues
       .intersect(keysReferencesInOriginTable)
       .filter(k => k.isDuplicate)
@@ -854,9 +865,9 @@ case class TableGroup private (
   }
 
   private def getUnmatchedForeignKeyReferences(
-                                                allPossibleParentTableValues: Set[KeyWithContext],
-                                                keysReferencesInOriginTable: Set[KeyWithContext]
-                                              ): TolerableErrors = {
+      allPossibleParentTableValues: Set[KeyWithContext],
+      keysReferencesInOriginTable: Set[KeyWithContext]
+  ): TolerableErrors = {
     val keyValuesNotDefinedInParent =
       keysReferencesInOriginTable.diff(allPossibleParentTableValues)
     if (keyValuesNotDefinedInParent.nonEmpty) {
@@ -878,20 +889,20 @@ case class TableGroup private (
   }
 
   private def getKeysReferencedInOriginTable(
-                                              foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
-                                              referencedTable: Table,
-                                              parentTableForeignKeyReference: ReferencedTableForeignKeyReference
-                                            ): Set[KeyWithContext] = {
+      foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+      referencedTable: Table,
+      parentTableForeignKeyReference: ReferencedTableForeignKeyReference
+  ): Set[KeyWithContext] = {
     val foreignKeyDefinitionsOnTable = foreignKeyDefinitionsByTable
-      .get(parentTableForeignKeyReference.definitionTable)
       .getOrElse(
+        parentTableForeignKeyReference.definitionTable,
         throw MetadataError(
           s"Could not find corresponding origin table(${parentTableForeignKeyReference.definitionTable.url}) for referenced table ${referencedTable.url}"
         )
       )
     foreignKeyDefinitionsOnTable
-      .get(parentTableForeignKeyReference.foreignKeyDefinition)
       .getOrElse(
+        parentTableForeignKeyReference.foreignKeyDefinition,
         throw MetadataError(
           s"Could not find foreign key against origin table." + parentTableForeignKeyReference.foreignKeyDefinition.jsonObject.toPrettyString
         )

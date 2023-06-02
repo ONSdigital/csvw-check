@@ -1,6 +1,5 @@
 package csvwcheck.numberformatparser
 
-import csvwcheck.errors.MetadataError
 import org.scalatest.funsuite.AnyFunSuite
 
 //noinspection ComparingUnrelatedTypes
@@ -57,7 +56,10 @@ class LdmlNumberFormatParserTest extends AnyFunSuite {
     val actual = parser.parse("26")
     assert(actual.isLeft)
     val Left(err) = actual
-    assert(err.message.contains("Expected explicit sign character [+-] missing"), err)
+    assert(
+      err.message.contains("Expected explicit sign character [+-] missing"),
+      err
+    )
   }
 
   test("Parsing a number missing exponent fails") {
@@ -77,7 +79,10 @@ class LdmlNumberFormatParserTest extends AnyFunSuite {
     val actual = parser.parse("-1.7E1")
     assert(actual.isLeft)
     val Left(err) = actual
-    assert(err.message.contains("Expected explicit sign character [+-] missing"), err)
+    assert(
+      err.message.contains("Expected explicit sign character [+-] missing"),
+      err
+    )
   }
 
   test(
@@ -129,7 +134,10 @@ class LdmlNumberFormatParserTest extends AnyFunSuite {
     val actual = parser.parse("3.4")
     assert(actual.isLeft)
     val Left(err) = actual
-    assert(err.message.contains("Expected a minimum of 2 fractional digits."), err)
+    assert(
+      err.message.contains("Expected a minimum of 2 fractional digits."),
+      err
+    )
   }
 
   test("Parsing a number meeting minimum fractional padding succeeds") {
@@ -145,7 +153,10 @@ class LdmlNumberFormatParserTest extends AnyFunSuite {
     val actual = parser.parse("3.412")
     assert(actual.isLeft)
     val Left(err) = actual
-    assert(err.message.contains("Expected a maximum of 2 fractional digits."), err)
+    assert(
+      err.message.contains("Expected a maximum of 2 fractional digits."),
+      err
+    )
   }
 
   test("Quoted information is supported") {
@@ -212,7 +223,8 @@ class LdmlNumberFormatParserTest extends AnyFunSuite {
 
   test("Unterminated Quoted Section Should lead to an Exception") {
     val numberFormatParser = LdmlNumberFormatParser()
-    val Left(err) = numberFormatParser.getParserForFormat("'this has no terminating quote")
+    val Left(err) =
+      numberFormatParser.getParserForFormat("'this has no terminating quote")
     assert(
       err.message == "Closing quotation mark missing.",
       err.message
@@ -309,7 +321,8 @@ class LdmlNumberFormatParserTest extends AnyFunSuite {
     "Fractional Grouping - Parsing Number with Primary and Secondary Grouping Succeeds"
   ) {
     val numberFormatParser = LdmlNumberFormatParser()
-    val Right(parser) = numberFormatParser.getParserForFormat("#0.##,###,###,##")
+    val Right(parser) =
+      numberFormatParser.getParserForFormat("#0.##,###,###,##")
     val actual = parser.parse("123.45,678,901,23")
     assert(actual == Right(BigDecimal("123.4567890123")), actual)
   }
@@ -352,14 +365,16 @@ class LdmlNumberFormatParserTest extends AnyFunSuite {
   }
   test("'E' is not Treated as an Exponent if There is no Preceding Digit") {
     val numberFormatParser = LdmlNumberFormatParser()
-    val Right(parser) = numberFormatParser.getParserForFormat("Explain This: 0.0")
+    val Right(parser) =
+      numberFormatParser.getParserForFormat("Explain This: 0.0")
     val actual = parser.parse("Explain This: 1.5")
     assert(actual == Right(1.5))
   }
 
   test("Non-special Character Text is Permitted (including white-space)") {
     val numberFormatParser = LdmlNumberFormatParser()
-    val Right(parser) = numberFormatParser.getParserForFormat("What do you mean? 0.0")
+    val Right(parser) =
+      numberFormatParser.getParserForFormat("What do you mean? 0.0")
     val actual = parser.parse("What do you mean? 9.8")
     assert(actual == Right(9.8))
   }
@@ -387,7 +402,9 @@ class LdmlNumberFormatParserTest extends AnyFunSuite {
 
   test("Parser Throws an Exception where no Digit Chars are Found in Format") {
     val numberFormatParser = LdmlNumberFormatParser()
-    val Left(err) = numberFormatParser.getParserForFormat("This does not contain any digit characters.")
+    val Left(err) = numberFormatParser.getParserForFormat(
+      "This does not contain any digit characters."
+    )
     assert(
       err.message == "Number format does not contain any digit characters."
     )
