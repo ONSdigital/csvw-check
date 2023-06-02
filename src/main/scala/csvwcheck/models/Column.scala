@@ -175,13 +175,21 @@ object Column {
 
   private def parseTextProperty(propertiesMap: Map[String, JsonNode], property: String): ParseResult[Option[String]] =
     propertiesMap.get(property)
+      .flatMap(filterOutNullOrMissingNodes)
       .map(n => parseNodeAsText(n).map(Some(_)))
       .getOrElse(Right(None))
 
   private def parseBooleanProperty(propertiesMap: Map[String, JsonNode], property: String): ParseResult[Option[Boolean]] =
     propertiesMap.get(property)
+      .flatMap(filterOutNullOrMissingNodes)
       .map(n => parseNodeAsBool(n).map(Some(_)))
       .getOrElse(Right(None))
+
+  private def filterOutNullOrMissingNodes(n: JsonNode): Option[JsonNode] =
+    if (n.isMissingNode || n.isNull)
+      None
+    else
+      Some(n)
 
   private def parseNodeAsText(valueNode: JsonNode, coerceToText: Boolean = false): ParseResult[String] = valueNode match {
     case textNode: TextNode => Right(textNode.asText)
