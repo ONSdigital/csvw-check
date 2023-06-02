@@ -87,3 +87,6 @@ libraryDependencies += "com.chuusai" %% "shapeless" % "2.3.3"
 // documentation at http://www.scala-sbt.org/documentation.html
 
 enablePlugins(JavaAppPackaging)
+
+// Temporarily necessary to stop sbt trying to download the same test files multiple times and breaking all the things.
+Test / parallelExecution := false

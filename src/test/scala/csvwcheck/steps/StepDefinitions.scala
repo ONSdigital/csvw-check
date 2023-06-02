@@ -6,6 +6,7 @@ import better.files.Dsl.unzip
 import better.files.File
 import csvwcheck.Validator
 import csvwcheck.models.WarningsAndErrors
+import csvwcheck.steps.EnsureFixtureFilesExist.fixturesPath
 import io.cucumber.scala.{EN, ScalaDsl}
 import sttp.client3._
 import sttp.client3.testing._
@@ -74,8 +75,6 @@ object EnsureFixtureFilesExist {
 }
 
 class StepDefinitions extends ScalaDsl with EN {
-  import csvwcheck.steps.EnsureFixtureFilesExist.fixturesPath
-
   private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
   private var schemaUrl: Option[String] = None
   private var csvUrl: Option[String] = None
