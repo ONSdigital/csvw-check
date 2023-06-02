@@ -296,10 +296,7 @@ object Table {
       .flatMap({
         case (rowTitleColumns, foreignKeyMappings) =>
           parsePrimaryKeyColumns(tableSchemaObject, columns)
-            .map({
-              case (pkColumns, pkWarnings) =>
-                (rowTitleColumns, foreignKeyMappings, pkColumns, pkWarnings)
-            })
+            .map((rowTitleColumns, foreignKeyMappings) ++ _)
       })
       .map({
         case (rowTitleColumns, foreignKeyMappings, pkColumns, pkWarnings) =>
@@ -525,9 +522,7 @@ object Table {
       case primaryKeyElement: TextNode =>
         val primaryKeyColNameReference = primaryKeyElement.asText()
         columns
-          .find(col =>
-            col.name.isDefined && col.name.get == primaryKeyColNameReference
-          )
+          .find(col => col.name.exists(_ == primaryKeyColNameReference))
           .map(Right(_))
           .getOrElse(
             Left(
