@@ -1244,7 +1244,7 @@ case class Table private (
     }
 
 
-  def validateRow(row: CSVRecord): ValidateRowOutput = {
+  private def validateRow(row: CSVRecord): ValidateRowOutput = {
     var errors = Array[ErrorWithCsvContext]()
     val primaryKeyValues = ArrayBuffer.empty[Any]
     val foreignKeyReferenceValues =

@@ -9,46 +9,58 @@ import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors._
 import csvwcheck.models._
 import csvwcheck.traits.LoggerExtensions.LogDebugException
-import sttp.client3.{HttpClientSyncBackend, Identity, SttpBackend, basicRequest}
+import sttp.client3.{HttpClientSyncBackend, Identity, SttpBackend, basicRequest, ignore}
 import sttp.model.Uri
 
 import java.io.{File, IOException}
-import java.net.URI
+import java.net.{URI, URL}
 import scala.language.postfixOps
 
 class Validator(
-    val schemaUri: Option[String],
-    csvUri: Option[String] = None,
-    httpClient: SttpBackend[Identity, Any] = HttpClientSyncBackend()
+                 val schemaUri: Option[String],
+                 csvUrl: Option[String] = None,
+                 httpClient: SttpBackend[Identity, Any] = HttpClientSyncBackend(),
+                 numParallelThreads: Int = 1,
+                 csvRowBatchSize: Int = 1000
 ) {
-  val parallelism: Int = sys.env.get("PARALLELISM") match {
-    case Some(value) => value.toInt
-    case None        => Runtime.getRuntime.availableProcessors()
-  }
-  val rowGrouping: Int = sys.env.get("ROW_GROUPING") match {
-    case Some(value) => value.toInt
-    case None        => 1000
-  }
   private val logger = Logger(this.getClass.getName)
+  private val csvwLinkHeaderRegEx = "^\\s*<(.*?)>\\s*;.*$".r
+
+  def getSchemaLocationSuggestedByHttpHeaders(csvUri: URI): Option[URI] = {
+    val uriScheme = csvUri.getScheme
+    if (uriScheme == "http" || uriScheme == "https") {
+      val csvHttpResponse = httpClient.send(basicRequest.response(ignore).get(Uri(csvUri)))
+      csvHttpResponse.header("Link")
+        .map(header => {
+          val metadataJsonLocation = csvwLinkHeaderRegEx.replaceAllIn(header, "$1")
+          // Now make the URL absolute if it isn't already.
+          new URL(new URL(getUriWithoutQueryString(csvUri).toString), metadataJsonLocation).toURI
+        })
+    } else {
+      None
+    }
+  }
 
   def validate(): Source[WarningsAndErrors, NotUsed] = {
     val absoluteSchemaUri = schemaUri.map(getAbsoluteSchemaUri)
 
-    val maybeCsvUri = csvUri.map(new URI(_))
+    val csvUri = csvUrl.map(new URI(_))
 
-    val schemaUrisToCheck = maybeCsvUri
-      .map(csvUri =>
+
+    val schemaUrisToCheck = csvUri
+      .map(csvUri => {
         Array(
+          getSchemaLocationSuggestedByHttpHeaders(csvUri),
           absoluteSchemaUri,
           Some(new URI(s"${getUriWithoutQueryString(csvUri)}-metadata.json")),
           Some(csvUri.resolve("csv-metadata.json"))
         )
-      )
+      })
       .getOrElse(Array(absoluteSchemaUri))
       .flatten
       .distinct
 
-    findAndValidateCsvwSchemaFileForCsv(maybeCsvUri, schemaUrisToCheck.toSeq)
+    findAndValidateCsvwSchemaFileForCsv(csvUri, schemaUrisToCheck.toSeq)
   }
 
   private def getAbsoluteSchemaUri(schemaPath: String): URI = {
@@ -60,7 +72,7 @@ class Validator(
     }
   }
 
-  private def attemptToFindMatchingTableGroup(
+  private def tryParsingPossibleSchema(
       maybeCsvUri: Option[URI],
       possibleSchemaUri: URI
   ): Either[CsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
@@ -158,7 +170,7 @@ class Validator(
   ): Source[WarningsAndErrors, NotUsed] = {
     schemaUrisToCheck match {
       case Seq() =>
-        if (schemaUri.isDefined) {
+        schemaUri.map(_ => {
           val error = ErrorWithCsvContext(
             "metadata",
             "cannot locate schema",
@@ -170,51 +182,54 @@ class Validator(
           Source(List(
             models.WarningsAndErrors(errors = Array[ErrorWithCsvContext](error))
           ))
-        } else Source(List(WarningsAndErrors()))
-      case Seq(uri, uris @ _*) =>
-        attemptToFindMatchingTableGroup(
-          maybeCsvUri,
-          uri
-        ) match {
-          case Right(parsedTableGroup) =>
-            val tableGroup = parsedTableGroup.component
-            tableGroup.validateCsvsAgainstTables(parallelism, rowGrouping).map { wAndE2 =>
-              WarningsAndErrors(
-                wAndE2.warnings ++ parsedTableGroup.warningsAndErrors.warnings,
-                wAndE2.errors ++ parsedTableGroup.warningsAndErrors.errors
-              )
-            }
-          case Left(GeneralCsvwLoadError(err)) =>
-            val error = ErrorWithCsvContext(
-              "metadata",
-              err.getClass.getName,
-              "",
-              "",
-              err.getMessage,
-              ""
-            )
-            logger.debug(err)
-            Source(List(WarningsAndErrors(errors = Array(error))))
-          case Left(SchemaDoesNotContainCsvError(err)) =>
-            logger.debug(err)
-            findAndValidateCsvwSchemaFileForCsv(maybeCsvUri, uris)
-              .map(warningsAndErrors => warningsAndErrors.copy(warnings = warningsAndErrors.warnings :+ WarningWithCsvContext(
-                    "source_url_mismatch",
-                    s"CSV supplied not found in metadata $uri",
-                    "",
-                    "",
-                    "",
-                    ""
-                  )
-                )
-              )
-          case Left(CascadeToOtherFilesError(err)) =>
-            logger.debug(err)
-            findAndValidateCsvwSchemaFileForCsv(maybeCsvUri, uris)
-          case Left(err) =>
-            throw new IllegalArgumentException(s"Unhandled CsvwLoadError $err")
+        })
+          .getOrElse(Source(List(WarningsAndErrors())))
+      case Seq(uri, uris @ _*) => tryNextPossibleSchema(maybeCsvUri, uri, uris)
+    }
+  }
 
+  private def tryNextPossibleSchema(maybeCsvUri: Option[URI], nextSchemaUri: URI, untestedSchemaUris: Seq[URI]): Source[WarningsAndErrors, NotUsed] = {
+    tryParsingPossibleSchema(
+      maybeCsvUri,
+      nextSchemaUri
+    ) match {
+      case Right(parsedTableGroup) =>
+        val tableGroup = parsedTableGroup.component
+        tableGroup.validateCsvsAgainstTables(numParallelThreads, csvRowBatchSize).map { wAndE2 =>
+          WarningsAndErrors(
+            wAndE2.warnings ++ parsedTableGroup.warningsAndErrors.warnings,
+            wAndE2.errors ++ parsedTableGroup.warningsAndErrors.errors
+          )
         }
+      case Left(GeneralCsvwLoadError(err)) =>
+        val error = ErrorWithCsvContext(
+          "metadata",
+          err.getClass.getName,
+          "",
+          "",
+          err.getMessage,
+          ""
+        )
+        logger.debug(err)
+        Source(List(WarningsAndErrors(errors = Array(error))))
+      case Left(SchemaDoesNotContainCsvError(err)) =>
+        logger.debug(err)
+        findAndValidateCsvwSchemaFileForCsv(maybeCsvUri, untestedSchemaUris)
+          .map(warningsAndErrors => warningsAndErrors.copy(warnings = warningsAndErrors.warnings :+ WarningWithCsvContext(
+            "source_url_mismatch",
+            s"CSV supplied not found in metadata $nextSchemaUri",
+            "",
+            "",
+            "",
+            ""
+          )
+          )
+          )
+      case Left(CascadeToOtherFilesError(err)) =>
+        logger.debug(err)
+        findAndValidateCsvwSchemaFileForCsv(maybeCsvUri, untestedSchemaUris)
+      case Left(err) =>
+        throw new IllegalArgumentException(s"Unhandled CsvwLoadError $err")
     }
   }
 

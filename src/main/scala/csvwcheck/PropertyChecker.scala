@@ -20,8 +20,7 @@ import scala.language.implicitConversions
 import scala.util.matching.Regex
 
 object PropertyChecker {
-
-  private type StringWarnings = Array[String]
+  type StringWarnings = Array[String]
   private type JsonNodeParseResult = Either[
     MetadataError,
     (JsonNode, StringWarnings, PropertyType.Value)

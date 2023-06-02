@@ -995,11 +995,11 @@ Feature: CSVW Validation Tests
 	# manifest-validation#test116
 	# processors MUST attempt to locate a metadata documents through site-wide configuration.
   Scenario: manifest-validation#test116 file-metadata with query component not found
-    Given I have a CSV file called "test116.csv?query"
+    Given I have a CSV file called "test116.csv"
     And it is stored at the url "https://w3c.github.io/csvw/tests/test116.csv?query"
     And I have a file called "test116.csv-metadata.json" at the url "https://w3c.github.io/csvw/tests/test116.csv-metadata.json"
     And there is no file at the url "https://w3c.github.io/.well-known/csvm"
-    And there is no file at the url "https://w3c.github.io/csvw/tests/test116.csv?query-metadata.json"
+    And there is no file at the url "https://w3c.github.io/csvw/tests/test116.csv-metadata.json"
     And there is no file at the url "https://w3c.github.io/csvw/tests/csv-metadata.json"
     When I carry out CSVW validation
     Then there should not be errors
@@ -1020,7 +1020,7 @@ Feature: CSVW Validation Tests
 	# manifest-validation#test118
 	# processors MUST attempt to locate a metadata documents through site-wide configuration. component.
   Scenario: manifest-validation#test118 directory-metadata with query component
-    Given I have a CSV file called "test118/action.csv?query"
+    Given I have a CSV file called "test118/action.csv"
     And it is stored at the url "https://w3c.github.io/csvw/tests/test118/action.csv?query"
     And I have a file called "test118/csv-metadata.json" at the url "https://w3c.github.io/csvw/tests/test118/csv-metadata.json"
     And there is no file at the url "https://w3c.github.io/.well-known/csvm"
@@ -1043,7 +1043,6 @@ Feature: CSVW Validation Tests
 	
 	# manifest-validation#test120
 	# If the metadata file found at this location does not explicitly include a reference to the requested tabular data file then it MUST be ignored.
-  @ignore
   Scenario: manifest-validation#test120 link-metadata not referencing file
     Given I have a CSV file called "test120.csv"
     And it has a Link header holding "<test120-linked-metadata.json>; rel="describedby"; type="application/csvm+json""
@@ -1073,7 +1072,6 @@ Feature: CSVW Validation Tests
 	
 	# manifest-validation#test122
 	# If the metadata file found at this location does not explicitly include a reference to the requested tabular data file then it MUST be ignored.
-  @ignore
   Scenario: manifest-validation#test122 link-metadata not describing file uses file-metadata
     Given I have a CSV file called "test122.csv"
     And it has a Link header holding "<test122-linked-metadata.json>; rel="describedby"; type="application/csvm+json""

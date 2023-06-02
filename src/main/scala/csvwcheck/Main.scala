@@ -32,7 +32,18 @@ object Main extends App {
   OParser.parse(parser, args, Config()) match {
     case Some(config) =>
       implicit val actorSystem: ActorSystem = ActorSystem("actor-system")
-      val validator = new Validator(config.inputSchema)
+
+      val numParallelThreads: Int = sys.env.get("PARALLELISM") match {
+        case Some(value) => value.toInt
+        case None        => Runtime.getRuntime.availableProcessors()
+      }
+
+      val csvRowBatchSize: Int = sys.env.get("ROW_GROUPING") match {
+        case Some(value) => value.toInt
+        case None        => 1000
+      }
+
+      val validator = new Validator(config.inputSchema, numParallelThreads = numParallelThreads, csvRowBatchSize = csvRowBatchSize)
       val akkaStream = validator
         .validate()
         .map(warningsAndErrors => {
