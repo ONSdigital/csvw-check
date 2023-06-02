@@ -816,6 +816,15 @@ case class Table private (
 
   override def toString: String = s"Table($url)"
 
+  override def hashCode(): Int = url.hashCode
+
+  override def equals(obj: Any): Boolean =
+    if (obj.isInstanceOf[Table]) {
+      obj.asInstanceOf[Table].url == this.url
+    } else {
+      false
+    }
+
   implicit val ec: scala.concurrent.ExecutionContext =
     scala.concurrent.ExecutionContext.global
 
