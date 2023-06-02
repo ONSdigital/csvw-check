@@ -86,12 +86,3 @@ libraryDependencies += "com.chuusai" %% "shapeless" % "2.3.3"
 // documentation at http://www.scala-sbt.org/documentation.html
 
 enablePlugins(JavaAppPackaging)
-
-Compile / resourceGenerators += Def.task {
-  import sys.process._
-  val path = "pwd".!!.trim
-  s"$path/src/main/ruby/GenerateTests.rb".!
-  val file =
-    (Compile / resourceManaged).value / ".." / ".." / ".." / ".." / "src" / "test" / "resources" / "features" / "csvw_validation_tests.feature"
-  Seq(file)
-}.taskValue
