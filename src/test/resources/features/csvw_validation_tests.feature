@@ -2,6 +2,9 @@
 
 Feature: CSVW Validation Tests
 
+  Background:
+    Given The test-cases defined by the W3C
+
 	# manifest-validation#test001
 	# The simplest possible table without metadata
   Scenario: manifest-validation#test001 Simple table

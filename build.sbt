@@ -6,16 +6,13 @@ scalaVersion := "2.13.4"
 scalacOptions ++= Seq("-deprecation", "-feature")
 autoCompilerPlugins := true
 
-// Want to use a published library in your project?
-// You can define other libraries as dependencies in your build like this:
-
+enablePlugins(JavaAppPackaging)
 enablePlugins(DockerPlugin)
+
 dockerBaseImage := "openjdk:11"
 dockerEntrypoint := Seq("bash")
 dockerEnvVars := Map("PATH" -> "$PATH:/opt/docker/bin")
 Docker / packageName := "csvwcheck"
-
-libraryDependencies += "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2"
 
 libraryDependencies += "io.cucumber" %% "cucumber-scala" % "8.14.1" % Test
 libraryDependencies += "io.cucumber" % "cucumber-junit" % "7.11.1" % Test
@@ -23,6 +20,7 @@ libraryDependencies += "com.novocode" % "junit-interface" % "0.11" % Test
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.15" % Test
 libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.9.2" % Test
 
+libraryDependencies += "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2"
 libraryDependencies += "io.spray" %% "spray-json" % "1.3.6"
 libraryDependencies += "org.apache.jena" % "jena-arq" % "4.4.0"
 libraryDependencies += "joda-time" % "joda-time" % "2.12.2"
@@ -36,7 +34,7 @@ libraryDependencies += "com.fasterxml.jackson.core" % "jackson-core" % "2.14.2"
 libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.8.15"
 libraryDependencies += "com.ibm.icu" % "icu4j" % "72.1"
 libraryDependencies += "org.apache.commons" % "commons-csv" % "1.10.0"
-libraryDependencies += "com.chuusai" %% "shapeless" % "2.3.3"
+libraryDependencies += "com.chuusai" %% "shapeless" % "2.3.10"
 // Here, `libraryDependencies` is a set of dependencies, and by using `+=`,
 // we're adding the scala-parser-combinators dependency to the set of dependencies
 // that sbt will go and fetch when it starts up.
@@ -85,8 +83,3 @@ libraryDependencies += "com.chuusai" %% "shapeless" % "2.3.3"
 
 // To learn more about multi-project builds, head over to the official sbt
 // documentation at http://www.scala-sbt.org/documentation.html
-
-enablePlugins(JavaAppPackaging)
-
-// Temporarily necessary to stop sbt trying to download the same test files multiple times and breaking all the things.
-Test / parallelExecution := false

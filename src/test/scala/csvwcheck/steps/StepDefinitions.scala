@@ -6,7 +6,6 @@ import better.files.Dsl.unzip
 import better.files.File
 import csvwcheck.Validator
 import csvwcheck.models.WarningsAndErrors
-import csvwcheck.steps.EnsureFixtureFilesExist.fixturesPath
 import io.cucumber.scala.{EN, ScalaDsl}
 import sttp.client3._
 import sttp.client3.testing._
@@ -18,7 +17,15 @@ import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import scala.io.Source
 
-object EnsureFixtureFilesExist {
+class StepDefinitions extends ScalaDsl with EN {
+  private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
+  private var schemaUrl: Option[String] = None
+  private var csvUrl: Option[String] = None
+
+  private var httpMock: SttpBackendStub[Identity, _] =
+    SttpBackendStub.synchronous
+  private var currentFileMock: Option[RemoteHttpFileMock] = None
+
   val fixturesPath: File = File(System.getProperty("user.dir"))
     ./("src")
     ./("test")
@@ -63,25 +70,13 @@ object EnsureFixtureFilesExist {
             ./("csvw-gh-pages")
             ./("tests")
             .children
-            .foreach(_.moveToDirectory(fixturesPath))
+            .foreach(_.copyToDirectory(fixturesPath))
         }
       }
     }
 
     assert(expectedFixtureFile.exists, s"$expectedFixtureFile doesn't exist")
   }
-
-  ensureFixtureFilesDownloaded()
-}
-
-class StepDefinitions extends ScalaDsl with EN {
-  private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
-  private var schemaUrl: Option[String] = None
-  private var csvUrl: Option[String] = None
-
-  private var httpMock: SttpBackendStub[Identity, _] =
-    SttpBackendStub.synchronous
-  private var currentFileMock: Option[RemoteHttpFileMock] = None
 
   private def mockCurrentFileResponse(): Unit =
     currentFileMock.foreach(fileMock => {
@@ -118,6 +113,8 @@ class StepDefinitions extends ScalaDsl with EN {
       localFileName: Option[String],
       linkHeader: Option[String]
   )
+
+  Given("^The test-cases defined by the W3C$") { () => ensureFixtureFilesDownloaded() }
 
   Given("""^I have a CSV file called "(.*?)"$""") { (filename: String) =>
     mockCurrentFileResponse()
