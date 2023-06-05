@@ -2,13 +2,17 @@ package csvwcheck.models
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.typesafe.scalalogging.Logger
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.models.ParseResult.ParseResult
+import csvwcheck.traits.LoggerExtensions.LogDebugException
 
 import java.io.{File, PrintWriter, StringWriter}
 import java.net.URI
 
 object Schema {
+  private val logger = Logger(this.getClass.getName)
+
   def loadMetadataAndValidate(
       schemaUri: URI
   ): Either[String, WithWarningsAndErrors[TableGroup]] = {
@@ -28,6 +32,7 @@ object Schema {
       }
     } catch {
       case e: Throwable =>
+        logger.debug(e)
         val sw = new StringWriter
         e.printStackTrace(new PrintWriter(sw))
         Left(sw.toString)
@@ -35,11 +40,9 @@ object Schema {
   }
 
   def fromCsvwMetadata(
-      uri: String,
-      json: ObjectNode
-  ): ParseResult[WithWarningsAndErrors[TableGroup]] = {
-    TableGroup.fromJson(json, uri)
-  }
+                        uri: String,
+                        tableGroupNode: ObjectNode
+  ): ParseResult[WithWarningsAndErrors[TableGroup]] = TableGroup.fromJson(tableGroupNode, uri)
 
 }
 

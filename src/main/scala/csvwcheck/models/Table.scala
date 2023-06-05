@@ -5,14 +5,15 @@ import akka.stream.scaladsl.Source
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode, TextNode}
 import com.typesafe.scalalogging.Logger
-import csvwcheck.PropertyChecker.StringWarnings
+import csvwcheck.propertyparser.Utils.StringWarnings
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
-import csvwcheck.{PropertyChecker, models}
+import csvwcheck.models
+import csvwcheck.propertyparser.PropertyParser
 import org.apache.commons.csv.{CSVFormat, CSVParser, CSVRecord}
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -188,7 +189,7 @@ object Table {
           )
         )
       case (propertyName, value) =>
-        PropertyChecker
+        PropertyParser
           .parseJsonProperty(propertyName, value, baseUrl, lang)
           .map(propertyName +: _)
     }

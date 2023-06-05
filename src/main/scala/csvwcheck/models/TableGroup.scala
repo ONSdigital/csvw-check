@@ -4,13 +4,14 @@ import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
-import csvwcheck.PropertyChecker
-import csvwcheck.PropertyChecker.undefinedLanguage
+import com.typesafe.scalalogging.Logger
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.models.Table.{MapForeignKeyDefinitionToValues, MapForeignKeyReferenceToValues}
 import csvwcheck.models.WarningsAndErrors.TolerableErrors
+import csvwcheck.propertyparser.Constants.undefinedLanguage
+import csvwcheck.propertyparser.PropertyParser
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import shapeless.syntax.std.tuple.productTupleOps
@@ -24,14 +25,15 @@ object TableGroup {
   val validProperties: Array[String] = Array[String]("tables", "notes", "@type")
   val containsWhitespaces: Regex = ".*\\s.*".r
 
+  private val logger = Logger(this.getClass.getName)
+
   def fromJson(
       tableGroupNodeIn: ObjectNode,
       baseUri: String
   ): ParseResult[WithWarningsAndErrors[TableGroup]] = {
     val baseUrl = baseUri.trim
     if (containsWhitespaces.matches(baseUrl)) {
-      // todo: Shouldn't this be a warning?
-      println(
+      logger.warn(
         "Warning: The path/url has whitespaces in it, please ensure its correctness. Proceeding with received " +
           "path/url .."
       )
@@ -212,7 +214,7 @@ object TableGroup {
         case (Right((baseUrl, lang, warnings)), (property, value)) =>
           property match {
             case "@base" | "@language" =>
-              PropertyChecker
+              PropertyParser
                 .parseJsonProperty(property, value, baseUrl, lang)
                 .flatMap({
                   case (propertyNode, Array(), _) =>
@@ -505,7 +507,7 @@ object TableGroup {
             if validProperties.contains(propertyName) =>
           Right((propertyName, valueNode, Array[String](), PropertyType.Common))
         case (propertyName, valueNode) =>
-          PropertyChecker
+          PropertyParser
             .parseJsonProperty(propertyName, valueNode, baseUrl, lang)
             .map(propertyName +: _)
       })
