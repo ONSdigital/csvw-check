@@ -19,7 +19,7 @@ object RegExpressions {
   private val Bcp47Region = "(?<region>[A-Za-z]{2}|[0-9]{3})"
   private val Bcp47Script = "(?<script>[A-Za-z]{4})"
   private val Bcp47Extlang = "(?<extlang>[A-Za-z]{3}(-[A-Za-z]{3}){0,2})"
-  val Bcp47Language: Regex =
+  val Bcp47Language: String =
     "(?<language>([A-Za-z]{2,3}(-" + Bcp47Extlang + ")?)|[A-Za-z]{4}|[A-Za-z]{5,8})"
   private val Bcp47Langtag =
     "(" + Bcp47Language + "(-" + Bcp47Script + ")?" + "(-" + Bcp47Region + ")?" + "(-" + Bcp47Variant + ")*" + "(-" + Bcp47Extension + ")*" + "(-" + Bcp47PrivateUse + ")?" + ")"
