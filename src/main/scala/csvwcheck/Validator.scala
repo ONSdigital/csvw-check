@@ -8,6 +8,7 @@ import com.typesafe.scalalogging.Logger
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors._
 import csvwcheck.models._
+import csvwcheck.standardisers.TableGroup.standardiseTableGroup
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import sttp.client3.{HttpClientSyncBackend, Identity, SttpBackend, basicRequest, ignore}
 import sttp.model.Uri
@@ -83,14 +84,7 @@ class Validator(
   ): Either[CsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
     try {
       fileUriToJson[ObjectNode](possibleSchemaUri)
-        .flatMap(objectNode =>
-          Schema
-            .fromCsvwMetadata(possibleSchemaUri.toString, objectNode) match {
-            case Right(tableGroup) => Right(tableGroup)
-            case Left(metadataError) =>
-              Left(GeneralCsvwLoadError(metadataError))
-          }
-        )
+        .flatMap(tableGroupNode => standardiseAndParseTableGroup(possibleSchemaUri, tableGroupNode))
         .flatMap(parsedTableGroup =>
           maybeCsvUri
             .map(csvUri => {
@@ -119,6 +113,26 @@ class Validator(
       case e: Throwable =>
         logger.debug(e)
         Left(GeneralCsvwLoadError(e))
+    }
+  }
+
+  private def standardiseAndParseTableGroup(possibleSchemaUri: URI, tableGroupNode: ObjectNode): Either[GeneralCsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
+    val tableGroupWithWarningsAndErrors = standardiseTableGroup(tableGroupNode, possibleSchemaUri.toString)
+      .flatMap({ case (standardisedTableGroup, warnings) =>
+        for {
+          tableGroupWithWarningsAndErrors <- TableGroup.fromJson(standardisedTableGroup)
+        } yield {
+          val newWarningsAndErrors = tableGroupWithWarningsAndErrors.warningsAndErrors
+            .copy(warnings = tableGroupWithWarningsAndErrors.warningsAndErrors.warnings ++ warnings)
+          tableGroupWithWarningsAndErrors.copy(warningsAndErrors = newWarningsAndErrors)
+        }
+      })
+
+    // Convert this result to the correct local Either type.
+    tableGroupWithWarningsAndErrors match {
+      case Right(tableGroupWithWarningsAndErrors) => Right(tableGroupWithWarningsAndErrors)
+      case Left(metadataError) =>
+        Left(GeneralCsvwLoadError(metadataError))
     }
   }
 

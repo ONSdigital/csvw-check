@@ -3,17 +3,15 @@ package csvwcheck.models
 import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode, TextNode}
+import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
 import com.typesafe.scalalogging.Logger
-import csvwcheck.propertyparser.Utils.StringWarnings
-import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
+import csvwcheck.models
 import csvwcheck.models.ParseResult.ParseResult
+import csvwcheck.standardisers.Utils.parseNodeAsText
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import csvwcheck.traits.LoggerExtensions.LogDebugException
-import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
-import csvwcheck.models
-import csvwcheck.propertyparser.PropertyParser
+import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import org.apache.commons.csv.{CSVFormat, CSVParser, CSVRecord}
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -25,6 +23,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 import scala.jdk.CollectionConverters.{IterableHasAsScala, MapHasAsScala}
 import scala.util.control.NonFatal
+
 object Table {
   type MapForeignKeyDefinitionToValues =
     Map[ForeignKeyDefinition, Set[KeyWithContext]]
@@ -33,772 +32,94 @@ object Table {
   type PrimaryKeysAndErrors =
     (mutable.Set[List[Any]], ArrayBuffer[ErrorWithCsvContext])
 
-  private val tablePermittedProperties = Array[String](
-    "columns",
-    "primaryKey",
-    "foreignKeys",
-    "rowTitles"
-  )
-
-  def fromJson(
-      tableDesc: ObjectNode,
-      baseUrl: String,
-      lang: String,
-      commonProperties: Map[String, JsonNode],
-      inheritedPropertiesIn: Map[String, JsonNode]
-  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
-    partitionAndValidateTablePropertiesByType(
-      commonProperties,
-      inheritedPropertiesIn,
-      tableDesc,
-      baseUrl,
-      lang
-    ).flatMap({
-      case PartitionedTableProperties(
-            annotations,
-            tableProperties,
-            inheritedProperties,
-            warnings
-          ) =>
-        getUrl(tableProperties).flatMap(url =>
-          extractTableSchema(tableProperties, inheritedProperties) match {
-            case Some(tableSchema) =>
-              parseTable(
-                tableSchema,
-                inheritedProperties,
-                baseUrl,
-                lang,
-                url,
-                tableProperties,
-                annotations,
-                warnings
-              )
-            case _ =>
-              Right(
-                initializeTableWithDefaults(
-                  annotations,
-                  warnings,
-                  url
-                )
-              )
-          }
-        )
-    })
-  }
-
-  private def partitionAndValidateTablePropertiesByType(
-      commonProperties: Map[String, JsonNode],
-      inheritedProperties: Map[String, JsonNode],
-      tableObjectNode: ObjectNode,
-      baseUrl: String,
-      lang: String
-  ): ParseResult[PartitionedTableProperties] = {
-    val initialPartitionedProperties = PartitionedTableProperties(
-      tableProperties = commonProperties,
-      inheritedProperties = inheritedProperties
-    )
-
-    tableObjectNode.getKeysAndValues
-      .map(parseTableProperty(_, tableObjectNode, baseUrl, lang))
-      .foldLeft[ParseResult[PartitionedTableProperties]](
-        Right(initialPartitionedProperties)
-      )({
-        case (err @ Left(_), _) => err
-        case (_, Left(newErr))  => Left(newErr)
-        case (
-              Right(partitionedProperties),
-              Right((propertyName, parsedNode, stringWarnings, propertyType))
-            ) =>
-          val warnings: Array[WarningWithCsvContext] =
-            partitionedProperties.warnings ++ stringWarnings.map(
-              WarningWithCsvContext(
-                _,
-                "metadata",
-                "",
-                "",
-                s"$propertyName : $parsedNode",
-                ""
-              )
+  def fromJson(standardisedTableObjectNode: ObjectNode): ParseResult[(Table, Array[WarningWithCsvContext])] =
+    getUrl(standardisedTableObjectNode)
+      .flatMap(url =>
+        standardisedTableObjectNode.getMaybeNode("tableSchema")
+          .map(
+            parseTable(
+              standardisedTableObjectNode,
+              _,
+              url
             )
-          propertyType match {
-            case PropertyType.Annotation =>
-              Right(
-                partitionedProperties.copy(
-                  annotations =
-                    partitionedProperties.annotations + (propertyName -> parsedNode),
-                  warnings = warnings
-                )
-              )
-            case PropertyType.Table | PropertyType.Common =>
-              Right(
-                partitionedProperties.copy(
-                  tableProperties =
-                    partitionedProperties.tableProperties + (propertyName -> parsedNode),
-                  warnings = warnings
-                )
-              )
-            case PropertyType.Column =>
-              Right(
-                partitionedProperties.copy(warnings =
-                  warnings :+ WarningWithCsvContext(
-                    "invalid_property",
-                    "metadata",
-                    "",
-                    "",
-                    propertyName,
-                    ""
-                  )
-                )
-              )
-            case _ =>
-              Right(
-                partitionedProperties.copy(
-                  inheritedProperties =
-                    partitionedProperties.inheritedProperties + (propertyName -> parsedNode),
-                  warnings = warnings
-                )
-              )
-          }
-
-      })
-  }
-
-  private def parseTableProperty(
-      propertyNameAndValue: (String, JsonNode),
-      tableObjectNode: ObjectNode,
-      baseUrl: String,
-      lang: String
-  ): ParseResult[(String, JsonNode, StringWarnings, PropertyType.Value)] =
-    propertyNameAndValue match {
-      case ("@type", textNode: TextNode) if textNode.asText == "Table" =>
-        Right("@type", textNode, Array[String](), PropertyType.Common)
-      case ("@type", _: TextNode) =>
-        val tableUrl = tableObjectNode
-          .getMaybeNode("url")
-          .map(_.asText)
-          .getOrElse("UnknownURL")
-        Left(
-          MetadataError(
-            s"@type of table is not 'Table' - $tableUrl.@type"
           )
-        )
-      case ("@type", value) =>
-        Left(
-          MetadataError(
-            s"Unexpected value for '@type'. Expected string but got ${value.getNodeType} (${value.toPrettyString})"
-          )
-        )
-      case (propertyName, value) =>
-        PropertyParser
-          .parseJsonProperty(propertyName, value, baseUrl, lang)
-          .map(propertyName +: _)
-    }
+          .getOrElse(Right((initializeTableWithDefaults(url), Array.empty)))
+      )
 
-  private def getUrl(
-      tableProperties: Map[String, JsonNode]
-  ): ParseResult[String] = {
-    tableProperties
-      .get("url")
-      .map(urlNode => Right(urlNode.asText()))
+  private def getUrl(standardisedTableObjectNode: ObjectNode): ParseResult[String] = {
+    standardisedTableObjectNode
+      .getMaybeNode("url")
+      .map(parseNodeAsText(_))
       .getOrElse(Left(MetadataError("URL not found for table")))
   }
 
-  private def extractTableSchema(
-      tableProperties: Map[String, JsonNode],
-      inheritedPropertiesCopy: Map[String, JsonNode]
-  ): Option[JsonNode] = {
-    tableProperties
-      .get("tableSchema")
-      .orElse(inheritedPropertiesCopy.get("tableSchema"))
-  }
-
   private def parseTable(
-      tableSchema: JsonNode,
-      inheritedProperties: Map[String, JsonNode],
-      baseUrl: String,
-      lang: String,
-      tableUrl: String,
-      tableProperties: Map[String, JsonNode],
-      annotations: Map[String, JsonNode],
-      existingWarnings: Array[WarningWithCsvContext]
-  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
-    tableSchema match {
-      case tableSchemaObject: ObjectNode =>
-        val inheritedPropertiesWithPermittedTableProperties =
-          getTableSchemaInheritedProperties(
-            inheritedProperties,
-            tableSchemaObject
-          )
+                          tableNode: ObjectNode,
+                          tableSchema: JsonNode,
+                          tableUrl: String
+                        ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
+      val notes = tableNode
+        .getMaybeNode("notes")
+        .map(_.asInstanceOf[ArrayNode])
 
-        val partiallyParsedTable = new Table(
-          url = tableUrl,
-          id = tableProperties.get("@id").map(_.asText()),
-          suppressOutput = tableProperties
-            .get("suppressOutput")
-            .exists(_.asBoolean),
-          annotations = annotations
-        )
-
-        parseTableSchema(
-          partiallyParsedTable,
-          tableSchemaObject,
-          inheritedPropertiesWithPermittedTableProperties,
-          baseUrl,
-          lang
-        ).flatMap(parseDialect(_, tableProperties))
-          .flatMap(parseNotes(_, tableProperties))
-          .map({
-            case (table, warnings) => (table, warnings ++ existingWarnings)
-          })
-      case _ =>
-        Left(
-          MetadataError(
-            s"Table schema must be object for table $tableUrl "
-          )
-        )
-    }
-  }
-
-  private def parseTableSchema(
-      table: Table,
-      tableSchemaObject: ObjectNode,
-      tablePropertiesIncludingInherited: Map[String, JsonNode],
-      baseUrl: String,
-      lang: String
-  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
-    parseAndValidateColumns(
-      table.url,
-      baseUrl,
-      lang,
-      tablePropertiesIncludingInherited,
-      tableSchemaObject
-    ).flatMap({
-      case (columns, columnWarnings) =>
-        parseTableSchemaGivenColumns(
-          table,
-          tableSchemaObject,
-          columns,
-          columnWarnings
-        )
-    })
-  }
-
-  private def parseTableSchemaGivenColumns(
-      table: Table,
-      tableSchemaObject: ObjectNode,
-      columns: Array[Column],
-      warnings: Array[WarningWithCsvContext]
-  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
-    parseRowTitles(tableSchemaObject, columns)
-      .flatMap(rowTitleColumns =>
-        parseForeignKeyColumns(tableSchemaObject, columns)
-          .map(foreignKeyMappings => (rowTitleColumns, foreignKeyMappings))
-      )
-      .flatMap({
-        case (rowTitleColumns, foreignKeyMappings) =>
-          parsePrimaryKeyColumns(tableSchemaObject, columns)
-            .map((rowTitleColumns, foreignKeyMappings) ++ _)
-      })
-      .map({
-        case (rowTitleColumns, foreignKeyMappings, pkColumns, pkWarnings) =>
-          // tableSchemas defined in other files have been updated to inline representations by this point already.
-          // See propertyChecker function for tableSchema.
-          val tableSchema = TableSchema(
-            columns = columns,
-            foreignKeys = foreignKeyMappings,
-            primaryKey = pkColumns,
-            rowTitleColumns = rowTitleColumns,
-            schemaId = tableSchemaObject.getMaybeNode("@id").map(_.asText)
-          )
-
-          (
-            table.copy(schema = Some(tableSchema)),
-            warnings ++ pkWarnings
-          )
-      })
-  }
-
-  private def parseRowTitles(
-      tableSchemaObject: ObjectNode,
-      columns: Array[Column]
-  ): ParseResult[Array[Column]] = {
-    tableSchemaObject
-      .getMaybeNode("rowTitles")
-      .map({
-        case arrayNode: ArrayNode =>
-          arrayNode.asScala
-            .map({
-              case rowTitleElement: TextNode =>
-                val rowTitle = rowTitleElement.asText
-                columns
-                  .find(col => col.name.contains(rowTitle))
-                  .map(Right(_))
-                  .getOrElse(
-                    Left(
-                      MetadataError(
-                        s"rowTitles references non-existent column - '$rowTitle''"
-                      )
-                    )
-                  )
-              case rowTitleElement =>
-                Left(
-                  MetadataError(
-                    s"Unhandled rowTitle value '${rowTitleElement.toPrettyString}'"
-                  )
-                )
-            })
-            .foldLeft[ParseResult[Array[Column]]](Right(Array()))({
-              case (err @ Left(_), _) => err
-              case (_, Left(newErr))  => Left(newErr)
-              case (Right(rowTitleColumns), Right(newRowTitleColumn)) =>
-                Right(rowTitleColumns :+ newRowTitleColumn)
-            })
-        case rowTitlesNode =>
-          Left(
-            MetadataError(
-              s"Unsupported rowTitles value ${rowTitlesNode.toPrettyString}"
-            )
-          )
-      })
-      .getOrElse(Right(Array[Column]()))
-  }
-
-  private def parseForeignKeyColumns(
-      tableSchemaObject: ObjectNode,
-      columns: Array[Column]
-  ): ParseResult[Array[ForeignKeyDefinition]] = {
-    tableSchemaObject
-      .getMaybeNode("foreignKeys")
-      .map({
-        case foreignKeysNode: ArrayNode =>
-          foreignKeysNode.asScala
-            .map({
-              case foreignKeyObjectNode: ObjectNode =>
-                parseForeignKeyObjectNode(foreignKeyObjectNode, columns)
-              case foreignKeyNode =>
-                Left(
-                  MetadataError(
-                    s"Unexpected foreign key value ${foreignKeyNode.toPrettyString}"
-                  )
-                )
-            })
-            .foldLeft[ParseResult[Array[ForeignKeyDefinition]]](Right(Array()))({
-              case (err @ Left(_), _) => err
-              case (_, Left(newErr))  => Left(newErr)
-              case (Right(foreignKeys), Right(newForeignKey)) =>
-                Right(foreignKeys :+ newForeignKey)
-            })
-        case foreignKeysNode =>
-          Left(
-            MetadataError(
-              s"Unexpected foreign keys node ${foreignKeysNode.toPrettyString}"
-            )
-          )
-      })
-      .getOrElse(Right(Array()))
-  }
-
-  private def parseForeignKeyObjectNode(
-      foreignKeyObjectNode: ObjectNode,
-      columns: Array[Column]
-  ): ParseResult[ForeignKeyDefinition] = {
-    foreignKeyObjectNode
-      .getMaybeNode("columnReference")
-      .map({
-        case columnReferenceArrayNode: ArrayNode =>
-          parseForeignKeyReferencesForColumnReferenceArrayNode(
-            foreignKeyObjectNode,
-            columnReferenceArrayNode,
-            columns
-          )
-        case columnReferenceNode =>
-          Left(
-            MetadataError(
-              s"columnReference property set to unexpected value ${columnReferenceNode.toPrettyString}"
-            )
-          )
-      })
-      .getOrElse(
-        Left(
-          MetadataError(
-            s"columnReference property unset on foreignKey ${foreignKeyObjectNode.toPrettyString}"
-          )
-        )
-      )
-  }
-
-  private def parseForeignKeyReferencesForColumnReferenceArrayNode(
-      foreignKeyObjectNode: ObjectNode,
-      columnReferenceArrayNode: ArrayNode,
-      columns: Array[Column]
-  ): ParseResult[ForeignKeyDefinition] = {
-    columnReferenceArrayNode.asScala
-      .map({
-        case columnReferenceElementTextNode: TextNode =>
-          val columnReference = columnReferenceElementTextNode.asText
-          columns
-            .find(col => col.name.contains(columnReference))
-            .map(Right(_))
-            .getOrElse(
-              Left(
-                MetadataError(
-                  s"foreignKey references non-existent column - $columnReference"
-                )
-              )
-            )
-        case columnReferenceElement =>
-          Left(
-            MetadataError(
-              s"columnReference element set to unexpected value ${columnReferenceElement.toPrettyString}"
-            )
-          )
-      })
-      .foldLeft[ParseResult[Array[Column]]](Right(Array()))({
-        case (err @ Left(_), _) => err
-        case (_, Left(newErr))  => Left(newErr)
-        case (Right(foreignKeyColumns), Right(newForeignKeyColumn)) =>
-          Right(foreignKeyColumns :+ newForeignKeyColumn)
-      })
-      .map(foreignKeyColumns =>
-        ForeignKeyDefinition(foreignKeyObjectNode, foreignKeyColumns)
-      )
-  }
-
-  private def parsePrimaryKeyColumns(
-      tableSchemaObject: ObjectNode,
-      columns: Array[Column]
-  ): ParseResult[(Array[Column], Array[WarningWithCsvContext])] = {
-    tableSchemaObject
-      .getMaybeNode("primaryKey")
-      .map(primaryKeyNode =>
-        primaryKeyNode.asScala
-          .map(parsePrimaryKeyColumnReference(_, columns))
-          .foldLeft[(Option[Array[Column]], Array[WarningWithCsvContext])](
-            Some(Array[Column]()),
-            Array[WarningWithCsvContext]()
-          )(
-            {
-              case ((_, warnings), Left(newErr)) =>
-                (
-                  None,
-                  warnings :+ newErr
-                ) // Primary key is now invalid, return no columns.
-              case ((None, warnings), Right(_)) =>
-                (
-                  None,
-                  warnings
-                ) // Primary key is already invalid, return no columns.
-              case (
-                    (Some(primaryKeyColumns), warnings),
-                    Right(newPrimaryKeyColumn)
-                  ) =>
-                (Some(primaryKeyColumns :+ newPrimaryKeyColumn), warnings)
-            }
-          )
-      )
-      .map({
-        case (None, warnings) =>
-          Right(
-            (Array[Column](), warnings)
-          ) // Primary key definition was invalid.
-        case (Some(primaryKeyColumns), warnings) =>
-          Right((primaryKeyColumns, warnings))
-      })
-      .getOrElse(Right((Array[Column](), Array.empty)))
-  }
-
-  private def parsePrimaryKeyColumnReference(
-      primaryKeyArrayElement: JsonNode,
-      columns: Array[Column]
-  ): Either[WarningWithCsvContext, Column] = {
-    primaryKeyArrayElement match {
-      case primaryKeyElement: TextNode =>
-        val primaryKeyColNameReference = primaryKeyElement.asText()
-        columns
-          .find(col => col.name.contains(primaryKeyColNameReference))
-          .map(Right(_))
-          .getOrElse(
-            Left(
-              WarningWithCsvContext(
-                "invalid_column_reference",
-                "metadata",
-                "",
-                "",
-                s"primaryKey: $primaryKeyColNameReference",
-                ""
-              )
-            )
-          )
-      case primaryKeyElement =>
-        Left(
-          WarningWithCsvContext(
-            "invalid_column_reference",
-            "metadata",
-            "",
-            "",
-            s"primaryKey: ${primaryKeyElement.toPrettyString}",
-            ""
-          )
-        )
-    }
-  }
-
-  private def parseAndValidateColumns(
-      tableUrl: String,
-      baseUrl: String,
-      lang: String,
-      inheritedProperties: Map[String, JsonNode],
-      tableSchemaObject: ObjectNode
-  ): ParseResult[(Array[Column], Array[WarningWithCsvContext])] =
-    parseColumnDefinitions(
-      tableUrl,
-      tableSchemaObject,
-      baseUrl,
-      lang,
-      inheritedProperties
-    ).flatMap(ensureNoDuplicateColumnNames)
-      .flatMap(ensureVirtualColumnsAfterColumns)
-
-  private def parseColumnDefinitions(
-      tableUrl: String,
-      tableSchemaObject: ObjectNode,
-      baseUrl: String,
-      lang: String,
-      inheritedProperties: Map[String, JsonNode]
-  ): ParseResult[(Array[Column], Array[WarningWithCsvContext])] = {
-    tableSchemaObject
-      .getMaybeNode("columns")
-      .map({
-        case arrayNode: ArrayNode =>
-          arrayNode
-            .elements()
-            .asScalaArray
-            .zipWithIndex
-            .map(parseColumnDefinition(_, baseUrl, lang, inheritedProperties))
-            .foldLeft[ParseResult[
-              (Array[Column], Array[WarningWithCsvContext])
-            ]](Right(Array(), Array()))({
-              case (err @ Left(_), _)  => err
-              case (_, Left(newError)) => Left(newError)
-              case (
-                    Right((columns, warnings)),
-                    Right((Some(column), newWarnings))
-                  ) =>
-                Right(columns :+ column, warnings ++ newWarnings)
-              case (Right((columns, warnings)), Right((None, newWarnings))) =>
-                Right(columns, warnings ++ newWarnings)
-            })
-        case _ =>
-          Right(
-            (
-              Array[Column](),
-              Array(
-                WarningWithCsvContext(
-                  "invalid_value",
-                  "metadata",
-                  "",
-                  "",
-                  s"columns is not array for table: $tableUrl",
-                  ""
-                )
-              )
-            )
-          )
-      })
-      .getOrElse(Right((Array.empty, Array.empty)))
-  }
-
-  def parseColumnDefinition(
-      colWithIndex: (JsonNode, Int),
-      baseUrl: String,
-      lang: String,
-      inheritedProperties: Map[String, JsonNode]
-  ): ParseResult[(Option[Column], Array[WarningWithCsvContext])] =
-    colWithIndex match {
-      case (col, index) =>
-        col match {
-          case colObj: ObjectNode =>
-            val colNum = index + 1
-            Column
-              .fromJson(
-                colNum,
-                colObj,
-                baseUrl,
-                lang,
-                inheritedProperties
-              )
-              .map({
-                case (colDef, warningsWithoutContext) =>
-                  (
-                    Some(colDef),
-                    warningsWithoutContext.map(warningWithoutContext =>
-                      WarningWithCsvContext(
-                        warningWithoutContext.`type`,
-                        "metadata",
-                        "",
-                        colNum.toString,
-                        warningWithoutContext.content,
-                        ""
-                      )
-                    )
-                  )
-              })
-          case _ =>
-            Right(
-              (
-                None,
-                Array(
-                  WarningWithCsvContext(
-                    "invalid_column_description",
-                    "metadata",
-                    "",
-                    "",
-                    col.toString,
-                    ""
-                  )
-                )
-              )
-            )
-        }
-    }
-
-  private def ensureNoDuplicateColumnNames(
-      columnsAndWarnings: (Array[Column], Array[WarningWithCsvContext])
-  ): ParseResult[(Array[Column], Array[WarningWithCsvContext])] = {
-    val (columns, _) = columnsAndWarnings
-    val columnNames = columns.flatMap(c => c.name)
-
-    val duplicateColumnNames = columnNames
-      .groupBy(identity)
-      .filter { case (_, elements) => elements.length > 1 }
-      .keys
-
-    if (duplicateColumnNames.nonEmpty) {
-      Left(
-        MetadataError(
-          s"Multiple columns named ${duplicateColumnNames.mkString(", ")}"
-        )
-      )
-    } else {
-      Right(columnsAndWarnings)
-    }
-  }
-
-  private def ensureVirtualColumnsAfterColumns(
-      columnsAndWarnings: (Array[Column], Array[WarningWithCsvContext])
-  ): ParseResult[(Array[Column], Array[WarningWithCsvContext])] = {
-    val (columns, _) = columnsAndWarnings
-    var virtualColumns = false
-    for (column <- columns) {
-      if (virtualColumns && !column.virtual) {
-        return Left(
-          MetadataError(
-            s"virtual columns before non-virtual column ${column.name.get} (${column.columnOrdinal})"
-          )
+      for {
+        schemaWithWarnings <- TableSchema.fromJson(tableSchema.asInstanceOf[ObjectNode])
+        dialect <- parseDialect(tableNode)
+      } yield {
+        val (tableSchema, warnings) = schemaWithWarnings
+        (
+          new Table(
+            dialect = dialect,
+            url = tableUrl,
+            id = tableNode.getMaybeNode("@id").map(_.asText()),
+            notes = notes,
+            suppressOutput = tableNode.getMaybeNode("suppressOutput").exists(_.asBoolean),
+            schema = tableSchema
+          ),
+          warnings
         )
       }
-      virtualColumns = virtualColumns || column.virtual
-    }
-    Right(columnsAndWarnings)
   }
 
-  private def parseDialect(
-      tableAndWarnings: (Table, Array[WarningWithCsvContext]),
-      tableProperties: Map[String, JsonNode]
-  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
-    val (table, warnings) = tableAndWarnings
-    tableProperties
-      .get("dialect")
-      .map({
-        case d: ObjectNode =>
-          Dialect
-            .fromJson(d)
-            .map(dialect => (table.copy(dialect = Some(dialect)), warnings))
-        case d if d.isMissingNode || d.isNull => Right(tableAndWarnings)
-        case d =>
-          Left(
-            MetadataError(
-              s"Unexpected JsonNode type ${d.getClass.getName}"
-            )
-          )
-      })
-      .getOrElse(Right(tableAndWarnings))
+  private def parseDialect(tableObjectNode: ObjectNode): ParseResult[Option[Dialect]] =
+    tableObjectNode
+      .getMaybeNode("dialect")
+      .map(_.asInstanceOf[ObjectNode])
+      .map(
+        Dialect
+          .fromJson(_)
+          .map(Some(_))
+      )
+      .getOrElse(Right(None))
 
-  }
-
-  private def getTableSchemaInheritedProperties(
-      inheritedProperties: Map[String, JsonNode],
-      tableSchemaObject: ObjectNode
-  ): Map[String, JsonNode] = {
-    inheritedProperties ++ tableSchemaObject.getKeysAndValues
-      .filter({
-        case (propertyName, _) =>
-          tablePermittedProperties.contains(propertyName)
-      })
-      .toMap
-  }
-
-  private def parseNotes(
-      tableAndWarnings: (Table, Array[WarningWithCsvContext]),
-      tableProperties: Map[String, JsonNode]
-  ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
-    val (table, warnings) = tableAndWarnings
-
-    tableProperties
-      .get("notes")
-      .map({
-        case notesNode: ArrayNode =>
-          Right(table.copy(notes = Some(notesNode)), warnings)
-        case _ => Left(MetadataError("Notes property should be an array"))
-      })
-      .getOrElse(Right(tableAndWarnings))
-  }
 
   private def initializeTableWithDefaults(
-      annotations: Map[String, JsonNode],
-      warnings: Array[WarningWithCsvContext],
-      url: String
-  ): (Table, Array[WarningWithCsvContext]) = {
-    val table = new Table(
+                                           url: String
+                                         ): Table =
+    new Table(
       url = url,
       id = None,
       schema = None,
       dialect = None,
       notes = None,
-      suppressOutput = false,
-      annotations = annotations
+      suppressOutput = false
     )
-    (table, warnings)
-  }
-
-  case class PartitionedTableProperties private (
-      annotations: Map[String, JsonNode] = Map(),
-      tableProperties: Map[String, JsonNode] = Map(),
-      inheritedProperties: Map[String, JsonNode] = Map(),
-      warnings: Array[WarningWithCsvContext] = Array()
-  )
 }
 
-case class TableSchema private (
-    columns: Array[Column],
-    primaryKey: Array[Column],
-    rowTitleColumns: Array[Column],
-    foreignKeys: Array[ForeignKeyDefinition],
-    schemaId: Option[String]
-)
 
-case class Table private (
-    url: String,
-    suppressOutput: Boolean,
-    annotations: Map[String, JsonNode],
-    id: Option[String] = None,
-    schema: Option[TableSchema] = None,
-    dialect: Option[Dialect] = None,
-    notes: Option[ArrayNode] = None,
-    // This array contains the foreign keys defined in other tables' schemas which reference data inside this table.
-    foreignKeyReferences: Array[ReferencedTableForeignKeyReference] = Array()
-) {
+case class Table private(
+                          url: String,
+                          suppressOutput: Boolean,
+                          id: Option[String] = None,
+                          schema: Option[TableSchema] = None,
+                          dialect: Option[Dialect] = None,
+                          notes: Option[ArrayNode] = None,
+                          // This array contains the foreign keys defined in other tables' schemas which reference data inside this table.
+                          foreignKeyReferences: Array[ReferencedTableForeignKeyReference] = Array()
+                        ) {
+
   import csvwcheck.models.Table.{MapForeignKeyDefinitionToValues, MapForeignKeyReferenceToValues, PrimaryKeysAndErrors}
+
   val mapAvailableCharsets: mutable.Map[String, Charset] =
     Charset.availableCharsets().asScala
   private val logger = Logger(this.getClass.getName)
@@ -813,15 +134,15 @@ case class Table private (
   override def equals(obj: Any): Boolean =
     obj match {
       case table: Table => table.url == this.url
-      case _            => false
+      case _ => false
     }
 
   def parseCsv(degreeOfParallelism: Int, rowGrouping: Int): Source[
     (
-        WarningsAndErrors,
+      WarningsAndErrors,
         MapForeignKeyDefinitionToValues,
         MapForeignKeyReferenceToValues
-    ),
+      ),
     NotUsed
   ] = {
     val dialect = this.dialect.getOrElse(Dialect())
@@ -889,8 +210,8 @@ case class Table private (
   }
 
   def validateHeader(
-      header: CSVRecord
-  ): WarningsAndErrors = {
+                      header: CSVRecord
+                    ): WarningsAndErrors = {
     var warnings: Array[WarningWithCsvContext] = Array()
     var errors: Array[ErrorWithCsvContext] = Array()
     var columnIndex = 0
@@ -942,17 +263,17 @@ case class Table private (
   }
 
   private def readAndValidateTableWithParser(
-      format: CSVFormat,
-      parser: CSVParser,
-      dialect: Dialect,
-      degreeOfParallelism: Int,
-      rowGrouping: Int
-  ): Source[
+                                              format: CSVFormat,
+                                              parser: CSVParser,
+                                              dialect: Dialect,
+                                              degreeOfParallelism: Int,
+                                              rowGrouping: Int
+                                            ): Source[
     (
-        WarningsAndErrors,
+      WarningsAndErrors,
         MapForeignKeyDefinitionToValues,
         MapForeignKeyReferenceToValues
-    ),
+      ),
     NotUsed
   ] = {
     Source
@@ -1000,9 +321,9 @@ case class Table private (
   }
 
   private def getParser(
-      dialect: Dialect,
-      format: CSVFormat
-  ): Either[WarningsAndErrors, CSVParser] = {
+                         dialect: Dialect,
+                         format: CSVFormat
+                       ): Either[WarningsAndErrors, CSVParser] = {
     val tableUri = new URI(url)
     if (tableUri.getScheme == "file") {
       val tableCsvFile = new File(tableUri)
@@ -1061,9 +382,9 @@ case class Table private (
   }
 
   private def accumulateTableKeyValuesForRowGroup(
-      accumulatedTableKeyValues: AccumulatedTableKeyValues,
-      rowGroup: Seq[ValidateRowOutput]
-  ): AccumulatedTableKeyValues =
+                                                   accumulatedTableKeyValues: AccumulatedTableKeyValues,
+                                                   rowGroup: Seq[ValidateRowOutput]
+                                                 ): AccumulatedTableKeyValues =
     rowGroup.foldLeft(accumulatedTableKeyValues)({
       case (acc, rowOutput) =>
         acc.copy(
@@ -1094,11 +415,11 @@ case class Table private (
     * at this point. During this checking the actual values of primary keys of these rows are compared.
     */
   private def checkPossiblePrimaryKeyDuplicates(
-      accumulatedTableKeyValues: AccumulatedTableKeyValues,
-      parser: CSVParser,
-      rowGrouping: Int,
-      parallelism: Int
-  ): Source[
+                                                 accumulatedTableKeyValues: AccumulatedTableKeyValues,
+                                                 parser: CSVParser,
+                                                 rowGrouping: Int,
+                                                 parallelism: Int
+                                               ): Source[
     WarningsAndErrors,
     NotUsed
   ] = {
@@ -1132,12 +453,12 @@ case class Table private (
         (mutable.Set[List[Any]](), ArrayBuffer.empty[ErrorWithCsvContext])
       ) {
         case (
-              (
-                primaryKeyValues,
-                errorsInAkkaStreams
-              ),
-              rowOutputs: Seq[ValidateRowOutput]
-            ) =>
+          (
+            primaryKeyValues,
+            errorsInAkkaStreams
+            ),
+          rowOutputs: Seq[ValidateRowOutput]
+          ) =>
           for (rowOutput <- rowOutputs) {
             ensurePrimaryKeyValueIsNotDuplicate(primaryKeyValues, rowOutput)
               .foreach(errorsInAkkaStreams.addOne)
@@ -1154,9 +475,9 @@ case class Table private (
   }
 
   private def ensurePrimaryKeyValueIsNotDuplicate(
-      existingPrimaryKeyValues: mutable.Set[List[Any]],
-      validateRowOutput: ValidateRowOutput
-  ): Option[ErrorWithCsvContext] = {
+                                                   existingPrimaryKeyValues: mutable.Set[List[Any]],
+                                                   validateRowOutput: ValidateRowOutput
+                                                 ): Option[ErrorWithCsvContext] = {
     val primaryKeyValues = validateRowOutput.primaryKeyValues
     if (
       validateRowOutput.primaryKeyValues.nonEmpty && existingPrimaryKeyValues
@@ -1241,9 +562,9 @@ case class Table private (
     * key violations or hash collisions.
     */
   private def accumulatePossiblePrimaryKeyDuplicates(
-      mapPrimaryKeyHashToRowNumbers: Map[Int, Array[Long]],
-      validateRowOutput: ValidateRowOutput
-  ): Map[Int, Array[Long]] = {
+                                                      mapPrimaryKeyHashToRowNumbers: Map[Int, Array[Long]],
+                                                      validateRowOutput: ValidateRowOutput
+                                                    ): Map[Int, Array[Long]] = {
     val primaryKeyValueHash = validateRowOutput.primaryKeyValues.hashCode()
     if (validateRowOutput.primaryKeyValues.nonEmpty) {
       val existingRowsMatchingHash = mapPrimaryKeyHashToRowNumbers.getOrElse(
@@ -1260,9 +581,9 @@ case class Table private (
   }
 
   private def accumulateReferencedTableForeignKeyValues(
-      validateRowOutput: ValidateRowOutput,
-      mapReferencedTableToForeignKeyValues: MapForeignKeyReferenceToValues
-  ): MapForeignKeyReferenceToValues =
+                                                         validateRowOutput: ValidateRowOutput,
+                                                         mapReferencedTableToForeignKeyValues: MapForeignKeyReferenceToValues
+                                                       ): MapForeignKeyReferenceToValues =
     validateRowOutput.parentTableForeignKeyReferences
       .foldLeft(mapReferencedTableToForeignKeyValues)({
         case (acc, (keyReference, keyValues)) =>
@@ -1278,9 +599,9 @@ case class Table private (
       })
 
   private def accumulateOriginTableForeignKeyValues(
-      validateRowOutput: ValidateRowOutput,
-      foreignKeyDefinitionsWithValues: MapForeignKeyDefinitionToValues
-  ): MapForeignKeyDefinitionToValues =
+                                                     validateRowOutput: ValidateRowOutput,
+                                                     foreignKeyDefinitionsWithValues: MapForeignKeyDefinitionToValues
+                                                   ): MapForeignKeyDefinitionToValues =
     validateRowOutput.childTableForeignKeys.foldLeft(
       foreignKeyDefinitionsWithValues
     ) {
@@ -1354,9 +675,9 @@ case class Table private (
   }
 
   private def getForeignKeyDefinitionsWithValues(
-      foreignKeyValues: List[(ForeignKeyDefinition, List[Any])],
-      row: CSVRecord
-  ): Predef.Map[ForeignKeyDefinition, KeyWithContext] = {
+                                                  foreignKeyValues: List[(ForeignKeyDefinition, List[Any])],
+                                                  row: CSVRecord
+                                                ): Predef.Map[ForeignKeyDefinition, KeyWithContext] = {
     foreignKeyValues
       .groupBy {
         case (k, _) => k
@@ -1368,11 +689,11 @@ case class Table private (
   }
 
   private def getForeignKeyReferencesWithPossibleValues(
-      foreignKeyReferenceValues: List[
-        (ReferencedTableForeignKeyReference, List[Any])
-      ],
-      row: CSVRecord
-  ): Predef.Map[ReferencedTableForeignKeyReference, KeyWithContext] = {
+                                                         foreignKeyReferenceValues: List[
+                                                           (ReferencedTableForeignKeyReference, List[Any])
+                                                         ],
+                                                         row: CSVRecord
+                                                       ): Predef.Map[ReferencedTableForeignKeyReference, KeyWithContext] = {
     foreignKeyReferenceValues
       .groupBy {
         case (k, _) => k
@@ -1390,23 +711,23 @@ case class Table private (
     * @param mapForeignKeyDefinitionToKeys
     * @param mapForeignKeyReferenceToKeys
     * @param mapPrimaryKeyHashToRowNums - used to store the hashes of every primary keys and its row numbers.
-    *   To validate primary key efficiently, we need to have them in memory and HashSets gave the best performance.
-    *   Storing all of the primary keys in sets leads to huge memory usage by the application.
-    *   To be memory efficient, we hash the primary keys and then store them along with the rowNumbers.
-    *   By hashing primary key values we're only identifying possible duplicates and it can be an overestimate of
-    *   the actual number of duplicates because of hash collisions. Hash Collisions are also addressed at later stage
+    *                                   To validate primary key efficiently, we need to have them in memory and HashSets gave the best performance.
+    *                                   Storing all of the primary keys in sets leads to huge memory usage by the application.
+    *                                   To be memory efficient, we hash the primary keys and then store them along with the rowNumbers.
+    *                                   By hashing primary key values we're only identifying possible duplicates and it can be an overestimate of
+    *                                   the actual number of duplicates because of hash collisions. Hash Collisions are also addressed at later stage
     *
-    *   {
-    *     56234234234: {1, 20},
-    *     45233453453: {2},
-    *     234234234234: {345}
-    *   }
+    *                                   {
+    *                                   56234234234: {1, 20},
+    *                                   45233453453: {2},
+    *                                   234234234234: {345}
+    *                                   }
     */
   private case class AccumulatedTableKeyValues(
-      warnings: Array[WarningWithCsvContext] = Array[WarningWithCsvContext](),
-      errors: Array[ErrorWithCsvContext] = Array[ErrorWithCsvContext](),
-      mapForeignKeyDefinitionToKeys: MapForeignKeyDefinitionToValues = Map(),
-      mapForeignKeyReferenceToKeys: MapForeignKeyReferenceToValues = Map(),
-      mapPrimaryKeyHashToRowNums: Map[Int, Array[Long]] = Map()
-  )
+                                                warnings: Array[WarningWithCsvContext] = Array[WarningWithCsvContext](),
+                                                errors: Array[ErrorWithCsvContext] = Array[ErrorWithCsvContext](),
+                                                mapForeignKeyDefinitionToKeys: MapForeignKeyDefinitionToValues = Map(),
+                                                mapForeignKeyReferenceToKeys: MapForeignKeyReferenceToValues = Map(),
+                                                mapPrimaryKeyHashToRowNums: Map[Int, Array[Long]] = Map()
+                                              )
 }

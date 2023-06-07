@@ -5,7 +5,7 @@ import csvwcheck.enums.PropertyType
 import csvwcheck.errors.MetadataError
 import org.scalatest.Tag
 import org.scalatest.funsuite.AnyFunSuite
-import propertyparser.PropertyParser
+import standardisers.TableGroup
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
@@ -13,7 +13,7 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 class PropertyCheckerTest extends AnyFunSuite {
   test("boolean property checker should return correct types") {
     val Right((value, warnings, propertyType)) =
-      PropertyParser.parseJsonProperty(
+      TableGroup.parseJsonProperty(
         "suppressOutput",
         new TextNode("w3c"),
         "https://www.w3.org/",
@@ -27,7 +27,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   test(
     "boolean property checker should return invalid for non boolean values"
   ) {
-    val Right((value, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((value, warnings, _)) = TableGroup.parseJsonProperty(
       "suppressOutput",
       new TextNode("w3c"),
       "https://www.w3.org/",
@@ -40,7 +40,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   test(
     "boolean property checker should return zero warnings for boolean values"
   ) {
-    val Right((value, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((value, warnings, _)) = TableGroup.parseJsonProperty(
       "suppressOutput",
       BooleanNode.getTrue,
       "https://www.w3.org/",
@@ -53,7 +53,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   test(
     "language property checker should return invalid for properties which cannot be accepted"
   ) {
-    val Right((_, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((_, warnings, _)) = TableGroup.parseJsonProperty(
       "@language",
       new TextNode("Invalid Language Property"),
       "https://www.w3.org/",
@@ -65,7 +65,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   test(
     "language property checker should return no warnings for correct language property"
   ) {
-    val Right((_, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((_, warnings, _)) = TableGroup.parseJsonProperty(
       "@language",
       new TextNode("sgn-BE-FR"),
       "https://www.w3.org/",
@@ -78,7 +78,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     "metadata exception is thrown for invalid value while checking link property"
   ) {
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty(
+      TableGroup.parseJsonProperty(
         "@base",
         new TextNode("_:invalid"),
         "https://www.w3.org/",
@@ -90,7 +90,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   test(
     "link property checker should return joined url after validation if baseUrl supplied"
   ) {
-    val Right((value, _, _)) = PropertyParser.parseJsonProperty(
+    val Right((value, _, _)) = TableGroup.parseJsonProperty(
       "@id",
       new TextNode("csv-w"),
       "https://www.w3.org/",
@@ -102,7 +102,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   test(
     "link property checker should return value as url after validation if baseUrl not supplied"
   ) {
-    val Right((value, _, _)) = PropertyParser.parseJsonProperty(
+    val Right((value, _, _)) = TableGroup.parseJsonProperty(
       "@base",
       new TextNode("https://baseUrlNotSupplied/csv-w"),
       "",
@@ -114,7 +114,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   test(
     "notes property checker should return invalid if value is not of type array"
   ) {
-    val Right((value, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((value, warnings, _)) = TableGroup.parseJsonProperty(
       "notes",
       new TextNode("Notes Content"),
       "",
@@ -133,7 +133,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     arrayNode.add("FirstNote")
     arrayNode.add("secondNote") // Find a better way initialize ArrayNode
     val Right((values, warnings, _)) =
-      PropertyParser.parseJsonProperty("notes", arrayNode, "", "und")
+      TableGroup.parseJsonProperty("notes", arrayNode, "", "und")
     assert(values.isInstanceOf[ArrayNode])
     assert(warnings.isInstanceOf[Array[String]])
     val arrayNodeOut = values.asInstanceOf[ArrayNode]
@@ -148,7 +148,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     "string property checker returns invalid warning if passed value is not string"
   ) {
     val Right((_, warnings, _)) =
-      PropertyParser.parseJsonProperty(
+      TableGroup.parseJsonProperty(
         "default",
         BooleanNode.getFalse,
         "",
@@ -160,7 +160,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   test(
     "string property checker returns string value without warnings if passed value is string"
   ) {
-    val Right((value, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((value, warnings, _)) = TableGroup.parseJsonProperty(
       "default",
       new TextNode("sample string"),
       "",
@@ -171,7 +171,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   }
 
   test("numeric property returns invalid on negative values") {
-    val Right((_, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((_, warnings, _)) = TableGroup.parseJsonProperty(
       "headerRowCount",
       new IntNode(-10),
       "",
@@ -182,7 +182,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
   test("numeric property returns value without warnings on valid value") {
     val Right((value, warnings, _)) =
-      PropertyParser.parseJsonProperty(
+      TableGroup.parseJsonProperty(
         "headerRowCount",
         new IntNode(5),
         "",
@@ -193,7 +193,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   }
 
   test("null property returns value in array without warnings on valid value") {
-    val Right((values, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((values, warnings, _)) = TableGroup.parseJsonProperty(
       "null",
       new TextNode("sample value"),
       "",
@@ -206,7 +206,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
   test("null property returns warnings for invalid value (non string type)") {
     val Right((_, warnings, _)) =
-      PropertyParser.parseJsonProperty("null", BooleanNode.getFalse, "", "und")
+      TableGroup.parseJsonProperty("null", BooleanNode.getFalse, "", "und")
     assert(warnings === Array[String]("invalid_value"))
   }
 
@@ -218,7 +218,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     expectedValues.add("sample")
 
     val Right((returnedValues, warnings, _)) =
-      PropertyParser.parseJsonProperty("null", values, "", "und")
+      TableGroup.parseJsonProperty("null", values, "", "und")
 
     assert(warnings === Array[String]("invalid_value"))
     assert(returnedValues === expectedValues)
@@ -227,7 +227,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   test(
     "separator property returns invalid warning if not of type string or null"
   ) {
-    val Right((_, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((_, warnings, _)) = TableGroup.parseJsonProperty(
       "separator",
       BooleanNode.getFalse,
       "",
@@ -237,7 +237,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   }
 
   test("separator property returns value on valid case") {
-    val Right((returnedValue, _, _)) = PropertyParser.parseJsonProperty(
+    val Right((returnedValue, _, _)) = TableGroup.parseJsonProperty(
       "separator",
       JsonNodeFactory.instance.objectNode(),
       "",
@@ -256,7 +256,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     expectedJsonNode.put("format", "^The Sample RegEx$")
 
     val Right((returnedValue, warnings, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
 
     assert(returnedValue === expectedJsonNode)
     assert(warnings === Array[String]())
@@ -280,7 +280,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     expectedJsonNode.put("format", "^The Sample RegEx$")
 
     val Right((returnedValue, warnings, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
 
     assert(returnedValue === expectedJsonNode)
     assert(warnings === Array[String]("invalid_datatype_base"))
@@ -296,7 +296,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     val jsonNode = objectMapper.readTree(json)
 
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       errorMessage === "datatype @id must not be the id of a built-in datatype (http://www.w3.org/2001/XMLSchema#string)"
     )
@@ -310,7 +310,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     val expectedJsonNode = JsonNodeFactory.instance.objectNode()
     expectedJsonNode.put("@id", "http://www.w3.org/2001/XMLSchema#integer")
 
-    val Right((returnedValue, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((returnedValue, warnings, _)) = TableGroup.parseJsonProperty(
       "datatype",
       new TextNode("integer"),
       "",
@@ -328,7 +328,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     expectedJsonNode.put("@id", "http://www.w3.org/2001/XMLSchema#string")
 
     val Right((returnedValue, warnings, typeString)) =
-      PropertyParser.parseJsonProperty(
+      TableGroup.parseJsonProperty(
         "datatype",
         new TextNode("InvalidDataTypeSupplied"),
         "",
@@ -350,7 +350,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       errorMessage === "Data types based on http://www.w3.org/2001/XMLSchema#integer cannot have a length facet"
     )
@@ -367,7 +367,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       errorMessage === "Data types based on http://www.w3.org/2001/XMLSchema#integer cannot have a minLength facet"
     )
@@ -384,7 +384,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       errorMessage === "Data types based on http://www.w3.org/2001/XMLSchema#integer cannot have a maxLength facet"
     )
@@ -403,7 +403,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       errorMessage === "minimum/minInclusive/minExclusive/maximum/maxInclusive/maxExclusive are only allowed for numeric, date/time and duration types"
     )
@@ -422,7 +422,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       errorMessage === "minimum/minInclusive/minExclusive/maximum/maxInclusive/maxExclusive are only allowed for numeric, date/time and duration types"
     )
@@ -441,7 +441,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       errorMessage === "datatype cannot specify both minimum/minInclusive (10) and minExclusive (10)"
     )
@@ -462,7 +462,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     val jsonNode = objectMapper.readTree(json)
 
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       errorMessage === "datatype minInclusive (10) cannot be greater than maxInclusive (9)"
     )
@@ -480,7 +480,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       errorMessage === "datatype minInclusive (10) cannot be greater than or equal to maxExclusive (10)"
     )
@@ -528,7 +528,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     for (json <- jsonArray) {
       val jsonNode = objectMapper.readTree(json)
       val Left(MetadataError(_, _)) =
-        PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+        TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     }
   }
 
@@ -560,7 +560,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     for (json <- jsonArray) {
       val jsonNode = objectMapper.readTree(json)
       val Left(MetadataError(_, _)) =
-        PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+        TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     }
   }
 
@@ -573,7 +573,7 @@ class PropertyCheckerTest extends AnyFunSuite {
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
     val Right((_, warnings, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
     assert(
       warnings === Array[String]("invalid_boolean_format '\"YES|NO|MAYBE\"'")
     )
@@ -617,7 +617,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     expectedValue.put("base", "http://www.w3.org/2001/XMLSchema#hexBinary")
 
     val Right((returnedValue, warnings, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
 
     assert(warnings === Array[String]())
     assert(returnedValue === expectedValue)
@@ -638,7 +638,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     expectedValue.put("base", "http://www.w3.org/2001/XMLSchema#date")
 
     val Right((returnedValue, warnings, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
 
     assert(warnings === Array[String]())
     assert(returnedValue === expectedValue)
@@ -658,7 +658,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     expectedValue.put("base", "http://www.w3.org/2001/XMLSchema#date")
 
     val Right((returnedValue, warnings, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
 
     assert(warnings === Array[String]("invalid_date_format 'dd/ZZ/yyyy'"))
     assert(
@@ -676,13 +676,13 @@ class PropertyCheckerTest extends AnyFunSuite {
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty(
+      TableGroup.parseJsonProperty(
         "tableSchema",
         jsonNode,
         "http://www.w3.org/",
         "und"
       )
-    assert(errorMessage === "@id _:someValue starts with _:")
+    assert(errorMessage === "'_:someValue' starts with _:")
   }
 
   test("throw metadata error if @type of schema is not 'Schema'") {
@@ -693,7 +693,7 @@ class PropertyCheckerTest extends AnyFunSuite {
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty(
+      TableGroup.parseJsonProperty(
         "tableSchema",
         jsonNode,
         "http://www.w3.org/",
@@ -707,7 +707,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   test(
     "return invalid value warning if tableSchema property is not a string or an object"
   ) {
-    val Right((_, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((_, warnings, _)) = TableGroup.parseJsonProperty(
       "tableSchema",
       BooleanNode.getTrue,
       baseUrl = "https://chickenburgers.com",
@@ -725,7 +725,7 @@ class PropertyCheckerTest extends AnyFunSuite {
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
     jsonNode.asInstanceOf[ObjectNode].remove("notes")
-    val Right((schema, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((schema, warnings, _)) = TableGroup.parseJsonProperty(
       "tableSchema",
       jsonNode,
       baseUrl = "https://chickenburgers.com",
@@ -746,7 +746,7 @@ class PropertyCheckerTest extends AnyFunSuite {
                  | }
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val Right((schema, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((schema, warnings, _)) = TableGroup.parseJsonProperty(
       "tableSchema",
       jsonNode,
       baseUrl = "https://chickenburgers.com",
@@ -771,7 +771,7 @@ class PropertyCheckerTest extends AnyFunSuite {
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty(
+      TableGroup.parseJsonProperty(
         "foreignKeys",
         jsonNode,
         baseUrl = "https://chickenburgers.com",
@@ -793,7 +793,7 @@ class PropertyCheckerTest extends AnyFunSuite {
                  | }
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val Right((_, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((_, warnings, _)) = TableGroup.parseJsonProperty(
       "foreignKeys",
       jsonNode,
       baseUrl = "https://chickenburgers.com",
@@ -812,7 +812,7 @@ class PropertyCheckerTest extends AnyFunSuite {
         |]
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val Right((values, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((values, warnings, _)) = TableGroup.parseJsonProperty(
       "foreignKeys",
       jsonNode,
       baseUrl = "https://chickenburgers.com",
@@ -825,7 +825,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   // Reference Property tests
   test("throw metadata error when foreign key reference is not an object") {
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty(
+      TableGroup.parseJsonProperty(
         "reference",
         new TextNode("Some text value"),
         "",
@@ -844,7 +844,7 @@ class PropertyCheckerTest extends AnyFunSuite {
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty(
+      TableGroup.parseJsonProperty(
         "reference",
         jsonNode,
         baseUrl = "https://chickenburgers.com",
@@ -865,7 +865,7 @@ class PropertyCheckerTest extends AnyFunSuite {
                  | }
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val Right((_, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((_, warnings, _)) = TableGroup.parseJsonProperty(
       "propertyUrl",
       jsonNode,
       baseUrl = "https://chickenburgers.com",
@@ -877,7 +877,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
   test("set value and warnings correctly when Uri template property valid") {
     val validTextNodeUrl = new TextNode("https://www.w3.org")
-    val Right((values, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((values, warnings, _)) = TableGroup.parseJsonProperty(
       "propertyUrl",
       validTextNodeUrl,
       baseUrl = "https://chickenburgers.com",
@@ -892,7 +892,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     "set correct value and warnings correctly when textDirection property is valid"
   ) {
     val validTextDirection = new TextNode("rtl")
-    val Right((values, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((values, warnings, _)) = TableGroup.parseJsonProperty(
       "textDirection",
       validTextDirection,
       baseUrl = "https://www.w3.org",
@@ -908,7 +908,7 @@ class PropertyCheckerTest extends AnyFunSuite {
   ) {
     val validTextDirection =
       new TextNode("Some value which is not a text direction")
-    val Right((_, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((_, warnings, _)) = TableGroup.parseJsonProperty(
       "textDirection",
       validTextDirection,
       baseUrl = "https://www.w3.org",
@@ -920,7 +920,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
   // Title Property tests
   test("set lang object when value is textual in title property") {
-    val Right((values, warnings, _)) = PropertyParser.parseJsonProperty(
+    val Right((values, warnings, _)) = TableGroup.parseJsonProperty(
       "titles",
       new TextNode("Sample Title"),
       "",
@@ -940,7 +940,7 @@ class PropertyCheckerTest extends AnyFunSuite {
     arrNode.add(true)
     arrNode.add("sample text value")
     val Right((values, warnings, _)) =
-      PropertyParser.parseJsonProperty("titles", arrNode, "", "und")
+      TableGroup.parseJsonProperty("titles", arrNode, "", "und")
 
     assert(!values.path("und").isMissingNode)
     assert(values.get("und").isArray)
@@ -965,7 +965,7 @@ class PropertyCheckerTest extends AnyFunSuite {
                  |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
     val Right((values, warnings, _)) =
-      PropertyParser.parseJsonProperty("titles", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("titles", jsonNode, "", "und")
     val expectedTitleArray =
       JsonNodeFactory.instance.arrayNode().add("sample content")
 
@@ -991,7 +991,7 @@ class PropertyCheckerTest extends AnyFunSuite {
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
     val Right((values, warnings, _)) =
-      PropertyParser.parseJsonProperty("transformations", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("transformations", jsonNode, "", "und")
 
     assert(warnings === Array[String]())
     assert(values === jsonNode)
@@ -1013,7 +1013,7 @@ class PropertyCheckerTest extends AnyFunSuite {
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
     val Right((values, warnings, _)) =
-      PropertyParser.parseJsonProperty("transformations", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("transformations", jsonNode, "", "und")
 
     assert(
       warnings.contains("invalid_property 'textDirection' with type Inherited")
@@ -1035,7 +1035,7 @@ class PropertyCheckerTest extends AnyFunSuite {
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
     val Left(MetadataError(errorMessage, _)) =
-      PropertyParser.parseJsonProperty("transformations", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("transformations", jsonNode, "", "und")
 
     assert(errorMessage === "transformations[0].@id starts with _:")
   }
@@ -1096,7 +1096,7 @@ class PropertyCheckerTest extends AnyFunSuite {
 
     val jsonNode = objectMapper.readTree(json)
     val Right((_, warnings, _)) =
-      PropertyParser.parseJsonProperty("datatype", jsonNode, "", "und")
+      TableGroup.parseJsonProperty("datatype", jsonNode, "", "und")
 
     assert(warnings(0).contains("invalid_regex"))
   }

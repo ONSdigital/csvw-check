@@ -1,4 +1,4 @@
-package csvwcheck.propertyparser
+package csvwcheck.standardisers
 
 object Constants {
   val StringDataTypes: Array[String] = Array[String](

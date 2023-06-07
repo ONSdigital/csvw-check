@@ -1,28 +1,39 @@
-package csvwcheck.propertyparser
+package csvwcheck.standardisers
 
 import com.fasterxml.jackson.databind.node._
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.enums.PropertyType
 import Utils.{JsonNodeParser, MetadataErrorsOrParsedObjectProperties, StringWarnings, invalidValueWarning}
+import csvwcheck.errors.MetadataError
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.propertyparser.RegExpressions.Bcp47LanguagetagRegExp
+import csvwcheck.standardisers.RegExpressions.Bcp47LanguagetagRegExp
 import shapeless.syntax.std.tuple.productTupleOps
-
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object ColumnProperties {
+  val parsers: Map[String, JsonNodeParser] = Map(
+    "@type" -> Utils.parseRequiredType(PropertyType.Common, "Column"),
+    // Column level properties
+    "name" -> parseNameProperty(PropertyType.Column),
+    "suppressOutput" -> Utils.parseBooleanProperty(PropertyType.Column),
+    "titles" -> parseNaturalLanguageProperty(PropertyType.Column),
+    "virtual" -> Utils.parseBooleanProperty(PropertyType.Column),
+  ) ++ InheritedProperties.parsers ++ IdProperty.parser
+
   private val NameRegExp =
     "^([A-Za-z0-9]|(%[A-F0-9][A-F0-9]))([A-Za-z0-9_]|(%[A-F0-9][A-F0-9]))*$".r
 
-  def parseColumnsProperty(
-                            csvwPropertyType: PropertyType.Value
-                          ): JsonNodeParser = { (value, _, _) => {
-    Right((value, Array[String](), csvwPropertyType))
-  }
+
+  def parseColumn(propertyType: PropertyType.Value): JsonNodeParser = (columnNode, baseUrl, lang) => columnNode match {
+    case columnNode: ObjectNode =>
+      Utils.parseObjectNode(columnNode, parsers, baseUrl, lang)
+        .map(_ :+ propertyType)
+    case columnNode => Left(MetadataError(s"Unexpected table value: ${columnNode.toPrettyString}"))
   }
 
-  def parseNameProperty(
+
+  private def parseNameProperty(
                          csvwPropertyType: PropertyType.Value
                        ): JsonNodeParser = { (value, _, _) => {
     value match {
@@ -50,7 +61,7 @@ object ColumnProperties {
   }
   }
 
-  def parseNaturalLanguageProperty(
+  private def parseNaturalLanguageProperty(
                                     csvwPropertyType: PropertyType.Value
                                   ): JsonNodeParser = { (value, _, lang) => {
     value match {

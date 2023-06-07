@@ -1,4 +1,4 @@
-package csvwcheck.propertyparser
+package csvwcheck.standardisers
 
 import scala.util.matching.Regex
 
