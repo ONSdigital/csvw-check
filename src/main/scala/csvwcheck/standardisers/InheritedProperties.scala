@@ -37,7 +37,11 @@ object InheritedProperties {
           // Copy over the inherited property from parent to child, if it exists on the parent.
           parentObject
             .getMaybeNode(propertyName)
-            .foreach(valueToCopy => childObject.set(propertyName, valueToCopy))
+            .foreach(valueToCopy => {
+              childObject.set(propertyName, valueToCopy)
+              ()
+            })
+
           childObjectCopy
       })
   }

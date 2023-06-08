@@ -9,7 +9,7 @@ import csvwcheck.errors.{DateFormatError, MetadataError}
 import csvwcheck.models.DateFormat
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
-import csvwcheck.standardisers.Utils.{MetadataErrorsOrParsedObjectProperties, StringWarnings, invalidValueWarning, parseUrlLinkProperty}
+import csvwcheck.standardisers.Utils.{MetadataErrorsOrParsedObjectProperties, StringWarnings, invalidValueWarning, parseNodeAsText, parseUrlLinkProperty}
 import csvwcheck.traits.NumberParser
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import org.joda.time.DateTime
@@ -73,14 +73,16 @@ object DataTypeProperties {
                                    baseDataType: String
                                  ): ParseResult[(Option[JsonNode], StringWarnings)] = {
     if (Constants.RegExpFormatDataTypes.contains(baseDataType)) {
-      val regExFormat = formatNode.asText
-      validateRegEx(regExFormat) match {
-        case Right(()) => Right((Some(formatNode), Array.empty))
-        case Left(e) =>
-          Right(
-            (None, Array(s"invalid_regex '$regExFormat' - ${e.getMessage}"))
-          )
-      }
+      parseNodeAsText(formatNode)
+        .flatMap(regExFormat =>
+          validateRegEx(regExFormat) match {
+            case Right(()) => Right((Some(new TextNode(regExFormat)), Array.empty))
+            case Left(e) =>
+              Right(
+                (None, Array(s"invalid_regex '$regExFormat' - ${e.getMessage}"))
+              )
+          }
+        )
     } else if (
       Constants.NumericFormatDataTypes.contains(baseDataType)
     ) {
@@ -223,7 +225,7 @@ object DataTypeProperties {
           )
         )
       case _ =>
-        throw new IllegalArgumentException(s"Unhandled data type $value")
+        Left(MetadataError(s"Unexpected data type value: ${value.toPrettyString}"))
     }
   }
 

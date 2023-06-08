@@ -543,12 +543,12 @@ object Utils {
   def parseObjectNode(objectNode: ObjectNode, parsers: Map[String, JsonNodeParser], baseUrl: String, lang: String): ParseResult[(ObjectNode, StringWarnings)] =
     objectNode.getKeysAndValues
       .map({
-        case (propertyName, value) if parsers.contains(propertyName) =>
+        case (propertyName, value) =>
           parseJsonProperty(parsers, propertyName, value, baseUrl, lang)
             .map({
               case (jsonNode, stringWarnings, _) => (propertyName, Some(jsonNode), stringWarnings)
+//              case (jsonNode, stringWarnings, _) => (propertyName, None, stringWarnings)
             })
-        case (propertyName, _) => Left(MetadataError(s"Unexpected property '$propertyName' in ${objectNode.toPrettyString}"))
       })
       .iterator
       .toObjectNodeAndStringWarnings

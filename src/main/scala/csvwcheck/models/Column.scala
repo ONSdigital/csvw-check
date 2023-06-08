@@ -64,7 +64,7 @@ object Column {
     val textDirection = columnNode.getMaybeNode("textDirection").map(_.asText)
     val virtual = columnNode.getMaybeNode("virtual").map(_.asBoolean)
     val titles = parseLangTitles(columnNode.getMaybeNode("titles"))
-    val format = dataTypeObjectNode.getMaybeNode("format").map(f => getFormat(f.asInstanceOf[ObjectNode]))
+    val format = dataTypeObjectNode.getMaybeNode("format").map(getFormat)
 
     for {
       baseDataType <- parseBaseDataType(dataTypeObjectNode)
@@ -168,12 +168,14 @@ object Column {
       .getMaybeNode("maxLength").map(_.asInt)
   )
 
-  private def getFormat(formatNode: ObjectNode): Format = {
-    Format(
-      pattern=formatNode.getMaybeNode("pattern").map(_.asText),
-      decimalChar=formatNode.getMaybeNode("decimalChar").map(_.asText).map(d => d(0)),
-      groupChar=formatNode.getMaybeNode("groupChar").map(_.asText).map(d => d(0))
-    )
+  private def getFormat(formatNode: JsonNode): Format = formatNode match {
+    case formatNode: TextNode => Format(pattern=Some(formatNode.asText), decimalChar = None, groupChar = None)
+    case formatNode: ObjectNode =>
+      Format(
+        pattern=formatNode.getMaybeNode("pattern").map(_.asText),
+        decimalChar=formatNode.getMaybeNode("decimalChar").map(_.asText).map(d => d(0)),
+        groupChar=formatNode.getMaybeNode("groupChar").map(_.asText).map(d => d(0))
+      )
   }
 
   private def getDataType(

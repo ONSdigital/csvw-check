@@ -36,7 +36,7 @@ object TableGroup {
         )
       )
     } else {
-      Array.empty
+      Array[WarningWithCsvContext]()
     }
 
     parseTables(standardisedTableGroupNode)
@@ -70,7 +70,7 @@ object TableGroup {
       .get("@context")
       .elements()
       .asScalaArray
-      .apply(2)
+      .apply(1)
       .asInstanceOf[ObjectNode]
 
     val baseUrl = contextObject.get("@base").asText
