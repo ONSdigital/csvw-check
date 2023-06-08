@@ -8,7 +8,7 @@ import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvConte
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.models.Table.{MapForeignKeyDefinitionToValues, MapForeignKeyReferenceToValues}
 import csvwcheck.models.WarningsAndErrors.TolerableErrors
-import csvwcheck.standardisers.InheritedProperties
+import csvwcheck.normalisation.InheritedProperties
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import shapeless.syntax.std.tuple.productTupleOps

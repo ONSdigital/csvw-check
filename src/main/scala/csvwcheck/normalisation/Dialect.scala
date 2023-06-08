@@ -1,49 +1,51 @@
-package csvwcheck.standardisers
+package csvwcheck.normalisation
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, BooleanNode, NullNode, ObjectNode, TextNode}
 import csvwcheck.enums.PropertyType
-import csvwcheck.standardisers.Utils.{JsonNodeParser, MetadataErrorsOrParsedObjectProperties, ObjectPropertyParseResult, invalidValueWarning, parseJsonProperty}
+import csvwcheck.errors.MetadataWarning
+import csvwcheck.normalisation.Utils.{Normaliser, MetadataErrorsOrParsedObjectProperties, ObjectPropertyNormaliserResult, PropertyPath, invalidValueWarning, noWarnings, normaliseJsonProperty}
 import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
-object DialectProperties {
+object Dialect {
   private val validTrimValues = Array("true", "false", "start", "end")
 
-  val parsers: Map[String, JsonNodeParser] = Map(
-    "@type" -> Utils.parseRequiredType(PropertyType.Common, "Dialect"),
+  val normalisers: Map[String, Normaliser] = Map(
+    "@type" -> Utils.normaliseRequiredType(PropertyType.Common, "Dialect"),
     // Dialect Properties
-    "commentPrefix" -> Utils.parseStringProperty(PropertyType.Dialect),
-    "delimiter" -> Utils.parseStringProperty(PropertyType.Dialect),
-    "doubleQuote" -> Utils.parseBooleanProperty(PropertyType.Dialect),
-    "encoding" -> parseEncodingProperty(PropertyType.Dialect),
-    "header" -> Utils.parseBooleanProperty(PropertyType.Dialect),
-    "headerRowCount" -> Utils.parseNonNegativeIntegerProperty(PropertyType.Dialect),
-    "lineTerminators" -> parseLineTerminatorsProperty(PropertyType.Dialect),
-    "quoteChar" -> Utils.parseStringProperty(PropertyType.Dialect),
-    "skipBlankRows" -> Utils.parseBooleanProperty(PropertyType.Dialect),
-    "skipColumns" -> Utils.parseNonNegativeIntegerProperty(PropertyType.Dialect),
-    "skipInitialSpace" -> Utils.parseBooleanProperty(PropertyType.Dialect),
-    "skipRows" -> Utils.parseNonNegativeIntegerProperty(PropertyType.Dialect),
-    "trim" -> parseTrimProperty(PropertyType.Dialect),
-  ) ++ IdProperty.parser
+    "commentPrefix" -> Utils.normaliseStringProperty(PropertyType.Dialect),
+    "delimiter" -> Utils.normaliseStringProperty(PropertyType.Dialect),
+    "doubleQuote" -> Utils.normaliseBooleanProperty(PropertyType.Dialect),
+    "encoding" -> normaliseEncodingProperty(PropertyType.Dialect),
+    "header" -> Utils.normaliseBooleanProperty(PropertyType.Dialect),
+    "headerRowCount" -> Utils.normaliseNonNegativeIntegerProperty(PropertyType.Dialect),
+    "lineTerminators" -> normaliseLineTerminatorsProperty(PropertyType.Dialect),
+    "quoteChar" -> Utils.normaliseStringProperty(PropertyType.Dialect),
+    "skipBlankRows" -> Utils.normaliseBooleanProperty(PropertyType.Dialect),
+    "skipColumns" -> Utils.normaliseNonNegativeIntegerProperty(PropertyType.Dialect),
+    "skipInitialSpace" -> Utils.normaliseBooleanProperty(PropertyType.Dialect),
+    "skipRows" -> Utils.normaliseNonNegativeIntegerProperty(PropertyType.Dialect),
+    "trim" -> normaliseTrimProperty(PropertyType.Dialect),
+  ) ++ IdProperty.normaliser
 
-  def parseDialectProperty(
+  def normaliseDialectProperty(
                             csvwPropertyType: PropertyType.Value
-                          ): JsonNodeParser = { (value, baseUrl, lang) => {
+                          ): Normaliser = { (value, baseUrl, lang, propertyPath) => {
     value match {
       case objectNode: ObjectNode =>
         objectNode.fields.asScala
           .map(fieldAndValue =>
-            parseDialectObjectProperty(
+            normaliseDialectObjectProperty(
               baseUrl,
               lang,
               fieldAndValue.getKey,
-              fieldAndValue.getValue
+              fieldAndValue.getValue,
+              propertyPath :+ fieldAndValue.getKey
             )
           )
-          .toObjectNodeAndStringWarnings
+          .toObjectNodeAndWarnings
           .map(_ :+ csvwPropertyType)
       case _ =>
         // May be we might need to support dialect property of type other than ObjectNode.
@@ -53,7 +55,7 @@ object DialectProperties {
         Right(
           (
             NullNode.instance,
-            Array(invalidValueWarning),
+            Array(MetadataWarning(propertyPath, invalidValueWarning)),
             csvwPropertyType
           )
         )
@@ -61,9 +63,9 @@ object DialectProperties {
   }
   }
 
-  private def parseTrimProperty(
+  private def normaliseTrimProperty(
                          csvwPropertyType: PropertyType.Value
-                       ): JsonNodeParser = { (value, _, _) =>
+                       ): Normaliser = { (value, _, _, propertyPath) =>
     value match {
       case boolNode: BooleanNode =>
         if (boolNode.booleanValue) {
@@ -72,51 +74,52 @@ object DialectProperties {
           Right((new TextNode("false"), Array.empty, csvwPropertyType))
         }
       case textNode: TextNode if validTrimValues.contains(textNode.asText) =>
-        Right((value, Array[String](), csvwPropertyType))
+        Right((value, noWarnings, csvwPropertyType))
       case _ =>
         Right(
           (
             new TextNode("false"),
-            Array(invalidValueWarning),
+            Array(MetadataWarning(propertyPath, invalidValueWarning)),
             csvwPropertyType
           )
         )
     }
   }
 
-  private def parseLineTerminatorsProperty(
+  private def normaliseLineTerminatorsProperty(
                           csvwPropertyType: PropertyType.Value
-                        ): JsonNodeParser = { (value, _, _) =>
+                        ): Normaliser = { (value, _, _, propertyPath) =>
     value match {
+      // todo
 //      case n: TextNode  => Right(Array(n.asText()))
 //      case n: ArrayNode => Right(n.iterator().asScalaArray.map(_.asText()))
 //      case n =>
 //        Left(MetadataError(s"Unexpected node type ${n.getClass.getName}"))
 
-      case a: ArrayNode => Right((a, Array[String](), csvwPropertyType))
+      case a: ArrayNode => Right((a, noWarnings, csvwPropertyType))
       case _ =>
         Right(
           (
             BooleanNode.getFalse,
-            Array(invalidValueWarning),
+            Array(MetadataWarning(propertyPath, invalidValueWarning)),
             csvwPropertyType
           )
         )
     }
   }
 
-  private def parseEncodingProperty(
+  private def normaliseEncodingProperty(
                              csvwPropertyType: PropertyType.Value
-                           ): JsonNodeParser = { (value, _, _) => {
+                           ): Normaliser = { (value, _, _, propertyPath) => {
     value match {
       case s: TextNode
         if Constants.ValidEncodings.contains(s.asText()) =>
-        Right((s, Array[String](), csvwPropertyType))
+        Right((s, noWarnings, csvwPropertyType))
       case _ =>
         Right(
           (
             NullNode.instance,
-            Array[String](invalidValueWarning),
+            Array(MetadataWarning(propertyPath, invalidValueWarning)),
             csvwPropertyType
           )
         )
@@ -124,13 +127,14 @@ object DialectProperties {
   }
   }
 
-  private def parseDialectObjectProperty(
+  private def normaliseDialectObjectProperty(
                                           baseUrl: String,
                                           lang: String,
                                           propertyName: String,
-                                          valueNode: JsonNode
-                                ): ObjectPropertyParseResult = {
-    parseJsonProperty(parsers, propertyName, valueNode, baseUrl, lang)
+                                          valueNode: JsonNode,
+                                          propertyPath: PropertyPath
+                                ): ObjectPropertyNormaliserResult = {
+    normaliseJsonProperty(normalisers, propertyPath, propertyName, valueNode, baseUrl, lang)
       .map({
         case (parsedValueNode, propertyWarnings, propertyType) =>
           if (
@@ -140,7 +144,7 @@ object DialectProperties {
           } else {
             val warnings =
               if (propertyType != PropertyType.Dialect && propertyType != PropertyType.Common)
-                propertyWarnings :+ "invalid_property"
+                propertyWarnings :+ MetadataWarning(propertyPath, "invalid_property")
               else
                 propertyWarnings
 

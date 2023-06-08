@@ -1324,7 +1324,9 @@ Feature: CSVW Validation Tests
     Then there should be errors
 	
 	# manifest-validation#test148
-	# If there is a non-empty case-sensitive intersection between the titles values, where matches MUST have a matching language; `und` matches any language, and languages match if they are equal when truncated, as defined in [BCP47], to the length of the shortest language tag.
+	# If there is a non-empty case-sensitive intersection between the titles values, where matches MUST have a matching
+    # language; `und` matches any language, and languages match if they are equal when truncated, as defined in [BCP47],
+    # to the length of the shortest language tag.
   Scenario: manifest-validation#test148 title incompatible with title on language
     Given I have a metadata file called "test148-metadata.json"
     And the metadata is stored at the url "https://w3c.github.io/csvw/tests/test148-metadata.json"

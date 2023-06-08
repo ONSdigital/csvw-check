@@ -8,8 +8,8 @@ import csvwcheck.models
 import csvwcheck.models.Column._
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
-import csvwcheck.standardisers.Constants.undefinedLanguage
-import csvwcheck.standardisers.Utils.parseNodeAsText
+import csvwcheck.normalisation.Constants.undefinedLanguage
+import csvwcheck.normalisation.Utils.parseNodeAsText
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.NumberParser
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}

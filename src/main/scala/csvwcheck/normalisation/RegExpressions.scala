@@ -1,4 +1,4 @@
-package csvwcheck.standardisers
+package csvwcheck.normalisation
 
 import scala.util.matching.Regex
 
@@ -26,4 +26,6 @@ object RegExpressions {
   val Bcp47LanguagetagRegExp: Regex =
     ("^(" + Bcp47Grandfathered + "|" + Bcp47Langtag + "|" + Bcp47PrivateUse + ")").r
   val prefixedPropertyPattern: Regex = "^[a-z]+:.*$".r
+  val NameRegExp =
+    "^([A-Za-z0-9]|(%[A-F0-9][A-F0-9]))([A-Za-z0-9_]|(%[A-F0-9][A-F0-9]))*$".r
 }

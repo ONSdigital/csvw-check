@@ -192,7 +192,7 @@ case class LdmlNumberFormatParser(
         Left(
           MetadataError(
             s"Unhandled error occurred parsing LDML number format: ${e.getMessage}",
-            e
+            cause = e
           )
         )
     }

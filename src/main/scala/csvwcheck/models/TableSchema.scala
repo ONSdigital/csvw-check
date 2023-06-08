@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode, TextNode}
 import csvwcheck.errors.{MetadataError, WarningWithCsvContext}
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.standardisers.InheritedProperties
+import csvwcheck.normalisation.InheritedProperties
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import shapeless.syntax.std.tuple.productTupleOps
 

@@ -41,7 +41,7 @@ case class NumberFormat(
       // Figure out what the default pattern should be
     }
   } catch {
-    case e: Exception => throw MetadataError(e.getMessage, e)
+    case e: Exception => throw MetadataError(e.getMessage, cause = e)
   }
 
   def parse(value: String): Number = {

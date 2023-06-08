@@ -8,7 +8,7 @@ import com.typesafe.scalalogging.Logger
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.models
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.standardisers.Utils.parseNodeAsText
+import csvwcheck.normalisation.Utils.parseNodeAsText
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
@@ -364,8 +364,9 @@ case class Table private(
           logger.debug(e)
           Left(
             WarningsAndErrors(
+              Array(),
               Array(
-                WarningWithCsvContext(
+                ErrorWithCsvContext(
                   "url_cannot_be_fetched",
                   "",
                   "",
@@ -373,8 +374,7 @@ case class Table private(
                   s"Url ${tableUri.toString} cannot be fetched",
                   ""
                 )
-              ),
-              Array()
+              )
             )
           )
       }

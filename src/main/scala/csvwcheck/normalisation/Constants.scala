@@ -1,4 +1,4 @@
-package csvwcheck.standardisers
+package csvwcheck.normalisation
 
 object Constants {
   val StringDataTypes: Array[String] = Array[String](

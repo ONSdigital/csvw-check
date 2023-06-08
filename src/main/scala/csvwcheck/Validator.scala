@@ -8,7 +8,7 @@ import com.typesafe.scalalogging.Logger
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors._
 import csvwcheck.models._
-import csvwcheck.standardisers.TableGroup.standardiseTableGroup
+import csvwcheck.normalisation.TableGroup.normaliseTableGroup
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import sttp.client3.{HttpClientSyncBackend, Identity, SttpBackend, basicRequest, ignore}
 import sttp.model.Uri
@@ -117,10 +117,10 @@ class Validator(
   }
 
   private def standardiseAndParseTableGroup(possibleSchemaUri: URI, tableGroupNode: ObjectNode): Either[GeneralCsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
-    val tableGroupWithWarningsAndErrors = standardiseTableGroup(tableGroupNode, possibleSchemaUri.toString)
-      .flatMap({ case (standardisedTableGroup, warnings) =>
+    val normalisedTableGroupWithWarningsAndErrors = normaliseTableGroup(tableGroupNode, possibleSchemaUri.toString)
+      .flatMap({ case (normalisedTableGroup, warnings) =>
         for {
-          tableGroupWithWarningsAndErrors <- TableGroup.fromJson(standardisedTableGroup)
+          tableGroupWithWarningsAndErrors <- TableGroup.fromJson(normalisedTableGroup)
         } yield {
           val newWarningsAndErrors = tableGroupWithWarningsAndErrors.warningsAndErrors
             .copy(warnings = tableGroupWithWarningsAndErrors.warningsAndErrors.warnings ++ warnings)
@@ -129,7 +129,7 @@ class Validator(
       })
 
     // Convert this result to the correct local Either type.
-    tableGroupWithWarningsAndErrors match {
+    normalisedTableGroupWithWarningsAndErrors match {
       case Right(tableGroupWithWarningsAndErrors) => Right(tableGroupWithWarningsAndErrors)
       case Left(metadataError) =>
         Left(GeneralCsvwLoadError(metadataError))
