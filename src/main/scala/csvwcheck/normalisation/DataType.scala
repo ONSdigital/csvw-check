@@ -9,9 +9,9 @@ import csvwcheck.errors.{DateFormatError, MetadataError, MetadataWarning}
 import csvwcheck.models.DateFormat
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedObjectProperties, MetadataWarnings, PropertyPath, invalidValueWarning, noWarnings, parseNodeAsText, normaliseUrlLinkProperty}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, PropertyPath, invalidValueWarning, noWarnings, normaliseUrlLinkProperty, parseNodeAsText}
 import csvwcheck.traits.NumberParser
-import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
+import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import org.joda.time.DateTime
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -19,98 +19,102 @@ import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object DataType {
+  val normalisers: Map[String, Normaliser] = Map(
+    "@id" ->normaliseDataTypeObjectIdNode(PropertyType.DataType),
+    "@base" -> normaliseDataTypeBase(PropertyType.DataType),
+
+    "minInclusive" -> Utils.normaliseDoNothing(PropertyType.DataType),
+    "maxInclusive" -> Utils.normaliseDoNothing(PropertyType.DataType),
+    "minExclusive" -> Utils.normaliseDoNothing(PropertyType.DataType),
+    "maxExclusive" -> Utils.normaliseDoNothing(PropertyType.DataType),
+
+    "length" -> Utils.normaliseDoNothing(PropertyType.DataType),
+    "minLength" -> Utils.normaliseDoNothing(PropertyType.DataType),
+    "maxLength" -> Utils.normaliseDoNothing(PropertyType.DataType),
+  )
+
   def normaliseDataTypeProperty(
                              csvwPropertyType: PropertyType.Value
-                           ): (JsonNode, String, String, PropertyPath) => ParseResult[
-    (
-      ObjectNode,
-        MetadataWarnings,
-        PropertyType.Value
-      )
-  ] = { (value, baseUrl, lang, propertyPath) => {
-    initialDataTypePropertyNormalisation(value, baseUrl, lang, propertyPath)
-      .flatMap(normaliseDataTypeLengths(_, propertyPath))
-      .flatMap(normaliseDataTypeMinMaxValues(_, propertyPath))
-      .flatMap(normaliseDataTypeFormat(_, propertyPath))
-      .map(_ :+ csvwPropertyType)
-  }
-  }
+                           ): Normaliser = context =>
+    initialDataTypePropertyNormalisation(context)
+      .flatMap({ case (dataTypeContext, warnings) =>
+        for {
+          _ <- normaliseDataTypeLengths(dataTypeContext)
+          _ <- normaliseDataTypeMinMaxValues(dataTypeContext)
+          normalisedDataTypeNodeWithWarnings <- normaliseDataTypeFormat(dataTypeContext)
+        } yield {
+          val (normalisedNode, newWarnings) = normalisedDataTypeNodeWithWarnings
+          (normalisedNode, warnings ++ newWarnings, csvwPropertyType)
+        }
+      })
+
+  private def normaliseDataTypeFormat(dataTypeContext: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
+    dataTypeContext.node
+      .getMaybeNode("format")
+      .map(formatNode => {
+        val formatNodeContext = dataTypeContext.toChild(formatNode, "format")
+        for {
+          baseDataType <- Utils.parseNodeAsText(dataTypeContext.node.get("@base"))
+          dataTypeFormatNodeAndWarnings <- normaliseDataTypeFormat(formatNodeContext, baseDataType)
+        } yield {
+          val (formatNodeReplacement, newWarnings) =
+            dataTypeFormatNodeAndWarnings
+
+          val parsedDataTypeNode = formatNodeReplacement match {
+            case Some(newNode) =>
+              dataTypeContext.node.deepCopy().set("format", newNode)
+            case None =>
+              val modifiedDataTypeNode = dataTypeContext.node
+                .deepCopy()
+              modifiedDataTypeNode.remove("format")
+
+              modifiedDataTypeNode
+          }
+          (parsedDataTypeNode, newWarnings)
+        }
+      })
+      .getOrElse(Right(()))
 
   private def normaliseDataTypeFormat(
-                                   input: (ObjectNode, MetadataWarnings),
-                                   propertyPath: PropertyPath
-                                 ): ParseResult[(ObjectNode, MetadataWarnings)] =
-    input match {
-      case (dataTypeNode: ObjectNode, warnings: MetadataWarnings) =>
-        dataTypeNode
-          .getMaybeNode("format")
-          .map(formatNode => {
-            val formatNodePropertyPath = propertyPath :+ "format"
-            for {
-              baseDataType <- Utils.parseNodeAsText(dataTypeNode.get("base"))
-              dataTypeFormatNodeAndWarnings <-
-                normaliseDataTypeFormat(formatNode, baseDataType, formatNodePropertyPath)
-            } yield {
-              val (formatNodeReplacement, newWarnings) =
-                dataTypeFormatNodeAndWarnings
-
-              val parsedDataTypeNode = formatNodeReplacement match {
-                case Some(newNode) =>
-                  dataTypeNode.deepCopy().set("format", newNode)
-                case None =>
-                  val modifiedDataTypeNode = dataTypeNode
-                    .deepCopy()
-                  modifiedDataTypeNode.remove("format")
-
-                  modifiedDataTypeNode
-              }
-              (parsedDataTypeNode, warnings ++ newWarnings)
-            }
-          })
-          .getOrElse(Right((dataTypeNode, warnings)))
-    }
-
-  private def normaliseDataTypeFormat(
-                                   formatNode: JsonNode,
-                                   baseDataType: String,
-                                   propertyPath: PropertyPath
+                                       formatContext: NormContext[JsonNode],
+                                       baseDataType: String
                                  ): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
     if (Constants.RegExpFormatDataTypes.contains(baseDataType)) {
-      parseNodeAsText(formatNode)
+      parseNodeAsText(formatContext.node)
         .flatMap(regExFormat =>
           validateRegEx(regExFormat) match {
             case Right(()) => Right((Some(new TextNode(regExFormat)), noWarnings))
             case Left(e) =>
               Right(
-                (None, Array(MetadataWarning(propertyPath, s"invalid_regex '$regExFormat' - ${e.getMessage}")))
+                (None, Array(formatContext.makeWarning(s"invalid_regex '$regExFormat' - ${e.getMessage}")))
               )
           }
         )
     } else if (
       Constants.NumericFormatDataTypes.contains(baseDataType)
     ) {
-      normaliseDataTypeFormatNumeric(formatNode, propertyPath)
+      normaliseDataTypeFormatNumeric(formatContext)
         .map({
           case (parsedNode, warnings) =>
             (Some(parsedNode), warnings)
         })
     } else if (baseDataType == "http://www.w3.org/2001/XMLSchema#boolean") {
-      formatNode match {
+      formatContext.node match {
         case formatTextNode: TextNode =>
-          val formatValues = formatNode.asText.split("""\|""")
+          val formatValues = formatTextNode.asText.split("""\|""")
           if (formatValues.length != 2) {
-            Right((None, Array(MetadataWarning(propertyPath, s"invalid_boolean_format '$formatNode'"))))
+            Right((None, Array(formatContext.makeWarning(s"invalid_boolean_format '$formatTextNode'"))))
           } else {
             Right((Some(formatTextNode), noWarnings))
           }
-        case _ =>
+        case formatNode =>
           // Boolean formats should always be textual
-          Right((None, Array(MetadataWarning(propertyPath, s"invalid_boolean_format '$formatNode'"))))
+          Right((None, Array(formatContext.makeWarning(s"invalid_boolean_format '$formatNode'"))))
       }
     } else if (
       Constants.DateFormatDataTypes.contains(baseDataType)
     ) {
-      formatNode match {
+      formatContext.node match {
         case formatTextNode: TextNode =>
           val dateFormatString = formatTextNode.asText()
           try {
@@ -118,39 +122,37 @@ object DataType {
             if (format.isDefined) {
               Right((Some(new TextNode(format.get)), noWarnings))
             } else {
-              Right((None, Array(MetadataWarning(propertyPath, s"invalid_date_format '$dateFormatString'"))))
+              Right((None, Array(formatContext.makeWarning(s"invalid_date_format '$dateFormatString'"))))
             }
           } catch {
             case _: DateFormatError =>
-              Right((None, Array(MetadataWarning(propertyPath, s"invalid_date_format '$dateFormatString'"))))
+              Right((None, Array(formatContext.makeWarning(s"invalid_date_format '$dateFormatString'"))))
           }
-        case _ =>
-          Right((None, Array(MetadataWarning(propertyPath, s"invalid_date_format '$formatNode'"))))
+        case formatNode =>
+          Right((None, Array(formatContext.makeWarning(s"invalid_date_format '$formatNode'"))))
       }
     } else {
-      Left(MetadataError(s"Unhandled format node ${formatNode.toPrettyString}", propertyPath))
+      Left(formatContext.makeError(s"Unhandled format node ${formatContext.node.toPrettyString}"))
     }
   }
 
 
   @tailrec
-  private def normaliseDataTypeFormatNumeric(
-                                          formatNode: JsonNode,
-                                          propertyPath: PropertyPath
-                                        ): ParseResult[(ObjectNode, MetadataWarnings)] = {
-    formatNode match {
+  private def normaliseDataTypeFormatNumeric(formatContext: NormContext[JsonNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
+    formatContext.node match {
       case _: TextNode =>
         val formatObjectNode = JsonNodeFactory.instance.objectNode()
         normaliseDataTypeFormatNumeric(
-          formatObjectNode.set("pattern", formatNode.deepCopy()), propertyPath
+          formatContext.withNode(
+            formatObjectNode.set("pattern", formatContext.node.deepCopy())
+          )
         )
       case formatObjectNode: ObjectNode =>
-        Right(normaliseNumericFormatObjectNode(formatObjectNode, propertyPath))
+        Right(normaliseNumericFormatObjectNode(formatContext.withNode(formatObjectNode)))
       case _ =>
         Left(
-          MetadataError(
-            s"Unhandled numeric data type format ${formatNode.toPrettyString}",
-            propertyPath
+          formatContext.makeError(
+            s"Unhandled numeric data type format ${formatContext.node.toPrettyString}"
           )
         )
     }
@@ -166,12 +168,9 @@ object DataType {
     }
 
 
-  private def normaliseNumericFormatObjectNode(
-                                            formatObjectNode: ObjectNode,
-                                            propertyPath: PropertyPath
-                                          ): (ObjectNode, MetadataWarnings) = {
+  private def normaliseNumericFormatObjectNode(formatContext: NormContext[ObjectNode]): (ObjectNode, MetadataWarnings) = {
     def parseMaybeStringAt(propertyName: String): ParseResult[Option[String]] =
-      formatObjectNode
+      formatContext.node
         .getMaybeNode(propertyName)
         .map(Utils.parseNodeAsText(_).map(Some(_)))
         .getOrElse(Right(None))
@@ -194,41 +193,39 @@ object DataType {
     } yield numberFormatParser
 
     numberFormatParserResult match {
-      case Right(_) => (formatObjectNode, noWarnings)
+      case Right(_) => (formatContext.node, noWarnings)
       case Left(err) =>
-        val formatNodeWithoutPattern = formatObjectNode.deepCopy()
+        val formatNodeWithoutPattern = formatContext.node.deepCopy()
         formatNodeWithoutPattern.remove("pattern")
 
         (
           formatNodeWithoutPattern,
-          Array(MetadataWarning(propertyPath, s"invalid_number_format - ${err.message}"))
+          Array(formatContext.makeWarning(s"invalid_number_format - ${err.message}"))
         )
     }
   }
 
-  private def initialDataTypePropertyNormalisation(
-                                            value: JsonNode,
-                                            baseUrl: String,
-                                            lang: String,
-                                            propertyPath: PropertyPath
-                                          ): ParseResult[(ObjectNode, MetadataWarnings)] = {
-    value match {
-      case dataTypeObjectNode: ObjectNode =>
-        normaliseDataTypeObject(dataTypeObjectNode, baseUrl, lang, propertyPath)
+  private def initialDataTypePropertyNormalisation(dataTypeContext: NormContext[JsonNode]): ParseResult[(NormContext[ObjectNode], MetadataWarnings)] = {
+    dataTypeContext.node match {
+      case dataTypeObjectNode: ObjectNode => normaliseDataTypeObject(dataTypeContext.withNode(dataTypeObjectNode))
       case x: TextNode if XsdDataTypes.types.contains(x.asText()) =>
         Right(
           (
-            objectMapper.createObjectNode
-              .put("@id", XsdDataTypes.types(x.asText())),
+            dataTypeContext.withNode(
+              objectMapper.createObjectNode
+                .put("@id", XsdDataTypes.types(x.asText()))
+            ),
             noWarnings
           )
         )
       case _: TextNode =>
         Right(
           (
-            objectMapper.createObjectNode
-              .put("@id", XsdDataTypes.types("string")),
-            Array(MetadataWarning(propertyPath, invalidValueWarning))
+            dataTypeContext.withNode(
+              objectMapper.createObjectNode
+                .put("@id", XsdDataTypes.types("string"))
+            ),
+            Array(dataTypeContext.makeWarning(invalidValueWarning))
           )
         )
       case _ =>
@@ -237,130 +234,94 @@ object DataType {
         // object with no properties.
         Right(
           (
-            JsonNodeFactory.instance.objectNode(),
-            Array(MetadataWarning(propertyPath, invalidValueWarning))
+            dataTypeContext.withNode(
+              JsonNodeFactory.instance.objectNode()
+            ),
+            Array(dataTypeContext.makeWarning(invalidValueWarning))
           )
         )
     }
   }
 
-  private def normaliseDataTypeObjectIdNode(
-                                         baseUrl: String,
-                                         lang: String,
-                                         valueNode: JsonNode,
-                                         propertyPath: PropertyPath
-                                       ): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
-    val idValue = valueNode.asText()
-    if (XsdDataTypes.types.values.toList.contains(idValue)) {
-      Left(
-        MetadataError(
-          s"datatype @id must not be the id of a built-in datatype ($idValue)", propertyPath
-        )
-      )
-    } else {
-      normaliseUrlLinkProperty(PropertyType.Common)(
-        valueNode,
-        baseUrl,
-        lang,
-        propertyPath
-      ).map({
-        case (linkNode, warns@Array(), _) => (Some(linkNode), warns)
-        case (_, warns, _) => (None, warns)
-      })
-    }
-  }
-
-  private def normaliseDataTypeObject(
-                                   objectNode: ObjectNode,
-                                   baseUrl: String,
-                                   lang: String,
-                                   propertyPath: PropertyPath
-                                 ): ParseResult[(ObjectNode, MetadataWarnings)] = {
-    objectNode.fields.asScala
-      .map(keyAndValue => {
-        val propertyName = keyAndValue.getKey
-        val valueNode = keyAndValue.getValue
-        val localPropertyPath = propertyPath :+ propertyName
-
-        propertyName match {
-          case "@id" =>
-            normaliseDataTypeObjectIdNode(baseUrl, lang, valueNode, localPropertyPath)
-              .map("@id" +: _)
-          case "base" =>
-            val baseValue = valueNode.asText()
-            if (XsdDataTypes.types.contains(baseValue)) {
-              Right(
-                (
-                  "base",
-                  Some(new TextNode(XsdDataTypes.types(baseValue))),
-                  noWarnings
-                )
-              )
-            } else {
-              Right(
-                (
-                  "base",
-                  Some(new TextNode(XsdDataTypes.types("string"))),
-                  Array(MetadataWarning(localPropertyPath, "invalid_datatype_base"))
-                )
-              )
-            }
-          case _ =>
-            Right(
-              (propertyName, Some(valueNode), noWarnings)
-            ) // todo: Is this right?
+  private def normaliseDataTypeObjectIdNode(propertyType: PropertyType.Value): Normaliser = (context: NormContext[JsonNode]) =>
+    parseNodeAsText(context.node)
+      .flatMap(idValue => {
+        if (XsdDataTypes.types.values.toList.contains(idValue)) {
+          Left(
+            context.makeError(
+              s"datatype @id must not be the id of a built-in datatype ($idValue)"
+            )
+          )
+        } else {
+          normaliseUrlLinkProperty(propertyType)(context)
         }
       })
-      .toObjectNodeAndWarnings
+
+  private def normaliseDataTypeObject(context: NormContext[ObjectNode]): ParseResult[(NormContext[ObjectNode], MetadataWarnings)] = {
+    Utils.normaliseObjectNode(normalisers, context)
       .map({
         case (objectNode, warnings) =>
           // Make sure that the `base` node is set.
           objectNode
-            .getMaybeNode("base")
-            .map(_ => (objectNode, warnings))
+            .getMaybeNode("@base")
+            .map(_ => (context.withNode(objectNode), warnings))
             .getOrElse(
               (
-                objectNode
-                  .deepCopy()
-                  .set("base", new TextNode(XsdDataTypes.types("string"))),
+                context.withNode(
+                  objectNode
+                    .deepCopy()
+                    .set("@base", new TextNode(XsdDataTypes.types("string"))),
+                ),
                 warnings
               )
             )
       })
   }
 
-  private def normaliseDataTypeMinMaxValues(
-                                         inputs: (ObjectNode, MetadataWarnings),
-                                         propertyPath: PropertyPath
-                                       ): ParseResult[(ObjectNode, MetadataWarnings)] = {
-    val (dataTypeNode, warnings) = inputs
-    dataTypeNode
-      .getMaybeNode("base")
+  private def normaliseDataTypeBase(propertyType: PropertyType.Value): Normaliser = context => {
+    parseNodeAsText(context.node)
+      .map(baseValue => {
+        if (XsdDataTypes.types.contains(baseValue)) {
+          (
+            new TextNode(XsdDataTypes.types(baseValue)),
+            noWarnings,
+            propertyType
+          )
+        } else {
+          (
+            new TextNode(XsdDataTypes.types("string")),
+            Array(context.makeWarning("invalid_datatype_base")),
+            propertyType
+          )
+        }
+      })
+  }
+
+  private def normaliseDataTypeMinMaxValues(dataTypeContext: NormContext[ObjectNode]): ParseResult[Unit] = {
+    dataTypeContext.node
+      .getMaybeNode("@base")
       .map({
         case baseDataTypeNode: TextNode =>
           normaliseDataTypeMinMaxValuesForBaseType(
-            dataTypeNode,
-            warnings,
-            baseDataTypeNode.asText,
-            propertyPath :+ "base"
+            dataTypeContext,
+            baseDataTypeNode.asText
           )
         case baseNode =>
           Left(
-            MetadataError(
-              s"Unexpected base data type value: ${baseNode.toPrettyString}",
-              propertyPath :+ "base"
+            dataTypeContext.makeError(
+              s"Unexpected base data type value: ${baseNode.toPrettyString}"
             )
           )
       })
-      .getOrElse(Right(inputs))
+      .getOrElse(Right(()))
   }
 
   private def normaliseDataTypeMinMaxValuesForBaseType(
-                                                    dataTypeNode: ObjectNode,
-                                                    existingStringWarnings: MetadataWarnings,
-                                                    baseDataType: String,
-                                                    propertyPath: PropertyPath
-                                                  ): ParseResult[(ObjectNode, MetadataWarnings)] = {
+                                                    dataTypeContext: NormContext[ObjectNode],
+                                                    baseDataType: String
+                                                  ): ParseResult[Unit] = {
+    val dataTypeNode = dataTypeContext.node
+
     val minimumNode = dataTypeNode.getMaybeNode("minimum")
     val minInclusiveNode = dataTypeNode.getMaybeNode("minInclusive")
     val minExclusiveNode = dataTypeNode.getMaybeNode("minExclusive")
@@ -377,20 +338,17 @@ object DataType {
     ) {
       // Date and Numeric types are permitted min/max/etc. values
       normaliseMinMaxRanges(
-        dataTypeNode,
+        dataTypeContext,
         baseDataType,
         minimumNode,
         maximumNode,
         minInclusiveNode,
         minExclusiveNode,
         maxInclusiveNode,
-        maxExclusiveNode,
-        existingStringWarnings,
-        propertyPath
+        maxExclusiveNode
       )
     } else {
       // Only date and numeric types as permitted min/max/etc. values
-
       val offendingNodes = Array(
         minimumNode,
         minInclusiveNode,
@@ -401,29 +359,28 @@ object DataType {
       ).filter(node => node.isDefined)
       if (offendingNodes.nonEmpty) {
         Left(
-          MetadataError(
-            "minimum/minInclusive/minExclusive/maximum/maxInclusive/maxExclusive are only allowed for numeric, date/time and duration types",
-            propertyPath
+          dataTypeContext.makeError(
+            "minimum/minInclusive/minExclusive/maximum/maxInclusive/maxExclusive are only allowed for numeric, date/time and duration types"
           )
         )
       } else {
-        Right((dataTypeNode, existingStringWarnings))
+        Right(())
       }
     }
   }
 
   private def normaliseMinMaxRanges(
-                                 dataTypeNode: ObjectNode,
+                                 dataTypeContext: NormContext[ObjectNode],
                                  baseDataType: String,
                                  minimumNode: Option[JsonNode],
                                  maximumNode: Option[JsonNode],
                                  minInclusiveNode: Option[JsonNode],
                                  minExclusiveNode: Option[JsonNode],
                                  maxInclusiveNode: Option[JsonNode],
-                                 maxExclusiveNode: Option[JsonNode],
-                                 stringWarnings: MetadataWarnings,
-                                 propertyPath: PropertyPath
-                               ): ParseResult[(ObjectNode, MetadataWarnings)] = {
+                                 maxExclusiveNode: Option[JsonNode]
+                               ): ParseResult[Unit] = {
+
+    val dataTypeNode = dataTypeContext.node
 
     if (minimumNode.isDefined) {
       dataTypeNode.put("minInclusive", minimumNode.map(_.asText()).get)
@@ -451,16 +408,14 @@ object DataType {
     (minInclusive, minExclusive, maxInclusive, maxExclusive) match {
       case (Some(minI), Some(minE), _, _) =>
         Left(
-          MetadataError(
-            s"datatype cannot specify both minimum/minInclusive ($minI) and minExclusive ($minE)",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype cannot specify both minimum/minInclusive ($minI) and minExclusive ($minE)"
           )
         )
       case (_, _, Some(maxI), Some(maxE)) =>
         Left(
-          MetadataError(
-            s"datatype cannot specify both maximum/maxInclusive ($maxI) and maxExclusive ($maxE)",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype cannot specify both maximum/maxInclusive ($maxI) and maxExclusive ($maxE)"
           )
         )
       case _ =>
@@ -468,30 +423,26 @@ object DataType {
           Constants.NumericFormatDataTypes.contains(baseDataType)
         ) {
           normaliseMinMaxNumericRanges(
-            dataTypeNode,
-            stringWarnings,
+            dataTypeContext,
             minInclusive,
             maxInclusive,
             minExclusive,
-            maxExclusive,
-            propertyPath
+            maxExclusive
           )
         } else if (
           Constants.DateFormatDataTypes.contains(baseDataType)
         ) {
           normaliseMinMaxDateTimeRanges(
-            dataTypeNode,
-            stringWarnings,
+            dataTypeContext,
             minInclusive,
             maxInclusive,
             minExclusive,
-            maxExclusive,
-            propertyPath
+            maxExclusive
           )
         } else {
           Left(
-            MetadataError(
-              s"Base data type was neither numeric note date/time - $baseDataType", propertyPath
+            dataTypeContext.makeError(
+              s"Base data type was neither numeric note date/time - $baseDataType"
             )
           )
         }
@@ -521,14 +472,12 @@ object DataType {
   }
 
   private def normaliseMinMaxNumericRanges(
-                                        dataTypeNode: ObjectNode,
-                                        stringWarnings: MetadataWarnings,
+                                        dataTypeContext: NormContext[ObjectNode],
                                         minInclusive: Option[String],
                                         maxInclusive: Option[String],
                                         minExclusive: Option[String],
-                                        maxExclusive: Option[String],
-                                        propertyPath: PropertyPath
-                                      ) = {
+                                        maxExclusive: Option[String]
+                                      ): ParseResult[Unit] = {
     (
       minInclusive.map(BigDecimal(_)),
       minExclusive.map(BigDecimal(_)),
@@ -537,69 +486,54 @@ object DataType {
     ) match {
       case (Some(minI), _, Some(maxI), _) if minI > maxI =>
         Left(
-          MetadataError(
-            s"datatype minInclusive ($minI) cannot be greater than maxInclusive ($maxI)",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype minInclusive ($minI) cannot be greater than maxInclusive ($maxI)"
           )
         )
       case (Some(minI), _, _, Some(maxE)) if minI >= maxE =>
         Left(
-          MetadataError(
-            s"datatype minInclusive ($minI) cannot be greater than or equal to maxExclusive ($maxE)",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype minInclusive ($minI) cannot be greater than or equal to maxExclusive ($maxE)"
           )
         )
       case (_, Some(minE), _, Some(maxE)) if minE > maxE =>
         Left(
-          MetadataError(
-            s"datatype minExclusive ($minE) cannot be greater than or equal to maxExclusive ($maxE)",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype minExclusive ($minE) cannot be greater than or equal to maxExclusive ($maxE)"
           )
         )
       case (_, Some(minE), Some(maxI), _) if minE >= maxI =>
         Left(
-          MetadataError(
-            s"datatype minExclusive ($minE) cannot be greater than maxInclusive ($maxI)",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype minExclusive ($minE) cannot be greater than maxInclusive ($maxI)"
           )
         )
-      case _ => Right((dataTypeNode, stringWarnings))
+      case _ => Right(())
     }
   }
 
-  private def normaliseDataTypeLengths(
-                                    inputs: (ObjectNode, MetadataWarnings),
-                                    propertyPath: PropertyPath
-                                  ): ParseResult[(ObjectNode, MetadataWarnings)] = {
-    val (dataTypeNode: ObjectNode, warnings) = inputs
-
-    dataTypeNode
-      .getMaybeNode("base")
+  private def normaliseDataTypeLengths(dataTypeContext: NormContext[ObjectNode]): ParseResult[Unit] = {
+    dataTypeContext.node
+      .getMaybeNode("@base")
       .map({
         case baseDataTypeNode: TextNode =>
           normaliseDataTypeWithBase(
-            dataTypeNode,
-            baseDataTypeNode.asText,
-            warnings,
-            propertyPath :+ "base"
+            dataTypeContext,
+            baseDataTypeNode.asText
           )
         case baseNode =>
           Left(
-            MetadataError(
-              s"Unexpected base data type value: ${baseNode.toPrettyString}",
-              propertyPath :+ "base"
+            dataTypeContext.makeError(
+              s"Unexpected base data type value: ${baseNode.toPrettyString}"
             )
           )
       })
-      .getOrElse(Right(inputs))
+      .getOrElse(Right(()))
   }
 
-  private def normaliseDataTypeWithBase(
-                                     dataTypeNode: ObjectNode,
-                                     baseDataType: String,
-                                     existingWarnings: MetadataWarnings,
-                                     propertyPath: PropertyPath
-                                   ): ParseResult[(ObjectNode, MetadataWarnings)] = {
+  private def normaliseDataTypeWithBase(dataTypeContext: NormContext[ObjectNode], baseDataType: String): ParseResult[Unit] = {
+    val dataTypeNode = dataTypeContext.node
+
     val lengthNode = dataTypeNode.getMaybeNode("length")
     val minLengthNode = dataTypeNode.getMaybeNode("minLength")
     val maxLengthNode = dataTypeNode.getMaybeNode("maxLength")
@@ -617,9 +551,8 @@ object DataType {
         )
       ) {
         Left(
-          MetadataError(
-            s"datatype length (${lengthNode.map(_.asInt).get}) cannot be less than minLength (${minLengthNode.map(_.asInt).get})",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype length (${lengthNode.map(_.asInt).get}) cannot be less than minLength (${minLengthNode.map(_.asInt).get})"
           )
         )
       } else if (
@@ -628,12 +561,11 @@ object DataType {
         )
       ) {
         Left(
-          MetadataError(
+          dataTypeContext.makeError(
             s"datatype length (${lengthNode.map(_.asInt)}) cannot be more than maxLength (${
               maxLengthNode
                 .map(_.asInt)
-            })",
-            propertyPath
+            })"
           )
         )
       } else if (
@@ -641,55 +573,49 @@ object DataType {
           .exists(min => maxLengthNode.exists(max => min.asInt > max.asInt))
       ) {
         Left(
-          MetadataError(
+          dataTypeContext.makeError(
             s"datatype minLength (${minLengthNode.map(_.asInt)}) cannot be more than maxLength (${
               maxLengthNode
                 .map(_.asInt)
-            })",
-            propertyPath
+            })"
           )
         )
       } else {
-        Right((dataTypeNode, existingWarnings))
+        Right(())
       }
     } else {
       // length, minLength and maxLength are only permitted on String and Binary data types.
       if (lengthNode.isDefined) {
         Left(
-          MetadataError(
-            s"Data types based on $baseDataType cannot have a length facet",
-            propertyPath :+ "length"
+          dataTypeContext.makeError(
+            s"Data types based on $baseDataType cannot have a length facet"
           )
         )
       } else if (minLengthNode.isDefined) {
         Left(
-          MetadataError(
-            s"Data types based on $baseDataType cannot have a minLength facet",
-            propertyPath :+ "minLength"
+          dataTypeContext.makeError(
+            s"Data types based on $baseDataType cannot have a minLength facet"
           )
         )
       } else if (maxLengthNode.isDefined) {
         Left(
-          MetadataError(
-            s"Data types based on $baseDataType cannot have a maxLength facet",
-            propertyPath :+ "maxLength"
+          dataTypeContext.makeError(
+            s"Data types based on $baseDataType cannot have a maxLength facet"
           )
         )
       } else {
-        Right((dataTypeNode, existingWarnings))
+        Right(())
       }
     }
   }
 
   private def normaliseMinMaxDateTimeRanges(
-                                         dataTypeNode: ObjectNode,
-                                         stringWarnings: MetadataWarnings,
+                                         dataTypeContext: NormContext[ObjectNode],
                                          minInclusive: Option[String],
                                          maxInclusive: Option[String],
                                          minExclusive: Option[String],
-                                         maxExclusive: Option[String],
-                                         propertyPath: PropertyPath
-                                       ) = {
+                                         maxExclusive: Option[String]
+                                       ): ParseResult[Unit] = {
     (
       minInclusive.map(DateTime.parse),
       minExclusive.map(DateTime.parse),
@@ -698,33 +624,29 @@ object DataType {
     ) match {
       case (Some(minI), _, Some(maxI), _) if minI.getMillis > maxI.getMillis =>
         Left(
-          MetadataError(
-            s"datatype minInclusive ($minI) cannot be greater than maxInclusive ($maxI)",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype minInclusive ($minI) cannot be greater than maxInclusive ($maxI)"
           )
         )
       case (Some(minI), _, _, Some(maxE)) if minI.getMillis >= maxE.getMillis =>
         Left(
-          MetadataError(
-            s"datatype minInclusive ($minI) cannot be greater than or equal to maxExclusive ($maxE)",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype minInclusive ($minI) cannot be greater than or equal to maxExclusive ($maxE)"
           )
         )
       case (_, Some(minE), _, Some(maxE)) if minE.getMillis > maxE.getMillis =>
         Left(
-          MetadataError(
-            s"datatype minExclusive ($minE) cannot be greater than or equal to maxExclusive ($maxE)",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype minExclusive ($minE) cannot be greater than or equal to maxExclusive ($maxE)"
           )
         )
       case (_, Some(minE), Some(maxI), _) if minE.getMillis >= maxI.getMillis =>
         Left(
-          MetadataError(
-            s"datatype minExclusive ($minE) cannot be greater than maxInclusive ($maxI)",
-            propertyPath
+          dataTypeContext.makeError(
+            s"datatype minExclusive ($minE) cannot be greater than maxInclusive ($maxI)"
           )
         )
-      case _ => Right((dataTypeNode, stringWarnings))
+      case _ => Right(())
     }
   }
 }

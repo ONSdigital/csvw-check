@@ -6,7 +6,7 @@ import csvwcheck.errors.{MetadataError, WarningWithCsvContext}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Constants.undefinedLanguage
 import csvwcheck.normalisation.Context.getBaseUrlAndLanguageFromContext
-import csvwcheck.normalisation.Utils.{Normaliser, MetadataErrorsOrParsedArrayElements, MetadataWarnings}
+import csvwcheck.normalisation.Utils.{NormContext, Normaliser}
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -32,7 +32,14 @@ object TableGroup {
       case tableGroupNode: ObjectNode =>
         val normalisedTableGroupStructure = normaliseSingleTableToTableGroupStructure(tableGroupNode)
 
-        getBaseUrlAndLanguageFromContext(baseUrl, lang, tableGroupNode)
+        val rootNodeContext = NormContext(
+          node=tableGroupNode,
+          baseUrl = baseUrl,
+          language = lang,
+          propertyPath = Array[String]()
+        )
+
+        getBaseUrlAndLanguageFromContext(rootNodeContext)
           .flatMap({ case (baseUrl, lang) =>
             Utils.normaliseObjectNode(normalisedTableGroupStructure, normalisers, baseUrl, lang, Array[String]())
           })

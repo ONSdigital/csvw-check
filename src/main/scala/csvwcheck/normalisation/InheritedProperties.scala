@@ -49,14 +49,14 @@ object InheritedProperties {
 
   private def normaliseUriTemplateProperty(
                                 csvwPropertyType: PropertyType.Value
-                              ): Normaliser = { (value, _, _, propertyPath) => {
-    value match {
+                              ): Normaliser = { context => {
+    context.node match {
       case s: TextNode => Right((s, noWarnings, csvwPropertyType))
       case _ =>
         Right(
           (
             new TextNode(""),
-            Array(MetadataWarning(propertyPath, invalidValueWarning)),
+            Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )
@@ -66,8 +66,8 @@ object InheritedProperties {
 
   private def normaliseTextDirectionProperty(
                                   csvwPropertyType: PropertyType.Value
-                                ): Normaliser = { (value, _, _, propertyPath) => {
-    value match {
+                                ): Normaliser = { context => {
+    context.node match {
       case s: TextNode
         if Array[String]("ltr", "rtl", "inherit").contains(s.asText()) =>
         Right((s, noWarnings, csvwPropertyType))
@@ -75,7 +75,7 @@ object InheritedProperties {
         Right(
           (
             new TextNode("inherit"),
-            Array(MetadataWarning(propertyPath, invalidValueWarning)),
+            Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )
@@ -86,15 +86,15 @@ object InheritedProperties {
 
   private def normaliseSeparatorProperty(
                               csvwPropertyType: PropertyType.Value
-                            ): Normaliser = { (value, _, _, propertyPath) => {
-    value match {
+                            ): Normaliser = { context => {
+    context.node match {
       case s if s.isTextual || s.isNull =>
         Right((s, Array.empty, csvwPropertyType))
       case _ =>
         Right(
           (
             NullNode.getInstance(),
-            Array(MetadataWarning(propertyPath, invalidValueWarning)),
+            Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )
@@ -104,8 +104,8 @@ object InheritedProperties {
 
   private def normaliseNullProperty(
                          csvwPropertyType: PropertyType.Value
-                       ): Normaliser = { (value, _, _, propertyPath) => {
-    value match {
+                       ): Normaliser = { context => {
+    context.node match {
       case textNode: TextNode =>
         val standardArrayNode = JsonNodeFactory.instance.arrayNode()
         standardArrayNode.add(textNode)
@@ -117,8 +117,9 @@ object InheritedProperties {
           .zipWithIndex
           .map({
             case (element: TextNode, _) => Right((Some(element), noWarnings))
-            case (_, index) =>
-              Right((None, Array(MetadataWarning(propertyPath :+ index.toString, invalidValueWarning))))
+            case (element, index) =>
+              val elementContext = context.toChild(element, index.toString)
+              Right((None, Array(elementContext.makeWarning(invalidValueWarning))))
           })
           .toArrayNodeAndWarnings
           .map(_ :+ csvwPropertyType)
@@ -126,8 +127,8 @@ object InheritedProperties {
         Right(
           (
             JsonNodeFactory.instance.arrayNode().add(""),
-            if (value.isNull) noWarnings
-            else Array(MetadataWarning(propertyPath, invalidValueWarning)),
+            if (context.node.isNull) noWarnings
+            else Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )

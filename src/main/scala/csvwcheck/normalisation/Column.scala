@@ -3,10 +3,12 @@ package csvwcheck.normalisation
 import com.fasterxml.jackson.databind.node._
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.enums.PropertyType
-import Utils.{Normaliser, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, PropertyPath, invalidValueWarning, noWarnings}
+import Utils.{MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, PropertyPath, invalidValueWarning, noWarnings}
+import com.fasterxml.jackson.databind.JsonNode
 import csvwcheck.errors.{MetadataError, MetadataWarning}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.RegExpressions.{Bcp47LanguagetagRegExp, NameRegExp}
+import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
@@ -22,26 +24,28 @@ object Column {
   ) ++ InheritedProperties.normalisers ++ IdProperty.normaliser
 
 
-  def normaliseColumn(propertyType: PropertyType.Value): Normaliser = (columnNode, baseUrl, lang, propertyPath) => columnNode match {
-    case columnNode: ObjectNode =>
-      Utils.normaliseObjectNode(columnNode, normalisers, baseUrl, lang, propertyPath)
-        .map(_ :+ propertyType)
-    case columnNode =>
-      // Any items within an array that are not valid objects of the type expected are ignored
-      Right(
-        (
-          NullNode.getInstance(),
-          Array(MetadataWarning(propertyPath, s"Unexpected column value: ${columnNode.toPrettyString}")),
-          propertyType
+  def normaliseColumn(propertyType: PropertyType.Value): Normaliser = {
+    case context => context.node match {
+      case columnNode: ObjectNode =>
+        Utils.normaliseObjectNode(normalisers, context.withNode(columnNode))
+          .map(_ :+ propertyType)
+      case columnNode =>
+        // Any items within an array that are not valid objects of the type expected are ignored
+        Right(
+          (
+            NullNode.getInstance(),
+            Array(context.makeWarning(s"Unexpected column value: ${columnNode.toPrettyString}")),
+            propertyType
+          )
         )
-      )
+    }
   }
 
 
   private def normaliseNameProperty(
                          csvwPropertyType: PropertyType.Value
-                       ): Normaliser = { (value, _, _, propertyPath) => {
-    value match {
+                       ): Normaliser = { case context =>
+    context.node match {
       case s: TextNode =>
         if (NameRegExp.matches(s.asText())) {
           Right((s, noWarnings, csvwPropertyType))
@@ -49,7 +53,7 @@ object Column {
           Right(
             (
               NullNode.instance,
-              Array(MetadataWarning(propertyPath, invalidValueWarning)),
+              Array(context.makeWarning(invalidValueWarning)),
               csvwPropertyType
             )
           )
@@ -58,90 +62,79 @@ object Column {
         Right(
           (
             NullNode.getInstance,
-            Array(MetadataWarning(propertyPath, invalidValueWarning)),
+            Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )
     }
   }
-  }
 
   private def normaliseNaturalLanguageProperty(
                                     csvwPropertyType: PropertyType.Value
-                                  ): Normaliser = { (value, _, lang, propertyPath) => {
-    value match {
+                                  ): Normaliser = { case context =>
+    context.node match {
       case s: TextNode =>
         val languageMap = JsonNodeFactory.instance.objectNode()
         val arrayForLang = JsonNodeFactory.instance.arrayNode()
         arrayForLang.add(s.asText)
-        languageMap.set(lang, arrayForLang)
+        languageMap.set(context.language, arrayForLang)
         Right((languageMap, noWarnings, csvwPropertyType))
       case a: ArrayNode =>
-        val (validStrings, warnings) = getValidTextualElementsFromArray(a, propertyPath)
+        val (validStrings, warnings) = getValidTextualElementsFromArray(context.withNode(a))
         val arrayNode: ArrayNode = objectMapper.valueToTree(validStrings)
         val languageMap = JsonNodeFactory.instance.objectNode()
-        languageMap.set(lang, arrayNode)
+        languageMap.set(context.language, arrayNode)
         Right((languageMap, warnings, csvwPropertyType))
       case languageMapObject: ObjectNode =>
-        processNaturalLanguagePropertyObject(languageMapObject, propertyPath)
+        processNaturalLanguagePropertyObject(context.withNode(languageMapObject))
           .map(_ :+ csvwPropertyType)
       case _ =>
         Right(
           (
             NullNode.getInstance(),
-            Array(MetadataWarning(propertyPath, invalidValueWarning)),
+            Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )
     }
   }
-  }
 
-  private def processNaturalLanguagePropertyObject(
-                                                    value: ObjectNode,
-                                                    propertyPath: PropertyPath
-                                                  ): ParseResult[(ObjectNode, MetadataWarnings)] =
-    value.fields.asScala
-      .map(fieldAndValue => {
-        val propertyName = fieldAndValue.getKey
-        val localPropertyPath = propertyPath :+ propertyName
+  private def processNaturalLanguagePropertyObject(context: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
+    context.node
+      .getKeysAndValues
+      .map({ case (propertyName, childValue) =>
+        val childContext = context.toChild(childValue, propertyName)
         if (Bcp47LanguagetagRegExp.matches(propertyName)) {
-          val (validStrings, warnings): (Array[String], MetadataWarnings) = {
-            fieldAndValue.getValue match {
+          val (validStrings, warnings): (Array[String], MetadataWarnings) =
+            childValue match {
               case s: TextNode => (Array(s.asText()), noWarnings)
-              case a: ArrayNode => getValidTextualElementsFromArray(a, localPropertyPath)
+              case arrayNode: ArrayNode => getValidTextualElementsFromArray(childContext.withNode(arrayNode))
               case _ =>
                 (
-                  Array.empty,
+                  Array[String](),
                   Array(
-                    MetadataWarning(localPropertyPath,
-                      s"$invalidValueWarning - ${fieldAndValue.getValue.toPrettyString} is invalid, array or textual elements expected",
-                    )
+                    childContext.makeWarning(s"$invalidValueWarning - ${childValue.toPrettyString} is invalid, array or textual elements expected")
                   )
                 )
             }
-          }
           val validStringsArrayNode: ArrayNode =
             objectMapper.valueToTree(validStrings)
           Right((propertyName, Some(validStringsArrayNode), warnings))
         } else {
-          Right((propertyName, None, Array(MetadataWarning(localPropertyPath, "invalid_language"))))
+          Right((propertyName, None, Array(childContext.makeWarning("invalid_language"))))
         }
-      })
-      .toObjectNodeAndWarnings
+      }).iterator.toObjectNodeAndWarnings
 
-  private def getValidTextualElementsFromArray(
-                                                a: ArrayNode,
-                                                propertyPath: PropertyPath
-                                              ): (Array[String], MetadataWarnings) =
-    a.elements()
+
+  private def getValidTextualElementsFromArray(context: NormContext[ArrayNode]): (Array[String], MetadataWarnings) =
+    context.node.elements()
       .asScala
       .zipWithIndex
       .map({
         case (s: TextNode, _) => Right(s.asText())
-        case (_, index) =>
-          val elementPropertyPath = propertyPath :+ index.toString
-          Left(MetadataWarning(elementPropertyPath, a.toPrettyString + " is invalid, textual elements expected"))
+        case (elementNode, index) =>
+          val elementContext = context.toChild(elementNode, index.toString)
+          Left(elementContext.makeWarning(context.node.toPrettyString + " is invalid, textual elements expected"))
       })
       .foldLeft((Array[String](), Array[MetadataWarning]()))({
         case ((validColumnNames, existingWarnings), Right(validColumnName)) =>
