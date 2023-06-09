@@ -67,7 +67,7 @@ object Utils {
           Right((parsedElementNode, newWarnings))
           ) =>
           parsedElementNode match {
-            case Some(arrayElement) if arrayElement.isEmpty =>
+            case Some(arrayElement) if arrayElement.isNull =>
               Right(
                 (
                   parsedArrayNode,

@@ -1342,7 +1342,7 @@ case class Column private(
     errors.toArray
   }
 
-  def validateHeader(columnName: String): WarningsAndErrors = {
+  def validateHeader(csvColumnTitle: String): WarningsAndErrors = {
     var errors = Array[ErrorWithCsvContext]()
     var validHeaders = Array[String]()
     for (titleLanguage <- titleValues.keys) {
@@ -1350,13 +1350,13 @@ case class Column private(
         validHeaders ++= titleValues(titleLanguage)
       }
     }
-    if (!validHeaders.contains(columnName)) {
+    if (!validHeaders.contains(csvColumnTitle)) {
       errors :+= ErrorWithCsvContext(
         "Invalid Header",
         "Schema",
         "1",
         columnOrdinal.toString,
-        columnName,
+        csvColumnTitle,
         titleValues.mkString(",")
       )
     }

@@ -26,6 +26,9 @@ object DataType {
     // The remaining properties are permitted, but are parsed collectively inside `normaliseDataTypeProperty`.
     "format" -> Utils.normaliseDoNothing(PropertyType.DataType),
 
+    "minimum" -> Utils.normaliseDoNothing(PropertyType.DataType),
+    "maximum" -> Utils.normaliseDoNothing(PropertyType.DataType),
+
     "minInclusive" -> Utils.normaliseDoNothing(PropertyType.DataType),
     "maxInclusive" -> Utils.normaliseDoNothing(PropertyType.DataType),
     "minExclusive" -> Utils.normaliseDoNothing(PropertyType.DataType),

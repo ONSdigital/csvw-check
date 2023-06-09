@@ -12,7 +12,7 @@ import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
-object TableSchemaProperties {
+object TableSchema {
   private val normalisers: Map[String, Normaliser] = Map(
     "@context" -> Context.normaliseContext(PropertyType.Context),
     "@type" -> Utils.normaliseRequiredType(PropertyType.Common, "Schema"),
@@ -61,16 +61,6 @@ object TableSchemaProperties {
     tableSchemaPropertyInternal
   }
 
-  private def normaliseTableSchemaObjectProperty(
-                                              propertyName: String,
-                                              propertyContext: NormContext[JsonNode]
-                                            ): ObjectPropertyNormaliserResult = {
-      Utils.normaliseJsonProperty(normalisers, propertyName, propertyContext)
-            .map({
-              case (parsedValue, warnings, _) => (propertyName, Some(parsedValue), warnings)
-            })
-  }
-
   private def normaliseColumnsProperty(
                             propertyType: PropertyType.Value
                           ): Normaliser = context => context.node match {
@@ -103,7 +93,11 @@ object TableSchemaProperties {
   private def normaliseSchemaObjectNode(context: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
     context.node.getKeysAndValues
       .map({ case (propertyName, value) =>
-        normaliseTableSchemaObjectProperty(propertyName, context.toChild(value, propertyName))
+        val propertyContext = context.toChild(value, propertyName)
+        Utils.normaliseJsonProperty(normalisers, propertyName, propertyContext)
+          .map({
+            case (parsedValue, warnings, _) => (propertyName, Some(parsedValue), warnings)
+          })
       })
       .iterator
       .toObjectNodeAndWarnings

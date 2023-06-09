@@ -5,22 +5,31 @@ import com.fasterxml.jackson.databind.node._
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, MetadataWarning}
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataWarnings, NormContext, Normaliser, PropertyPath, invalidValueWarning}
+import csvwcheck.normalisation.Constants.tableDirectionValidValues
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataWarnings, NormContext, Normaliser, PropertyPath, invalidValueWarning, noWarnings}
 import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object Table {
+
   private val normalisers: Map[String, Normaliser] = Map(
     "@type" -> Utils.normaliseRequiredType(PropertyType.Common, "Table"),
     // Table properties
+    "suppressOutput" -> Utils.normaliseBooleanProperty(PropertyType.Table),
+    "tableSchema" -> TableSchema.normaliseTableSchema(PropertyType.Table),
+    "url" -> Utils.normaliseUrlLinkProperty(PropertyType.Table),
+
     "dialect" -> Dialect.normaliseDialectProperty(PropertyType.Table),
     "notes" -> normaliseNotesProperty(PropertyType.Table),
-    "suppressOutput" -> Utils.normaliseBooleanProperty(PropertyType.Table),
-    "tableSchema" -> TableSchemaProperties.normaliseTableSchema(PropertyType.Table),
     "transformations" -> Transformation.normaliseTransformationsProperty(PropertyType.Table),
-    "url" -> Utils.normaliseUrlLinkProperty(PropertyType.Table),
+    "tableDirection" -> normaliseTableDirection(PropertyType.Table)
   ) ++ InheritedProperties.normalisers ++ IdProperty.normaliser
+
+  def normaliseTableDirection(propertyType: PropertyType.Value): Normaliser = context => context.node match {
+    case textNode: TextNode if tableDirectionValidValues.contains(textNode.asText) => Right((textNode, noWarnings, propertyType))
+    case textDirectionNode => Right((new TextNode(""), Array(context.makeWarning(s"Unexpected text direction value: ${textDirectionNode.toPrettyString}")), propertyType))
+  }
 
   def normaliseTable(propertyType: PropertyType.Value): Normaliser = context => context.node match {
     case tableNode: ObjectNode =>
@@ -38,7 +47,7 @@ object Table {
   }
 
 
-  private def normaliseNotesProperty(
+  def normaliseNotesProperty(
                                   csvwPropertyType: PropertyType.Value
                                 ): Normaliser = {
     def normaliseNotesPropertyInternal(context: NormContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {

@@ -84,19 +84,19 @@ class Validator(
   ): Either[CsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
     try {
       fileUriToJson[ObjectNode](possibleSchemaUri)
-        .flatMap(tableGroupNode => standardiseAndParseTableGroup(possibleSchemaUri, tableGroupNode))
-        .flatMap(parsedTableGroup =>
+        .flatMap(tableGroupNode => normaliseTableGroup(possibleSchemaUri, tableGroupNode))
+        .flatMap(normalisedTableGroup =>
           maybeCsvUri
             .map(csvUri => {
               val workingWithUserSpecifiedMetadata =
                 schemaUri.isDefined && possibleSchemaUri.toString == schemaUri.get
               if (
                 tableGroupContainsCsv(
-                  parsedTableGroup.component,
+                  normalisedTableGroup.component,
                   csvUri
-                ) || parsedTableGroup.warningsAndErrors.errors.nonEmpty || workingWithUserSpecifiedMetadata
+                ) || normalisedTableGroup.warningsAndErrors.errors.nonEmpty || workingWithUserSpecifiedMetadata
               ) {
-                Right(parsedTableGroup)
+                Right(normalisedTableGroup)
               } else {
                 Left(
                   SchemaDoesNotContainCsvError(
@@ -107,7 +107,7 @@ class Validator(
                 )
               }
             })
-            .getOrElse(Right(parsedTableGroup))
+            .getOrElse(Right(normalisedTableGroup))
         )
     } catch {
       case e: Throwable =>
@@ -116,8 +116,8 @@ class Validator(
     }
   }
 
-  private def standardiseAndParseTableGroup(possibleSchemaUri: URI, tableGroupNode: ObjectNode): Either[GeneralCsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
-    val normalisedTableGroupWithWarningsAndErrors = normaliseTableGroup(tableGroupNode, possibleSchemaUri.toString)
+  private def normaliseTableGroup(possibleSchemaUri: URI, tableGroupNode: ObjectNode): Either[GeneralCsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
+    val normalisedTableGroupWithWarningsAndErrors = normalisation.TableGroup.normaliseTableGroup(tableGroupNode, possibleSchemaUri.toString)
       .flatMap({ case (normalisedTableGroup, warnings) =>
         for {
           tableGroupWithWarningsAndErrors <- TableGroup.fromJson(normalisedTableGroup)
@@ -220,14 +220,14 @@ class Validator(
       maybeCsvUri,
       nextSchemaUri
     ) match {
-      case Right(parsedTableGroup) =>
-        val tableGroup = parsedTableGroup.component
-        tableGroup
+      case Right(normalisedTableGroupWithWarningsAndErrors) =>
+        val normalisedTableGroup = normalisedTableGroupWithWarningsAndErrors.component
+        normalisedTableGroup
           .validateCsvsAgainstTables(numParallelThreads, csvRowBatchSize)
           .map { wAndE2 =>
             WarningsAndErrors(
-              wAndE2.warnings ++ parsedTableGroup.warningsAndErrors.warnings,
-              wAndE2.errors ++ parsedTableGroup.warningsAndErrors.errors
+              wAndE2.warnings ++ normalisedTableGroupWithWarningsAndErrors.warningsAndErrors.warnings,
+              wAndE2.errors ++ normalisedTableGroupWithWarningsAndErrors.warningsAndErrors.errors
             )
           }
       case Left(GeneralCsvwLoadError(err)) =>

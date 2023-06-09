@@ -26,10 +26,15 @@ object Context {
           Utils.normaliseObjectNode(normalisers, normContext.toChild(contextObjectNode, "1"))
             .flatMap({
               case (objectNode, stringWarnings) =>
-                for {
-                  newBaseUrl <- objectNode.getMaybeNode("@base").map(parseNodeAsText(_)).getOrElse(Right(normContext.baseUrl))
-                  newLang <- objectNode.getMaybeNode("@language").map(parseNodeAsText(_)).getOrElse(Right(normContext.language))
-                } yield (getStandardContextNode(newBaseUrl, newLang), stringWarnings, propertyType)
+                val unexpectedFields = objectNode.fieldNames().asScala.filter(!normalisers.contains(_)).toArray
+                if (unexpectedFields.nonEmpty) {
+                  Left(normContext.makeError(s"Unexpected fields: ${unexpectedFields.mkString(", ")} found on @context."))
+                } else {
+                  for {
+                    newBaseUrl <- objectNode.getMaybeNode("@base").map(parseNodeAsText(_)).getOrElse(Right(normContext.baseUrl))
+                    newLang <- objectNode.getMaybeNode("@language").map(parseNodeAsText(_)).getOrElse(Right(normContext.language))
+                  } yield (getStandardContextNode(newBaseUrl, newLang), stringWarnings, propertyType)
+                }
             })
         case _ => Left(normContext.makeError(s"Unexpected @context value: ${contextArrayNode.toPrettyString}"))
       }

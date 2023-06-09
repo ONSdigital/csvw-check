@@ -3,10 +3,10 @@ package csvwcheck.models
 import akka.NotUsed
 import akka.stream.scaladsl.Source
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode, TextNode}
+import com.fasterxml.jackson.databind.node.ObjectNode
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.models.Table.{MapForeignKeyDefinitionToValues, MapForeignKeyReferenceToValues}
+import csvwcheck.models.Table.{MapForeignKeyDefinitionToValues, MapForeignKeyReferenceToValues, parseDialect}
 import csvwcheck.models.WarningsAndErrors.TolerableErrors
 import csvwcheck.normalisation.InheritedProperties
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
@@ -45,21 +45,26 @@ object TableGroup {
           linkForeignKeysToReferencedTables(tablesWithWarningsAndErrors.component)
             .map(tables => tablesWithWarningsAndErrors.copy(component = tables))
       })
-      .map(tablesWithWarningsAndErrors => {
-        val tableGroup = TableGroup(
-          baseUrl,
-          getId(standardisedTableGroupNode),
-          tablesWithWarningsAndErrors.component,
-          standardisedTableGroupNode.getMaybeNode("notes")
-        )
-
-        WithWarningsAndErrors(
-          tableGroup,
-          WarningsAndErrors(
-            warnings = warnings ++ tablesWithWarningsAndErrors.warningsAndErrors.warnings,
-            errors = tablesWithWarningsAndErrors.warningsAndErrors.errors
+      .flatMap(tablesWithWarningsAndErrors => {
+        for {
+          dialect <- parseDialect(standardisedTableGroupNode)
+        } yield {
+          val tableGroup = TableGroup(
+            baseUrl,
+            getId(standardisedTableGroupNode),
+            tablesWithWarningsAndErrors.component,
+            standardisedTableGroupNode.getMaybeNode("notes"),
+            dialect
           )
-        )
+
+          WithWarningsAndErrors(
+            tableGroup,
+            WarningsAndErrors(
+              warnings = warnings ++ tablesWithWarningsAndErrors.warningsAndErrors.warnings,
+              errors = tablesWithWarningsAndErrors.warningsAndErrors.errors
+            )
+          )
+        }
       })
   }
 
@@ -327,7 +332,8 @@ case class TableGroup private (
     baseUrl: String,
     id: Option[String],
     tables: Map[String, Table],
-    notes: Option[JsonNode]
+    notes: Option[JsonNode],
+    dialect: Option[Dialect]
 ) {
   type MapTableToForeignKeyDefinitions =
     Map[Table, MapForeignKeyDefinitionToValues]

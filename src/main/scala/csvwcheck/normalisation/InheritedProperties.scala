@@ -34,7 +34,7 @@ object InheritedProperties {
   def copyInheritedProperties(parentObject: ObjectNode, childObject: ObjectNode): ObjectNode = {
     normalisers.keys
       .foldLeft(childObject.deepCopy())({
-        case (childObjectCopy, propertyName) =>
+        case (childObject, propertyName) =>
           // Copy over the inherited property from parent to child, if it exists on the parent.
           parentObject
             .getMaybeNode(propertyName)
@@ -43,7 +43,7 @@ object InheritedProperties {
               ()
             })
 
-          childObjectCopy
+          childObject
       })
   }
 

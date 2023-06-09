@@ -2,12 +2,12 @@ package csvwcheck.models
 
 import akka.NotUsed
 import akka.stream.scaladsl.Source
-import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
 import com.typesafe.scalalogging.Logger
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.models
 import csvwcheck.models.ParseResult.ParseResult
+import csvwcheck.normalisation.InheritedProperties
 import csvwcheck.normalisation.Utils.parseNodeAsText
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import csvwcheck.traits.LoggerExtensions.LogDebugException
@@ -32,18 +32,20 @@ object Table {
   type PrimaryKeysAndErrors =
     (mutable.Set[List[Any]], ArrayBuffer[ErrorWithCsvContext])
 
-  def fromJson(standardisedTableObjectNode: ObjectNode): ParseResult[(Table, Array[WarningWithCsvContext])] =
+  def fromJson(standardisedTableObjectNode: ObjectNode, inheritedDialect: Option[Dialect] = None): ParseResult[(Table, Array[WarningWithCsvContext])] =
     getUrl(standardisedTableObjectNode)
       .flatMap(url =>
         standardisedTableObjectNode.getMaybeNode("tableSchema")
+          .map(_.asInstanceOf[ObjectNode])
           .map(
             parseTable(
               standardisedTableObjectNode,
               _,
-              url
+              url,
+              inheritedDialect
             )
           )
-          .getOrElse(Right((initializeTableWithDefaults(url), Array.empty)))
+          .getOrElse(Right((initializeTableWithDefaults(url, inheritedDialect), Array.empty)))
       )
 
   private def getUrl(standardisedTableObjectNode: ObjectNode): ParseResult[String] = {
@@ -55,21 +57,23 @@ object Table {
 
   private def parseTable(
                           tableNode: ObjectNode,
-                          tableSchema: JsonNode,
-                          tableUrl: String
+                          tableSchema: ObjectNode,
+                          tableUrl: String,
+                          inheritedDialect: Option[Dialect]
                         ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
       val notes = tableNode
         .getMaybeNode("notes")
         .map(_.asInstanceOf[ArrayNode])
 
+      val tableSchemaWithInheritedProperties = InheritedProperties.copyInheritedProperties(tableNode, tableSchema)
       for {
-        schemaWithWarnings <- TableSchema.fromJson(tableSchema.asInstanceOf[ObjectNode])
+        schemaWithWarnings <- TableSchema.fromJson(tableSchemaWithInheritedProperties)
         dialect <- parseDialect(tableNode)
       } yield {
         val (tableSchema, warnings) = schemaWithWarnings
-        (
+        val stuff = (
           new Table(
-            dialect = dialect,
+            dialect = dialect.orElse(inheritedDialect),
             url = tableUrl,
             id = tableNode.getMaybeNode("@id").map(_.asText()),
             notes = notes,
@@ -78,11 +82,12 @@ object Table {
           ),
           warnings
         )
+        stuff
       }
   }
 
-  private def parseDialect(tableObjectNode: ObjectNode): ParseResult[Option[Dialect]] =
-    tableObjectNode
+  def parseDialect(tableOrGroupObjectNode: ObjectNode): ParseResult[Option[Dialect]] =
+    tableOrGroupObjectNode
       .getMaybeNode("dialect")
       .map(_.asInstanceOf[ObjectNode])
       .map(
@@ -94,13 +99,14 @@ object Table {
 
 
   private def initializeTableWithDefaults(
-                                           url: String
+                                           url: String,
+                                           inheritedDialect: Option[Dialect]
                                          ): Table =
     new Table(
       url = url,
       id = None,
       schema = None,
-      dialect = None,
+      dialect = inheritedDialect,
       notes = None,
       suppressOutput = false
     )
@@ -215,10 +221,10 @@ case class Table private(
     var warnings: Array[WarningWithCsvContext] = Array()
     var errors: Array[ErrorWithCsvContext] = Array()
     var columnIndex = 0
-    var columnNames: Array[String] = Array()
+    var csvColumnTitles: Array[String] = Array()
     while (columnIndex < header.size()) {
-      val columnName = header.get(columnIndex).trim
-      if (columnName == "") {
+      val csvColumnTitle = header.get(columnIndex).trim
+      if (csvColumnTitle.isEmpty) {
         warnings :+= WarningWithCsvContext(
           "Empty column name",
           "Schema",
@@ -228,21 +234,21 @@ case class Table private(
           ""
         )
       }
-      if (columnNames.contains(columnName)) {
+      if (csvColumnTitles.contains(csvColumnTitle)) {
         warnings :+= WarningWithCsvContext(
           "Duplicate column name",
           "Schema",
           "",
           (columnIndex + 1).toString,
-          columnName,
+          csvColumnTitle,
           ""
         )
-      } else columnNames :+= columnName
+      } else csvColumnTitles :+= csvColumnTitle
       // Only validate columns are defined if a tableSchema has been defined.
       schema.foreach(s => {
         if (columnIndex < s.columns.length) {
           val column = s.columns(columnIndex)
-          val WarningsAndErrors(w, e) = column.validateHeader(columnName)
+          val WarningsAndErrors(w, e) = column.validateHeader(csvColumnTitle)
           warnings = warnings.concat(w)
           errors = errors.concat(e)
         } else {

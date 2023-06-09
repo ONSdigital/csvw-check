@@ -119,4 +119,5 @@ object Constants {
     "Datatype"
   )
   val undefinedLanguage: String = "und"
+  val tableDirectionValidValues = Set("rtl", "ltr", "auto")
 }

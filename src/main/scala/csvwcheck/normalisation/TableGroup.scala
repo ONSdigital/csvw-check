@@ -15,9 +15,15 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 object TableGroup {
 
   private val normalisers: Map[String, Normaliser] = Map(
+    // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#h-table-groups
     "@type" -> Utils.normaliseRequiredType(PropertyType.Common, "TableGroup"),
     "@context" -> Context.normaliseContext(PropertyType.Common),
-    "tables" -> normaliseTables(PropertyType.TableGroup)
+    "tables" -> normaliseTables(PropertyType.TableGroup),
+
+    "dialect" -> Dialect.normaliseDialectProperty(PropertyType.TableGroup),
+    "notes" -> Table.normaliseNotesProperty(PropertyType.TableGroup),
+    "transformations" -> Transformation.normaliseTransformationsProperty(PropertyType.TableGroup),
+    "tableDirection" -> Table.normaliseTableDirection(PropertyType.TableGroup)
   ) ++ InheritedProperties.normalisers ++ IdProperty.normaliser
 
   /**
@@ -80,7 +86,6 @@ object TableGroup {
           tables.add(newTableNode)
           newTableGroupNode.set("tables", tables)
 
-          // Bring the context node along for the ride
           tableGroupNode
             .getMaybeNode("@context")
             .foreach(contextNode => {
