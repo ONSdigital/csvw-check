@@ -5,22 +5,23 @@ import com.fasterxml.jackson.databind.node._
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.XsdDataTypes
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{DateFormatError, MetadataError, MetadataWarning}
+import csvwcheck.errors.DateFormatError
 import csvwcheck.models.DateFormat
 import csvwcheck.models.ParseResult.ParseResult
+import csvwcheck.normalisation.Utils.{MetadataWarnings, NormContext, Normaliser, invalidValueWarning, noWarnings, normaliseUrlLinkProperty, parseNodeAsText}
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, PropertyPath, invalidValueWarning, noWarnings, normaliseUrlLinkProperty, parseNodeAsText}
 import csvwcheck.traits.NumberParser
-import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
+import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import org.joda.time.DateTime
-import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.annotation.tailrec
-import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object DataType {
   val normalisers: Map[String, Normaliser] = Map(
-    "@id" ->normaliseDataTypeObjectIdNode(PropertyType.DataType),
+    // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#h-derived-datatypes
+    "@id" -> normaliseDataTypeObjectIdNode(PropertyType.DataType),
+    "@type" -> Utils.normaliseRequiredType(PropertyType.DataType, "Datatype"),
+
     "base" -> normaliseDataTypeBase(PropertyType.DataType),
 
     // The remaining properties are permitted, but are parsed collectively inside `normaliseDataTypeProperty`.
@@ -40,8 +41,8 @@ object DataType {
   )
 
   def normaliseDataType(
-                             csvwPropertyType: PropertyType.Value
-                           ): Normaliser = context =>
+                         csvwPropertyType: PropertyType.Value
+                       ): Normaliser = context =>
     initialDataTypePropertyNormalisation(context)
       .flatMap({ case (dataTypeContext, warnings) =>
         for {
@@ -84,7 +85,7 @@ object DataType {
   private def normaliseDataTypeFormat(
                                        formatContext: NormContext[JsonNode],
                                        baseDataType: String
-                                 ): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
+                                     ): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
     if (Constants.RegExpFormatDataTypes.contains(baseDataType)) {
       parseNodeAsText(formatContext.node)
         .flatMap(regExFormat =>
@@ -323,9 +324,9 @@ object DataType {
   }
 
   private def normaliseDataTypeMinMaxValuesForBaseType(
-                                                    dataTypeContext: NormContext[ObjectNode],
-                                                    baseDataType: String
-                                                  ): ParseResult[Unit] = {
+                                                        dataTypeContext: NormContext[ObjectNode],
+                                                        baseDataType: String
+                                                      ): ParseResult[Unit] = {
     val dataTypeNode = dataTypeContext.node
 
     val minimumNode = dataTypeNode.getMaybeNode("minimum")
@@ -376,15 +377,15 @@ object DataType {
   }
 
   private def normaliseMinMaxRanges(
-                                 dataTypeContext: NormContext[ObjectNode],
-                                 baseDataType: String,
-                                 minimumNode: Option[JsonNode],
-                                 maximumNode: Option[JsonNode],
-                                 minInclusiveNode: Option[JsonNode],
-                                 minExclusiveNode: Option[JsonNode],
-                                 maxInclusiveNode: Option[JsonNode],
-                                 maxExclusiveNode: Option[JsonNode]
-                               ): ParseResult[Unit] = {
+                                     dataTypeContext: NormContext[ObjectNode],
+                                     baseDataType: String,
+                                     minimumNode: Option[JsonNode],
+                                     maximumNode: Option[JsonNode],
+                                     minInclusiveNode: Option[JsonNode],
+                                     minExclusiveNode: Option[JsonNode],
+                                     maxInclusiveNode: Option[JsonNode],
+                                     maxExclusiveNode: Option[JsonNode]
+                                   ): ParseResult[Unit] = {
 
     val dataTypeNode = dataTypeContext.node
 
@@ -478,12 +479,12 @@ object DataType {
   }
 
   private def normaliseMinMaxNumericRanges(
-                                        dataTypeContext: NormContext[ObjectNode],
-                                        minInclusive: Option[String],
-                                        maxInclusive: Option[String],
-                                        minExclusive: Option[String],
-                                        maxExclusive: Option[String]
-                                      ): ParseResult[Unit] = {
+                                            dataTypeContext: NormContext[ObjectNode],
+                                            minInclusive: Option[String],
+                                            maxInclusive: Option[String],
+                                            minExclusive: Option[String],
+                                            maxExclusive: Option[String]
+                                          ): ParseResult[Unit] = {
     (
       minInclusive.map(BigDecimal(_)),
       minExclusive.map(BigDecimal(_)),
@@ -616,12 +617,12 @@ object DataType {
   }
 
   private def normaliseMinMaxDateTimeRanges(
-                                         dataTypeContext: NormContext[ObjectNode],
-                                         minInclusive: Option[String],
-                                         maxInclusive: Option[String],
-                                         minExclusive: Option[String],
-                                         maxExclusive: Option[String]
-                                       ): ParseResult[Unit] = {
+                                             dataTypeContext: NormContext[ObjectNode],
+                                             minInclusive: Option[String],
+                                             maxInclusive: Option[String],
+                                             minExclusive: Option[String],
+                                             maxExclusive: Option[String]
+                                           ): ParseResult[Unit] = {
     (
       minInclusive.map(DateTime.parse),
       minExclusive.map(DateTime.parse),

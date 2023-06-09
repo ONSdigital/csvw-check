@@ -2,7 +2,7 @@ package csvwcheck.normalisation
 
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode}
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{MetadataError, WarningWithCsvContext}
+import csvwcheck.errors.WarningWithCsvContext
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Constants.undefinedLanguage
 import csvwcheck.normalisation.Context.getBaseUrlAndLanguageFromContext
@@ -28,9 +28,10 @@ object TableGroup {
 
   /**
     * https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#dfn-normalization
+    *
     * @param tableGroupNode The table group node which will be normalised
-    * @param baseUrl The URL of the initially loaded JSON document
-    * @param lang The default language for the loaded JSON document
+    * @param baseUrl        The URL of the initially loaded JSON document
+    * @param lang           The default language for the loaded JSON document
     * @return
     */
   def normaliseTableGroup(tableGroupNode: ObjectNode, baseUrl: String, lang: String = undefinedLanguage): ParseResult[(ObjectNode, Array[WarningWithCsvContext])] =
@@ -39,7 +40,7 @@ object TableGroup {
         val normalisedTableGroupStructure = normaliseSingleTableToTableGroupStructure(tableGroupNode)
 
         val rootNodeContext = NormContext(
-          node=normalisedTableGroupStructure,
+          node = normalisedTableGroupStructure,
           baseUrl = baseUrl,
           language = lang,
           propertyPath = Array[String]()
@@ -61,8 +62,8 @@ object TableGroup {
                   s"${w.path.mkString(".")}: ${w.message}",
                   ""
                 )
+                )
               )
-            )
           })
       case tableGroupNode =>
         val rootNodeContext = NormContext(

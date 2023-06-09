@@ -1,10 +1,10 @@
 package csvwcheck.models
 
 case class KeyWithContext(
-    rowNumber: Long,
-    keyValues: List[Any],
-    var isDuplicate: Boolean = false
-) {
+                           rowNumber: Long,
+                           keyValues: List[Any],
+                           var isDuplicate: Boolean = false
+                         ) {
 
   /**
     * KeyWithContext object holds the rowNumber information for setting better errors.

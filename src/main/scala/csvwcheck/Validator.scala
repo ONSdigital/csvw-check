@@ -8,7 +8,6 @@ import com.typesafe.scalalogging.Logger
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors._
 import csvwcheck.models._
-import csvwcheck.normalisation.TableGroup.normaliseTableGroup
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import sttp.client3.{HttpClientSyncBackend, Identity, SttpBackend, basicRequest, ignore}
 import sttp.model.Uri
@@ -18,12 +17,12 @@ import java.net.{URI, URL}
 import scala.language.postfixOps
 
 class Validator(
-    val schemaUri: Option[String],
-    csvUrl: Option[String] = None,
-    httpClient: SttpBackend[Identity, Any] = HttpClientSyncBackend(),
-    numParallelThreads: Int = 1,
-    csvRowBatchSize: Int = 1000
-) {
+                 val schemaUri: Option[String],
+                 csvUrl: Option[String] = None,
+                 httpClient: SttpBackend[Identity, Any] = HttpClientSyncBackend(),
+                 numParallelThreads: Int = 1,
+                 csvRowBatchSize: Int = 1000
+               ) {
   private val logger = Logger(this.getClass.getName)
   private val csvwLinkHeaderRegEx = "^\\s*<(.*?)>\\s*;.*$".r
 
@@ -79,9 +78,9 @@ class Validator(
   }
 
   private def tryParsingPossibleSchema(
-      maybeCsvUri: Option[URI],
-      possibleSchemaUri: URI
-  ): Either[CsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
+                                        maybeCsvUri: Option[URI],
+                                        possibleSchemaUri: URI
+                                      ): Either[CsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
     try {
       fileUriToJson[ObjectNode](possibleSchemaUri)
         .flatMap(tableGroupNode => normaliseTableGroup(possibleSchemaUri, tableGroupNode))
@@ -137,8 +136,8 @@ class Validator(
   }
 
   private def fileUriToJson[TJsonNode <: JsonNode](
-      fileUri: URI
-  ): Either[CsvwLoadError, TJsonNode] = {
+                                                    fileUri: URI
+                                                  ): Either[CsvwLoadError, TJsonNode] = {
     if (fileUri.getScheme == "file") {
       try {
         Right(objectMapper.readTree(new File(fileUri)).asInstanceOf[TJsonNode])
@@ -160,9 +159,9 @@ class Validator(
   }
 
   private def tableGroupContainsCsv(
-      tableGroup: TableGroup,
-      csvUri: URI
-  ): Boolean = {
+                                     tableGroup: TableGroup,
+                                     csvUri: URI
+                                   ): Boolean = {
     val csvUrl = csvUri.toString
     val tables = tableGroup.tables
 
@@ -184,9 +183,9 @@ class Validator(
   }
 
   private def findAndValidateCsvwSchemaFileForCsv(
-      maybeCsvUri: Option[URI],
-      schemaUrisToCheck: Seq[URI]
-  ): Source[WarningsAndErrors, NotUsed] = {
+                                                   maybeCsvUri: Option[URI],
+                                                   schemaUrisToCheck: Seq[URI]
+                                                 ): Source[WarningsAndErrors, NotUsed] = {
     schemaUrisToCheck match {
       case Seq() =>
         schemaUri
@@ -207,15 +206,15 @@ class Validator(
             )
           })
           .getOrElse(Source(List(WarningsAndErrors())))
-      case Seq(uri, uris @ _*) => tryNextPossibleSchema(maybeCsvUri, uri, uris)
+      case Seq(uri, uris@_*) => tryNextPossibleSchema(maybeCsvUri, uri, uris)
     }
   }
 
   private def tryNextPossibleSchema(
-      maybeCsvUri: Option[URI],
-      nextSchemaUri: URI,
-      untestedSchemaUris: Seq[URI]
-  ): Source[WarningsAndErrors, NotUsed] = {
+                                     maybeCsvUri: Option[URI],
+                                     nextSchemaUri: URI,
+                                     untestedSchemaUris: Seq[URI]
+                                   ): Source[WarningsAndErrors, NotUsed] = {
     tryParsingPossibleSchema(
       maybeCsvUri,
       nextSchemaUri

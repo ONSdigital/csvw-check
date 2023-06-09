@@ -1,4 +1,5 @@
 package csvwcheck
+
 import scala.collection.mutable
 
 //noinspection HttpUrlsUsage

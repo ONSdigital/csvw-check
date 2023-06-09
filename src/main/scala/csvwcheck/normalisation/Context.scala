@@ -47,7 +47,7 @@ object Context {
     rootNodeContext.node
       .getMaybeNode("@context")
       .map(contextNode =>
-        normaliseContext(PropertyType.Context)(rootNodeContext.toChild(contextNode,"@context"))
+        normaliseContext(PropertyType.Context)(rootNodeContext.toChild(contextNode, "@context"))
           .map({
             case (parsedContextNode, _, _) =>
               val contextObjectNode = parsedContextNode.get(1)

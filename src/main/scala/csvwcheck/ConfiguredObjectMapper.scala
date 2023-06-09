@@ -1,4 +1,5 @@
 package csvwcheck
+
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
 

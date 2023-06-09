@@ -120,4 +120,5 @@ object Constants {
   )
   val undefinedLanguage: String = "und"
   val tableDirectionValidValues = Set("rtl", "ltr", "auto")
+  val validTextDirectionValues = Set("ltr", "rtl", "auto", "inherit")
 }

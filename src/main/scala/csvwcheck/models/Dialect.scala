@@ -61,7 +61,7 @@ object Dialect {
     val lineTerminatorsResult = dialectNode
       .getMaybeNode("lineTerminator")
       .map {
-        case n: TextNode  => Right(Array(n.asText()))
+        case n: TextNode => Right(Array(n.asText()))
         case n: ArrayNode => Right(n.iterator().asScalaArray.map(_.asText()))
         case n =>
           Left(MetadataError(s"Unexpected node type ${n.getClass.getName}"))
@@ -89,17 +89,17 @@ object Dialect {
 }
 
 case class Dialect(
-    encoding: String = "UTF-8",
-    lineTerminators: Array[String] = Array("\n", "\r\n"),
-    quoteChar: Char = '\"',
-    doubleQuote: Boolean = true,
-    skipRows: Int = 0,
-    commentPrefix: String = "#",
-    header: Boolean = true,
-    headerRowCount: Int = 1,
-    delimiter: Char = ',',
-    skipColumns: Int = 0,
-    skipBlankRows: Boolean = false,
-    skipInitialSpace: Boolean = false,
-    trim: TrimType.Value = TrimType.True
-)
+                    encoding: String = "UTF-8",
+                    lineTerminators: Array[String] = Array("\n", "\r\n"),
+                    quoteChar: Char = '\"',
+                    doubleQuote: Boolean = true,
+                    skipRows: Int = 0,
+                    commentPrefix: String = "#",
+                    header: Boolean = true,
+                    headerRowCount: Int = 1,
+                    delimiter: Char = ',',
+                    skipColumns: Int = 0,
+                    skipBlankRows: Boolean = false,
+                    skipInitialSpace: Boolean = false,
+                    trim: TrimType.Value = TrimType.True
+                  )

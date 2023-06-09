@@ -6,7 +6,7 @@ import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.enums.PropertyType
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Context.getBaseUrlAndLanguageFromContext
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, ObjectPropertyNormaliserResult, PropertyPath, invalidValueWarning}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, invalidValueWarning}
 import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -14,6 +14,7 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object TableSchema {
   private val normalisers: Map[String, Normaliser] = Map(
+    // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#h-schemas
     "@context" -> Context.normaliseContext(PropertyType.Context),
     "@type" -> Utils.normaliseRequiredType(PropertyType.Common, "Schema"),
     // Schema Properties
@@ -24,8 +25,8 @@ object TableSchema {
   ) ++ InheritedProperties.normalisers ++ IdProperty.normaliser
 
   def normaliseTableSchema(
-                        csvwPropertyType: PropertyType.Value
-                      ): Normaliser = {
+                            csvwPropertyType: PropertyType.Value
+                          ): Normaliser = {
     def tableSchemaPropertyInternal(context: NormContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
       context.node match {
         case textNode: TextNode =>
@@ -61,9 +62,22 @@ object TableSchema {
     tableSchemaPropertyInternal
   }
 
+  private def normaliseSchemaObjectNode(context: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
+    context.node.getKeysAndValues
+      .map({ case (propertyName, value) =>
+        val propertyContext = context.toChild(value, propertyName)
+        Utils.normaliseJsonProperty(normalisers, propertyName, propertyContext)
+          .map({
+            case (parsedValue, warnings, _) => (propertyName, Some(parsedValue), warnings)
+          })
+      })
+      .iterator
+      .toObjectNodeAndWarnings
+  }
+
   private def normaliseColumnsProperty(
-                            propertyType: PropertyType.Value
-                          ): Normaliser = context => context.node match {
+                                        propertyType: PropertyType.Value
+                                      ): Normaliser = context => context.node match {
     case columnsNode: ArrayNode =>
       columnsNode
         .elements()
@@ -73,7 +87,7 @@ object TableSchema {
           case (columnNode: ObjectNode, index) =>
             val columnNodeContext = context.toChild(columnNode.asInstanceOf[JsonNode], index.toString)
             Column.normaliseColumn(propertyType)(columnNodeContext)
-              .map({ case (parsedColumnNode, warnings, _) => (Some(parsedColumnNode), warnings)})
+              .map({ case (parsedColumnNode, warnings, _) => (Some(parsedColumnNode), warnings) })
           case (columnNode, index) =>
             val columnNodeContext = context.toChild(columnNode, index.toString)
             // Any items within an array that are not valid objects of the type expected are ignored
@@ -88,19 +102,6 @@ object TableSchema {
         .map(_ :+ propertyType)
     case columnsNode =>
       Left(context.makeError(s"Unexpected columns value: ${columnsNode.toPrettyString}"))
-  }
-
-  private def normaliseSchemaObjectNode(context: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
-    context.node.getKeysAndValues
-      .map({ case (propertyName, value) =>
-        val propertyContext = context.toChild(value, propertyName)
-        Utils.normaliseJsonProperty(normalisers, propertyName, propertyContext)
-          .map({
-            case (parsedValue, warnings, _) => (propertyName, Some(parsedValue), warnings)
-          })
-      })
-      .iterator
-      .toObjectNodeAndWarnings
   }
 }
 

@@ -8,10 +8,12 @@ import scopt.OParser
 
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
+
 case class Config(
-    inputSchema: Option[String] = None,
-    csvPath: Option[String] = None
-)
+                   inputSchema: Option[String] = None,
+                   csvPath: Option[String] = None
+                 )
+
 object Main extends App {
   val logger = Logger("Root")
   val builder = OParser.builder[Config]
@@ -35,12 +37,12 @@ object Main extends App {
 
       val numParallelThreads: Int = sys.env.get("PARALLELISM") match {
         case Some(value) => value.toInt
-        case None        => Runtime.getRuntime.availableProcessors()
+        case None => Runtime.getRuntime.availableProcessors()
       }
 
       val csvRowBatchSize: Int = sys.env.get("ROW_GROUPING") match {
         case Some(value) => value.toInt
-        case None        => 1000
+        case None => 1000
       }
 
       val validator = new Validator(
@@ -73,8 +75,8 @@ object Main extends App {
   }
 
   private def getDescriptionForMessage(
-      errorMessage: MessageWithCsvContext
-  ): String = {
+                                        errorMessage: MessageWithCsvContext
+                                      ): String = {
     s"Type: ${errorMessage.`type`}, Category: ${errorMessage.category}, " +
       s"Row: ${errorMessage.row}, Column: ${errorMessage.column}, " +
       s"Content: ${errorMessage.content}, Constraints: ${errorMessage.constraints} \n"

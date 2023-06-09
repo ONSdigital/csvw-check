@@ -20,8 +20,8 @@ object TableGroup {
   val containsWhitespaces: Regex = ".*\\s.*".r
 
   def fromJson(
-    standardisedTableGroupNode: ObjectNode
-  ): ParseResult[WithWarningsAndErrors[TableGroup]] = {
+                standardisedTableGroupNode: ObjectNode
+              ): ParseResult[WithWarningsAndErrors[TableGroup]] = {
     val (baseUrl, _) = parseContext(standardisedTableGroupNode)
 
     val warnings = if (containsWhitespaces.matches(baseUrl)) {
@@ -69,8 +69,8 @@ object TableGroup {
   }
 
   def parseContext(
-      tableGroupObjectNode: ObjectNode
-  ): (String, String) = {
+                    tableGroupObjectNode: ObjectNode
+                  ): (String, String) = {
     val contextObject = tableGroupObjectNode
       .get("@context")
       .elements()
@@ -86,24 +86,24 @@ object TableGroup {
 
 
   private def linkForeignKeysToReferencedTables(
-      tables: Map[String, Table]
-  ): ParseResult[Map[String, Table]] = {
+                                                 tables: Map[String, Table]
+                                               ): ParseResult[Map[String, Table]] = {
     tables.foldLeft[ParseResult[Map[String, Table]]](Right(tables))({
-      case (err @ Left(_), _) => err
+      case (err@Left(_), _) => err
       case (Right(tables), (_, originTable)) =>
         linkForeignKeysDefinedOnTable(tables, originTable)
     })
   }
 
   private def linkForeignKeysDefinedOnTable(
-      tables: Map[String, Table],
-      definitionTable: Table
-  ): ParseResult[Map[String, Table]] = {
+                                             tables: Map[String, Table],
+                                             definitionTable: Table
+                                           ): ParseResult[Map[String, Table]] = {
     definitionTable.schema
       .map(tableSchema =>
         tableSchema.foreignKeys.zipWithIndex
           .foldLeft[ParseResult[Map[String, Table]]](Right(tables))({
-            case (err @ Left(_), _) => err
+            case (err@Left(_), _) => err
             case (Right(tables), (foreignKey, foreignKeyOrdinal)) =>
               linkForeignKeyToReferencedTable(
                 tables,
@@ -117,11 +117,11 @@ object TableGroup {
   }
 
   private def linkForeignKeyToReferencedTable(
-      tables: Map[String, Table],
-      definitionTable: Table,
-      foreignKey: ForeignKeyDefinition,
-      foreignKeyOrdinal: Int
-  ): ParseResult[Map[String, Table]] = {
+                                               tables: Map[String, Table],
+                                               definitionTable: Table,
+                                               foreignKey: ForeignKeyDefinition,
+                                               foreignKeyOrdinal: Int
+                                             ): ParseResult[Map[String, Table]] = {
     foreignKey.jsonObject
       .getMaybeNode("reference")
       .map({
@@ -132,25 +132,25 @@ object TableGroup {
             foreignKeyOrdinal,
             referenceObjectNode
           ).flatMap(referencedTable =>
-              referencedTable.schema
-                .map(
-                  setForeignKeyOnReferencedTable(
-                    definitionTable,
-                    foreignKey,
-                    referencedTable,
-                    _,
-                    referenceObjectNode,
-                    foreignKeyOrdinal
+            referencedTable.schema
+              .map(
+                setForeignKeyOnReferencedTable(
+                  definitionTable,
+                  foreignKey,
+                  referencedTable,
+                  _,
+                  referenceObjectNode,
+                  foreignKeyOrdinal
+                )
+              )
+              .getOrElse(
+                Left(
+                  MetadataError(
+                    s"Unable to locate schema for table '${definitionTable.url}'"
                   )
                 )
-                .getOrElse(
-                  Left(
-                    MetadataError(
-                      s"Unable to locate schema for table '${definitionTable.url}'"
-                    )
-                  )
-                )
-            )
+              )
+          )
             .map(referencedTable =>
               tables.updated(referencedTable.url, referencedTable)
             )
@@ -171,11 +171,11 @@ object TableGroup {
   }
 
   private def getReferencedTableForForeignKey(
-      tables: Map[String, Table],
-      originTableUrl: String,
-      foreignKeyArrayIndex: Int,
-      referenceObject: ObjectNode
-  ): ParseResult[Table] = {
+                                               tables: Map[String, Table],
+                                               originTableUrl: String,
+                                               foreignKeyArrayIndex: Int,
+                                               referenceObject: ObjectNode
+                                             ): ParseResult[Table] = {
     referenceObject
       .getMaybeNode("resource")
       .map(resourceNode => {
@@ -225,13 +225,13 @@ object TableGroup {
   }
 
   private def setForeignKeyOnReferencedTable(
-      definitionTable: Table,
-      foreignKeyDefinition: ForeignKeyDefinition,
-      referencedTable: Table,
-      referencedTableSchema: TableSchema,
-      referenceNode: ObjectNode,
-      foreignKeyOrdinal: Int
-  ): ParseResult[Table] = {
+                                              definitionTable: Table,
+                                              foreignKeyDefinition: ForeignKeyDefinition,
+                                              referencedTable: Table,
+                                              referencedTableSchema: TableSchema,
+                                              referenceNode: ObjectNode,
+                                              foreignKeyOrdinal: Int
+                                            ): ParseResult[Table] = {
     val mapNameToColumn = referencedTableSchema.columns
       .flatMap(col => col.name.map((_, col)))
       .toMap
@@ -288,7 +288,7 @@ object TableGroup {
       .foldLeft[ParseResult[WithWarningsAndErrors[Map[String, Table]]]](
         Right(WithWarningsAndErrors(Map(), WarningsAndErrors()))
       )({
-        case (err @ Left(_), _) => err
+        case (err@Left(_), _) => err
         case (
           Right(WithWarningsAndErrors(tables, warningsAndErrors)),
           tableObjectNode: ObjectNode
@@ -328,28 +328,28 @@ object TableGroup {
   }
 }
 
-case class TableGroup private (
-    baseUrl: String,
-    id: Option[String],
-    tables: Map[String, Table],
-    notes: Option[JsonNode],
-    dialect: Option[Dialect]
-) {
+case class TableGroup private(
+                               baseUrl: String,
+                               id: Option[String],
+                               tables: Map[String, Table],
+                               notes: Option[JsonNode],
+                               dialect: Option[Dialect]
+                             ) {
   type MapTableToForeignKeyDefinitions =
     Map[Table, MapForeignKeyDefinitionToValues]
   type MapTableToForeignKeyReferences =
     Map[Table, MapForeignKeyReferenceToValues]
 
   type TableState = (
-      WarningsAndErrors,
+    WarningsAndErrors,
       MapTableToForeignKeyDefinitions,
       MapTableToForeignKeyReferences
-  )
+    )
 
   def validateCsvsAgainstTables(
-      parallelism: Int,
-      rowGrouping: Int
-  ): Source[WarningsAndErrors, NotUsed] = {
+                                 parallelism: Int,
+                                 rowGrouping: Int
+                               ): Source[WarningsAndErrors, NotUsed] = {
     val degreeOfParallelism =
       math.min(tables.size, sqrt(parallelism).floor.toInt)
     val degreeOfParallelismInTable = parallelism / degreeOfParallelism
@@ -370,18 +370,18 @@ case class TableGroup private (
         )
       ) {
         case (
-              (
-                warningsAndErrorsAccumulator,
-                foreignKeysAccumulator,
-                foreignKeyReferencesAccumulator
-              ),
-              (
-                warningsAndErrorsSource,
-                foreignKeysSource,
-                foreignKeyReferencesSource,
-                table
-              )
-            ) =>
+          (
+            warningsAndErrorsAccumulator,
+            foreignKeysAccumulator,
+            foreignKeyReferencesAccumulator
+            ),
+          (
+            warningsAndErrorsSource,
+            foreignKeysSource,
+            foreignKeyReferencesSource,
+            table
+            )
+          ) =>
           (
             WarningsAndErrors(
               warningsAndErrorsAccumulator.warnings ++ warningsAndErrorsSource.warnings,
@@ -396,10 +396,10 @@ case class TableGroup private (
       }
       .map {
         case (
-              warningsAndErrors,
-              allForeignKeyDefinitions,
-              allForeignKeyReferences
-            ) =>
+          warningsAndErrors,
+          allForeignKeyDefinitions,
+          allForeignKeyReferences
+          ) =>
           WarningsAndErrors(
             errors = warningsAndErrors.errors ++ validateForeignKeyIntegrity(
               allForeignKeyDefinitions,
@@ -411,9 +411,9 @@ case class TableGroup private (
   }
 
   private def validateForeignKeyIntegrity(
-      foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
-      foreignKeyReferencesByTable: MapTableToForeignKeyReferences
-  ): TolerableErrors = {
+                                           foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+                                           foreignKeyReferencesByTable: MapTableToForeignKeyReferences
+                                         ): TolerableErrors = {
     // Origin/Definition Table : Referenced Table
     // Country, Year, Population  : Country, Name
     // UK, 2021, 67M  : UK, United Kingdom
@@ -435,11 +435,11 @@ case class TableGroup private (
   }
 
   private def validateForeignKeyIntegrity(
-      foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
-      referencedTable: Table,
-      foreignKeyReference: ReferencedTableForeignKeyReference,
-      allValidValues: Set[KeyWithContext]
-  ): TolerableErrors = {
+                                           foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+                                           referencedTable: Table,
+                                           foreignKeyReference: ReferencedTableForeignKeyReference,
+                                           allValidValues: Set[KeyWithContext]
+                                         ): TolerableErrors = {
     val keysReferencesInOriginTable = getKeysReferencedInOriginTable(
       foreignKeyDefinitionsByTable,
       referencedTable,
@@ -455,10 +455,11 @@ case class TableGroup private (
         keysReferencesInOriginTable
       )
   }
+
   private def getDuplicateKeysInReferencedTable(
-      allPossibleParentTableValues: Set[KeyWithContext],
-      keysReferencesInOriginTable: Set[KeyWithContext]
-  ): TolerableErrors = {
+                                                 allPossibleParentTableValues: Set[KeyWithContext],
+                                                 keysReferencesInOriginTable: Set[KeyWithContext]
+                                               ): TolerableErrors = {
     val duplicateKeysInParent = allPossibleParentTableValues
       .intersect(keysReferencesInOriginTable)
       .filter(k => k.isDuplicate)
@@ -482,9 +483,9 @@ case class TableGroup private (
   }
 
   private def getUnmatchedForeignKeyReferences(
-      allPossibleParentTableValues: Set[KeyWithContext],
-      keysReferencesInOriginTable: Set[KeyWithContext]
-  ): TolerableErrors = {
+                                                allPossibleParentTableValues: Set[KeyWithContext],
+                                                keysReferencesInOriginTable: Set[KeyWithContext]
+                                              ): TolerableErrors = {
     val keyValuesNotDefinedInParent =
       keysReferencesInOriginTable.diff(allPossibleParentTableValues)
     if (keyValuesNotDefinedInParent.nonEmpty) {
@@ -506,10 +507,10 @@ case class TableGroup private (
   }
 
   private def getKeysReferencedInOriginTable(
-      foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
-      referencedTable: Table,
-      parentTableForeignKeyReference: ReferencedTableForeignKeyReference
-  ): Set[KeyWithContext] = {
+                                              foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+                                              referencedTable: Table,
+                                              parentTableForeignKeyReference: ReferencedTableForeignKeyReference
+                                            ): Set[KeyWithContext] = {
     val foreignKeyDefinitionsOnTable = foreignKeyDefinitionsByTable
       .getOrElse(
         parentTableForeignKeyReference.definitionTable,

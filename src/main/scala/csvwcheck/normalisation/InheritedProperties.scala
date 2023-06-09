@@ -1,9 +1,9 @@
 package csvwcheck.normalisation
 
-import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, NullNode, ObjectNode, TextNode}
+import com.fasterxml.jackson.databind.node._
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.MetadataWarning
-import csvwcheck.normalisation.Utils.{Normaliser, MetadataErrorsOrParsedArrayElements, invalidValueWarning, noWarnings}
+import csvwcheck.normalisation.Constants.validTextDirectionValues
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, Normaliser, invalidValueWarning, noWarnings}
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -11,7 +11,7 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object InheritedProperties {
   val normalisers: Map[String, Normaliser] = Map(
-    // Inherited properties
+    // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#h-inherited-properties
     "aboutUrl" -> normaliseUriTemplateProperty(PropertyType.Inherited),
     "datatype" -> DataType.normaliseDataType(PropertyType.Inherited),
     "default" -> Utils.normaliseStringProperty(PropertyType.Inherited),
@@ -27,8 +27,9 @@ object InheritedProperties {
 
   /**
     * Copy inherited properties from a parent object to a child object.
+    *
     * @param parentObject The parent object to inherit from
-    * @param childObject The child object to copy to
+    * @param childObject  The child object to copy to
     * @return
     */
   def copyInheritedProperties(parentObject: ObjectNode, childObject: ObjectNode): ObjectNode = {
@@ -48,8 +49,8 @@ object InheritedProperties {
   }
 
   private def normaliseUriTemplateProperty(
-                                csvwPropertyType: PropertyType.Value
-                              ): Normaliser = { context => {
+                                            csvwPropertyType: PropertyType.Value
+                                          ): Normaliser = { context => {
     context.node match {
       case s: TextNode => Right((s, noWarnings, csvwPropertyType))
       case _ =>
@@ -65,11 +66,11 @@ object InheritedProperties {
   }
 
   private def normaliseTextDirectionProperty(
-                                  csvwPropertyType: PropertyType.Value
-                                ): Normaliser = { context => {
+                                              csvwPropertyType: PropertyType.Value
+                                            ): Normaliser = { context => {
     context.node match {
       case s: TextNode
-        if Array[String]("ltr", "rtl", "inherit").contains(s.asText()) =>
+        if validTextDirectionValues.contains(s.asText()) =>
         Right((s, noWarnings, csvwPropertyType))
       case _ =>
         Right(
@@ -85,8 +86,8 @@ object InheritedProperties {
   }
 
   private def normaliseSeparatorProperty(
-                              csvwPropertyType: PropertyType.Value
-                            ): Normaliser = { context => {
+                                          csvwPropertyType: PropertyType.Value
+                                        ): Normaliser = { context => {
     context.node match {
       case s if s.isTextual || s.isNull =>
         Right((s, Array.empty, csvwPropertyType))
@@ -103,8 +104,8 @@ object InheritedProperties {
   }
 
   private def normaliseNullProperty(
-                         csvwPropertyType: PropertyType.Value
-                       ): Normaliser = { context => {
+                                     csvwPropertyType: PropertyType.Value
+                                   ): Normaliser = { context => {
     context.node match {
       case textNode: TextNode =>
         val standardArrayNode = JsonNodeFactory.instance.arrayNode()

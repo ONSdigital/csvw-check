@@ -1,4 +1,5 @@
 package csvwcheck
+
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.Sink
 import csvwcheck.models.{KeyWithContext, WarningsAndErrors}

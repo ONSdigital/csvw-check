@@ -6,8 +6,8 @@ import scala.collection.mutable
 
 object MapHelpers {
   def deepCloneJsonPropertiesMap(
-      propertiesMap: mutable.Map[String, JsonNode]
-  ): mutable.Map[String, JsonNode] = {
+                                  propertiesMap: mutable.Map[String, JsonNode]
+                                ): mutable.Map[String, JsonNode] = {
     mutable.Map.from(
       propertiesMap.toArray.map({
         case (propertyName: String, value: JsonNode) =>

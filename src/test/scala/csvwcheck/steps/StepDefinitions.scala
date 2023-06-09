@@ -18,20 +18,18 @@ import scala.concurrent.duration.Duration
 import scala.io.Source
 
 class StepDefinitions extends ScalaDsl with EN {
-  private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
-  private var schemaUrl: Option[String] = None
-  private var csvUrl: Option[String] = None
-
-  private var httpMock: SttpBackendStub[Identity, _] =
-    SttpBackendStub.synchronous
-  private var currentFileMock: Option[RemoteHttpFileMock] = None
-
   val fixturesPath: File = File(System.getProperty("user.dir"))
     ./("src")
     ./("test")
     ./("resources")
     ./("features")
     ./("fixtures")
+  private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
+  private var schemaUrl: Option[String] = None
+  private var csvUrl: Option[String] = None
+  private var httpMock: SttpBackendStub[Identity, _] =
+    SttpBackendStub.synchronous
+  private var currentFileMock: Option[RemoteHttpFileMock] = None
 
   def ensureFixtureFilesDownloaded(): Unit = {
     val expectedFixtureFile = fixturesPath./("test001.csv")
@@ -109,10 +107,10 @@ class StepDefinitions extends ScalaDsl with EN {
     })
 
   private case class RemoteHttpFileMock(
-      remoteFileUrl: String,
-      localFileName: Option[String],
-      linkHeader: Option[String]
-  )
+                                         remoteFileUrl: String,
+                                         localFileName: Option[String],
+                                         linkHeader: Option[String]
+                                       )
 
   Given("^The test-cases defined by the W3C$") { () => ensureFixtureFilesDownloaded() }
 
@@ -155,11 +153,10 @@ class StepDefinitions extends ScalaDsl with EN {
   }
 
   And("""^the (schema|metadata) is stored at the url "(.*?)"$""") {
-    (_: String, url: String) =>
-      {
-        schemaUrl = Some(url)
-        currentFileMock = currentFileMock.map(_.copy(remoteFileUrl = url))
-      }
+    (_: String, url: String) => {
+      schemaUrl = Some(url)
+      currentFileMock = currentFileMock.map(_.copy(remoteFileUrl = url))
+    }
   }
 
   Given("""^it has a Link header holding "(.*?)"$""") { l: String =>

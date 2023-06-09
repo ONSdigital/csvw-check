@@ -7,9 +7,9 @@ import csvwcheck.errors.{ErrorWithCsvContext, ErrorWithoutContext, MetadataError
 import csvwcheck.models
 import csvwcheck.models.Column._
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import csvwcheck.normalisation.Constants.undefinedLanguage
 import csvwcheck.normalisation.Utils.parseNodeAsText
+import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.NumberParser
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
@@ -114,12 +114,12 @@ object Column {
     titles
       .map(_.asInstanceOf[ObjectNode])
       .map(titlesObjectNode =>
-          titlesObjectNode.getKeysAndValues
-            .foldLeft[Map[String, Array[String]]](Map())({
-              case (titlesMap, (lang, values: ArrayNode)) =>
-                titlesMap + (lang -> Array
-                    .from(values.elements().asScala.map(_.asText())))
-            })
+        titlesObjectNode.getKeysAndValues
+          .foldLeft[Map[String, Array[String]]](Map())({
+            case (titlesMap, (lang, values: ArrayNode)) =>
+              titlesMap + (lang -> Array
+                .from(values.elements().asScala.map(_.asText())))
+          })
       )
       .getOrElse(Map())
   }
@@ -147,15 +147,15 @@ object Column {
   private def parseNumericAndDateRangeRestrictions(
                                                     dataTypeObjectNode: ObjectNode
                                                   ): NumericAndDateRangeRestrictions = NumericAndDateRangeRestrictions(
-      minInclusive = dataTypeObjectNode
-        .getMaybeNode("minInclusive").map(_.asText),
-      maxInclusive = dataTypeObjectNode
-        .getMaybeNode("maxInclusive").map(_.asText),
-      minExclusive = dataTypeObjectNode
-        .getMaybeNode("minExclusive").map(_.asText),
-      maxExclusive = dataTypeObjectNode
-        .getMaybeNode("maxExclusive").map(_.asText)
-    )
+    minInclusive = dataTypeObjectNode
+      .getMaybeNode("minInclusive").map(_.asText),
+    maxInclusive = dataTypeObjectNode
+      .getMaybeNode("maxInclusive").map(_.asText),
+    minExclusive = dataTypeObjectNode
+      .getMaybeNode("minExclusive").map(_.asText),
+    maxExclusive = dataTypeObjectNode
+      .getMaybeNode("maxExclusive").map(_.asText)
+  )
 
   private def parseLengthRestrictions(
                                        dataTypeObjectNode: ObjectNode
@@ -169,12 +169,12 @@ object Column {
   )
 
   private def getFormat(formatNode: JsonNode): Format = formatNode match {
-    case formatNode: TextNode => Format(pattern=Some(formatNode.asText), decimalChar = None, groupChar = None)
+    case formatNode: TextNode => Format(pattern = Some(formatNode.asText), decimalChar = None, groupChar = None)
     case formatNode: ObjectNode =>
       Format(
-        pattern=formatNode.getMaybeNode("pattern").map(_.asText),
-        decimalChar=formatNode.getMaybeNode("decimalChar").map(_.asText).map(d => d(0)),
-        groupChar=formatNode.getMaybeNode("groupChar").map(_.asText).map(d => d(0))
+        pattern = formatNode.getMaybeNode("pattern").map(_.asText),
+        decimalChar = formatNode.getMaybeNode("decimalChar").map(_.asText).map(d => d(0)),
+        groupChar = formatNode.getMaybeNode("groupChar").map(_.asText).map(d => d(0))
       )
   }
 
@@ -719,96 +719,6 @@ case class Column private(
     }
   }
 
-  def processUnsignedLong(
-                           value: String
-                         ): Either[ErrorWithoutContext, BigInteger] = {
-    val result = processNonNegativeInteger(value)
-    result match {
-      case Left(w) =>
-        Left(ErrorWithoutContext("invalid_unsignedLong", w.content))
-      case Right(parsedValue) =>
-        if (parsedValue > unsignedLongMaxValue) {
-          Left(
-            ErrorWithoutContext(
-              "invalid_unsignedLong",
-              "Value greater than 18446744073709551615"
-            )
-          )
-        } else Right(parsedValue)
-    }
-  }
-
-  def processUnsignedInt(
-                          value: String
-                        ): Either[ErrorWithoutContext, Long] = {
-    val result = processNonNegativeInteger(value)
-    result match {
-      case Left(w) =>
-        Left(ErrorWithoutContext("invalid_unsignedInt", w.content))
-      case Right(parsedValue) =>
-        if (parsedValue > 4294967295L) {
-          Left(
-            ErrorWithoutContext(
-              "invalid_unsignedInt",
-              "Value greater than 4294967295"
-            )
-          )
-        } else Right(parsedValue.longValue())
-    }
-  }
-
-  def processUnsignedShort(
-                            value: String
-                          ): Either[ErrorWithoutContext, Long] = {
-    val result = processNonNegativeInteger(value)
-    result match {
-      case Left(w) =>
-        Left(ErrorWithoutContext("invalid_unsignedShort", w.content))
-      case Right(parsedValue) =>
-        if (parsedValue > 65535) {
-          Left(
-            ErrorWithoutContext(
-              "invalid_unsignedShort",
-              "Value greater than 65535"
-            )
-          )
-        } else Right(parsedValue.intValue())
-    }
-  }
-
-  def processUnsignedByte(
-                           value: String
-                         ): Either[ErrorWithoutContext, Short] = {
-    val result = processNonNegativeInteger(value)
-    result match {
-      case Left(w) =>
-        Left(ErrorWithoutContext("invalid_unsignedByte", w.content))
-      case Right(parsedValue) =>
-        if (parsedValue > 255) {
-          Left(ErrorWithoutContext("invalid_unsignedByte", "Greater than 255"))
-        } else Right(parsedValue.shortValue())
-    }
-  }
-
-  def processNonNegativeInteger(
-                                 value: String
-                               ): Either[ErrorWithoutContext, BigInteger] = {
-    val result = processIntegerDatatype(value)
-    result match {
-      case Left(w) =>
-        Left(ErrorWithoutContext("invalid_nonNegativeInteger", w.content))
-      case Right(parsedValue) =>
-        if (parsedValue < 0) {
-          Left(
-            ErrorWithoutContext(
-              "invalid_nonNegativeInteger",
-              "Value less than 0"
-            )
-          )
-        } else Right(parsedValue)
-    }
-  }
-
   def processIntegerDatatype(
                               value: String
                             ): Either[ErrorWithoutContext, BigInteger] = {
@@ -897,6 +807,96 @@ case class Column private(
     } catch {
       case e: Throwable =>
         Left(ErrorWithoutContext("invalid_integer", e.getMessage))
+    }
+  }
+
+  def processUnsignedLong(
+                           value: String
+                         ): Either[ErrorWithoutContext, BigInteger] = {
+    val result = processNonNegativeInteger(value)
+    result match {
+      case Left(w) =>
+        Left(ErrorWithoutContext("invalid_unsignedLong", w.content))
+      case Right(parsedValue) =>
+        if (parsedValue > unsignedLongMaxValue) {
+          Left(
+            ErrorWithoutContext(
+              "invalid_unsignedLong",
+              "Value greater than 18446744073709551615"
+            )
+          )
+        } else Right(parsedValue)
+    }
+  }
+
+  def processUnsignedInt(
+                          value: String
+                        ): Either[ErrorWithoutContext, Long] = {
+    val result = processNonNegativeInteger(value)
+    result match {
+      case Left(w) =>
+        Left(ErrorWithoutContext("invalid_unsignedInt", w.content))
+      case Right(parsedValue) =>
+        if (parsedValue > 4294967295L) {
+          Left(
+            ErrorWithoutContext(
+              "invalid_unsignedInt",
+              "Value greater than 4294967295"
+            )
+          )
+        } else Right(parsedValue.longValue())
+    }
+  }
+
+  def processUnsignedShort(
+                            value: String
+                          ): Either[ErrorWithoutContext, Long] = {
+    val result = processNonNegativeInteger(value)
+    result match {
+      case Left(w) =>
+        Left(ErrorWithoutContext("invalid_unsignedShort", w.content))
+      case Right(parsedValue) =>
+        if (parsedValue > 65535) {
+          Left(
+            ErrorWithoutContext(
+              "invalid_unsignedShort",
+              "Value greater than 65535"
+            )
+          )
+        } else Right(parsedValue.intValue())
+    }
+  }
+
+  def processNonNegativeInteger(
+                                 value: String
+                               ): Either[ErrorWithoutContext, BigInteger] = {
+    val result = processIntegerDatatype(value)
+    result match {
+      case Left(w) =>
+        Left(ErrorWithoutContext("invalid_nonNegativeInteger", w.content))
+      case Right(parsedValue) =>
+        if (parsedValue < 0) {
+          Left(
+            ErrorWithoutContext(
+              "invalid_nonNegativeInteger",
+              "Value less than 0"
+            )
+          )
+        } else Right(parsedValue)
+    }
+  }
+
+  def processUnsignedByte(
+                           value: String
+                         ): Either[ErrorWithoutContext, Short] = {
+    val result = processNonNegativeInteger(value)
+    result match {
+      case Left(w) =>
+        Left(ErrorWithoutContext("invalid_unsignedByte", w.content))
+      case Right(parsedValue) =>
+        if (parsedValue > 255) {
+          Left(ErrorWithoutContext("invalid_unsignedByte", "Greater than 255"))
+        } else Right(parsedValue.shortValue())
     }
   }
 
@@ -1016,6 +1016,18 @@ case class Column private(
     )
   }
 
+  def dateTimeParser(
+                      datatype: String,
+                      warning: String,
+                      value: String
+                    ): Either[ErrorWithoutContext, ZonedDateTime] = {
+    val dateFormatObject = DateFormat(format.flatMap(f => f.pattern), datatype)
+    dateFormatObject.parse(value) match {
+      case Right(value) => Right(value)
+      case Left(error) => Left(ErrorWithoutContext(warning, error))
+    }
+  }
+
   def processGMonth(
                      value: String
                    ): Either[ErrorWithoutContext, ZonedDateTime] = {
@@ -1044,18 +1056,6 @@ case class Column private(
       "invalid_gYear",
       value
     )
-  }
-
-  def dateTimeParser(
-                      datatype: String,
-                      warning: String,
-                      value: String
-                    ): Either[ErrorWithoutContext, ZonedDateTime] = {
-    val dateFormatObject = DateFormat(format.flatMap(f => f.pattern), datatype)
-    dateFormatObject.parse(value) match {
-      case Right(value) => Right(value)
-      case Left(error) => Left(ErrorWithoutContext(warning, error))
-    }
   }
 
   def processGYearMonth(

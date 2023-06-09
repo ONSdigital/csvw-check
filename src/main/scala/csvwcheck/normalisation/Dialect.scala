@@ -1,21 +1,18 @@
 package csvwcheck.normalisation
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{ArrayNode, BooleanNode, JsonNodeFactory, NullNode, ObjectNode, TextNode}
+import com.fasterxml.jackson.databind.node._
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.MetadataWarning
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedObjectProperties, MetadataErrorsOrParsedArrayElements, NormContext, Normaliser, ObjectPropertyNormaliserResult, invalidValueWarning, noWarnings, normaliseJsonProperty, parseNodeAsText}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, NormContext, Normaliser, ObjectPropertyNormaliserResult, invalidValueWarning, noWarnings, normaliseJsonProperty}
 import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object Dialect {
-  private val validTrimValues = Array("true", "false", "start", "end")
-
   val normalisers: Map[String, Normaliser] = Map(
+    // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#h-dialect-descriptions
     "@type" -> Utils.normaliseRequiredType(PropertyType.Common, "Dialect"),
-    // Dialect Properties
     "commentPrefix" -> Utils.normaliseStringProperty(PropertyType.Dialect),
     "delimiter" -> Utils.normaliseStringProperty(PropertyType.Dialect),
     "doubleQuote" -> Utils.normaliseBooleanProperty(PropertyType.Dialect),
@@ -30,10 +27,11 @@ object Dialect {
     "skipRows" -> Utils.normaliseNonNegativeIntegerProperty(PropertyType.Dialect),
     "trim" -> normaliseTrimProperty(PropertyType.Dialect),
   ) ++ IdProperty.normaliser
+  private val validTrimValues = Array("true", "false", "start", "end")
 
   def normaliseDialectProperty(
-                            csvwPropertyType: PropertyType.Value
-                          ): Normaliser = { context => {
+                                csvwPropertyType: PropertyType.Value
+                              ): Normaliser = { context => {
     context.node match {
       case objectNode: ObjectNode =>
         objectNode.getKeysAndValues
@@ -57,9 +55,29 @@ object Dialect {
   }
   }
 
+  private def normaliseDialectObjectProperty(propertyName: String, propertyContext: NormContext[JsonNode]): ObjectPropertyNormaliserResult = {
+    normaliseJsonProperty(normalisers, propertyName, propertyContext)
+      .map({
+        case (parsedValueNode, propertyWarnings, propertyType) =>
+          if (
+            propertyType == PropertyType.Dialect && propertyWarnings.isEmpty
+          ) {
+            (propertyName, Some(parsedValueNode), propertyWarnings)
+          } else {
+            val warnings =
+              if (propertyType != PropertyType.Dialect && propertyType != PropertyType.Common)
+                propertyWarnings :+ propertyContext.makeWarning("invalid_property")
+              else
+                propertyWarnings
+
+            (propertyName, None, warnings)
+          }
+      })
+  }
+
   private def normaliseTrimProperty(
-                         csvwPropertyType: PropertyType.Value
-                       ): Normaliser = { context =>
+                                     csvwPropertyType: PropertyType.Value
+                                   ): Normaliser = { context =>
     context.node match {
       case boolNode: BooleanNode =>
         if (boolNode.booleanValue) {
@@ -81,10 +99,10 @@ object Dialect {
   }
 
   private def normaliseLineTerminatorsProperty(
-                          csvwPropertyType: PropertyType.Value
-                        ): Normaliser = { context =>
+                                                csvwPropertyType: PropertyType.Value
+                                              ): Normaliser = { context =>
     context.node match {
-      case lineTerminator: TextNode if !lineTerminator.asText.isEmpty  =>
+      case lineTerminator: TextNode if !lineTerminator.asText.isEmpty =>
         val lineTerminatorsArray = JsonNodeFactory.instance.arrayNode(1)
         lineTerminatorsArray.add(lineTerminator)
         Right(lineTerminatorsArray, noWarnings, csvwPropertyType)
@@ -117,8 +135,8 @@ object Dialect {
   }
 
   private def normaliseEncodingProperty(
-                             csvwPropertyType: PropertyType.Value
-                           ): Normaliser = { context => {
+                                         csvwPropertyType: PropertyType.Value
+                                       ): Normaliser = { context => {
     context.node match {
       case s: TextNode
         if Constants.ValidEncodings.contains(s.asText()) =>
@@ -133,25 +151,5 @@ object Dialect {
         )
     }
   }
-  }
-
-  private def normaliseDialectObjectProperty(propertyName: String, propertyContext: NormContext[JsonNode]): ObjectPropertyNormaliserResult = {
-    normaliseJsonProperty(normalisers, propertyName, propertyContext)
-      .map({
-        case (parsedValueNode, propertyWarnings, propertyType) =>
-          if (
-            propertyType == PropertyType.Dialect && propertyWarnings.isEmpty
-          ) {
-            (propertyName, Some(parsedValueNode), propertyWarnings)
-          } else {
-            val warnings =
-              if (propertyType != PropertyType.Dialect && propertyType != PropertyType.Common)
-                propertyWarnings :+ propertyContext.makeWarning("invalid_property")
-              else
-                propertyWarnings
-
-            (propertyName, None, warnings)
-          }
-      })
   }
 }

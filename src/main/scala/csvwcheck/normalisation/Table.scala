@@ -3,10 +3,9 @@ package csvwcheck.normalisation
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node._
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, MetadataWarning}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Constants.tableDirectionValidValues
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataWarnings, NormContext, Normaliser, PropertyPath, invalidValueWarning, noWarnings}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataWarnings, NormContext, Normaliser, invalidValueWarning, noWarnings}
 import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
@@ -14,6 +13,7 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 object Table {
 
   private val normalisers: Map[String, Normaliser] = Map(
+    // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#h-tables
     "@type" -> Utils.normaliseRequiredType(PropertyType.Common, "Table"),
     // Table properties
     "suppressOutput" -> Utils.normaliseBooleanProperty(PropertyType.Table),
@@ -26,10 +26,6 @@ object Table {
     "tableDirection" -> normaliseTableDirection(PropertyType.Table)
   ) ++ InheritedProperties.normalisers ++ IdProperty.normaliser
 
-  def normaliseTableDirection(propertyType: PropertyType.Value): Normaliser = context => context.node match {
-    case textNode: TextNode if tableDirectionValidValues.contains(textNode.asText) => Right((textNode, noWarnings, propertyType))
-    case textDirectionNode => Right((new TextNode(""), Array(context.makeWarning(s"Unexpected text direction value: ${textDirectionNode.toPrettyString}")), propertyType))
-  }
 
   def normaliseTable(propertyType: PropertyType.Value): Normaliser = context => context.node match {
     case tableNode: ObjectNode =>
@@ -46,10 +42,14 @@ object Table {
       )
   }
 
+  def normaliseTableDirection(propertyType: PropertyType.Value): Normaliser = context => context.node match {
+    case textNode: TextNode if tableDirectionValidValues.contains(textNode.asText) => Right((textNode, noWarnings, propertyType))
+    case textDirectionNode => Right((new TextNode(""), Array(context.makeWarning(s"Unexpected text direction value: ${textDirectionNode.toPrettyString}")), propertyType))
+  }
 
   def normaliseNotesProperty(
-                                  csvwPropertyType: PropertyType.Value
-                                ): Normaliser = {
+                              csvwPropertyType: PropertyType.Value
+                            ): Normaliser = {
     def normaliseNotesPropertyInternal(context: NormContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
       context.node match {
         case arrayNode: ArrayNode =>

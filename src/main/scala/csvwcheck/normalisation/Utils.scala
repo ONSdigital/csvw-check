@@ -2,12 +2,14 @@ package csvwcheck.normalisation
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node._
-import csvwcheck.{NameSpaces, XsdDataTypes}
+import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{MetadataError, MetadataWarning}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Constants.{CsvWDataTypes, undefinedLanguage}
+import csvwcheck.normalisation.RegExpressions.Bcp47LanguagetagRegExp
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
+import csvwcheck.{NameSpaces, XsdDataTypes}
 import shapeless.syntax.std.tuple.productTupleOps
 
 import java.net.{URI, URL}
@@ -17,43 +19,31 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 object Utils {
   type MetadataWarnings = Array[MetadataWarning]
   type PropertyPath = Array[String]
-
-  /**
-    * Context when normalising a particular node wiithin the JSON document
-    * @param node The node being normalised
-    * @param baseUrl The baseUrl for the current JSON-LD document
-    * @param language The language for the current JSON-LD document
-    * @param propertyPath The path from the root node to this particular node
-    */
-  case class NormContext[T <: JsonNode](node: T, baseUrl: String, language: String, propertyPath: PropertyPath) {
-    def withNode[TSpecial <: JsonNode](specialisedNode: TSpecial): NormContext[TSpecial] =
-      this.copy(node = specialisedNode)
-
-    def withNodeAs[TSpecial <: JsonNode](): NormContext[TSpecial] =
-      this.copy(node = this.node.asInstanceOf[TSpecial])
-
-    def toChild[TChild <: JsonNode](childNode: TChild, pathAddition: String): NormContext[TChild] =
-      this.copy(node = childNode, propertyPath = this.propertyPath :+ pathAddition)
-
-    def makeWarning(message: String): MetadataWarning = MetadataWarning(path = this.propertyPath, message = message)
-
-    def makeError(message: String): MetadataError = MetadataError(message = message, propertyPath = this.propertyPath)
-  }
-
   type Normaliser = NormContext[JsonNode] => NormaliserResult
-
-  private type NormaliserResult = Either[
-    MetadataError,
-    (JsonNode, MetadataWarnings, PropertyType.Value)
-  ]
-
   type ObjectPropertyNormaliserResult =
     ParseResult[(String, Option[JsonNode], MetadataWarnings)]
   type ArrayElementNormaliserResult =
     ParseResult[(Option[JsonNode], MetadataWarnings)]
-
+  private type NormaliserResult = Either[
+    MetadataError,
+    (JsonNode, MetadataWarnings, PropertyType.Value)
+  ]
   val noWarnings = Array[MetadataWarning]()
   val invalidValueWarning = "invalid_value"
+
+  def normaliseStringProperty(
+                               csvwPropertyType: PropertyType.Value
+                             ): Normaliser = { context =>
+    context.node match {
+      case textNode: TextNode => Right((textNode, noWarnings, csvwPropertyType))
+      case _ =>
+        Right(
+          new TextNode(""),
+          Array(context.makeWarning(invalidValueWarning)),
+          csvwPropertyType
+        )
+    }
+  }
 
   implicit class MetadataErrorsOrParsedArrayElements(iterator: Iterator[ArrayElementNormaliserResult]) {
     def toArrayNodeAndWarnings: ParseResult[(ArrayNode, MetadataWarnings)] = {
@@ -117,35 +107,6 @@ object Utils {
     }
   }
 
-  def normaliseStringProperty(
-                           csvwPropertyType: PropertyType.Value
-                         ): Normaliser = { context =>
-    context.node match {
-      case textNode: TextNode => Right((textNode, noWarnings, csvwPropertyType))
-      case _ =>
-        Right(
-          new TextNode(""),
-          Array(context.makeWarning(invalidValueWarning)),
-          csvwPropertyType
-        )
-    }
-  }
-
-  def parseNodeAsText(
-                       valueNode: JsonNode,
-                       coerceToText: Boolean = false
-                     ): ParseResult[String] =
-    valueNode match {
-      case textNode: TextNode => Right(textNode.asText)
-      case node if coerceToText => Right(node.asText)
-      case node =>
-        Left(
-          MetadataError(
-            s"Unexpected value, expected string/text but got: ${node.toPrettyString}"
-          )
-        )
-    }
-
   def parseNodeAsInt(valueNode: JsonNode): ParseResult[Int] =
     valueNode match {
       case numericNode: IntNode => Right(numericNode.asInt)
@@ -169,8 +130,8 @@ object Utils {
     }
 
   def normaliseBooleanProperty(
-                            csvwPropertyType: PropertyType.Value
-                          ): Normaliser =
+                                csvwPropertyType: PropertyType.Value
+                              ): Normaliser =
     context => {
       if (context.node.isBoolean) {
         Right((context.node, noWarnings, csvwPropertyType))
@@ -186,8 +147,8 @@ object Utils {
     }
 
   def normaliseNonNegativeIntegerProperty(
-                                       csvwPropertyType: PropertyType.Value
-                                     ): Normaliser = { context =>
+                                           csvwPropertyType: PropertyType.Value
+                                         ): Normaliser = { context =>
     context.node match {
       case value: IntNode if value.asInt() >= 0 =>
         Right((value, noWarnings, csvwPropertyType))
@@ -206,45 +167,45 @@ object Utils {
                              normalisers: Map[String, Normaliser],
                              propertyName: String,
                              propertyContext: NormContext[JsonNode]
-                     ): NormaliserResult = {
-  if (normalisers.contains(propertyName)) {
-    normalisers(propertyName)(propertyContext)
-  } else if (
-    RegExpressions.prefixedPropertyPattern
-      .matches(propertyName) && NameSpaces.values.contains(propertyName.split(":")(0))
-  ) {
-    normaliseCommonPropertyValue(propertyContext)
-      .map(_ :+ PropertyType.Annotation)
-  } else {
-    // property name must be an absolute URI
-    asUri(propertyName)
-      .map(_ => {
-        try {
-          normaliseCommonPropertyValue(propertyContext)
-            .map(_ :+ PropertyType.Annotation)
-        } catch {
-          case e: Exception =>
-            Right(
-              (
-                propertyContext.node,
-                Array(propertyContext.makeWarning(s"invalid_property ${e.getMessage}")),
-                PropertyType.Undefined
+                           ): NormaliserResult = {
+    if (normalisers.contains(propertyName)) {
+      normalisers(propertyName)(propertyContext)
+    } else if (
+      RegExpressions.prefixedPropertyPattern
+        .matches(propertyName) && NameSpaces.values.contains(propertyName.split(":")(0))
+    ) {
+      normaliseCommonPropertyValue(propertyContext)
+        .map(_ :+ PropertyType.Annotation)
+    } else {
+      // property name must be an absolute URI
+      asUri(propertyName)
+        .map(_ => {
+          try {
+            normaliseCommonPropertyValue(propertyContext)
+              .map(_ :+ PropertyType.Annotation)
+          } catch {
+            case e: Exception =>
+              Right(
+                (
+                  propertyContext.node,
+                  Array(propertyContext.makeWarning(s"invalid_property ${e.getMessage}")),
+                  PropertyType.Undefined
+                )
               )
+          }
+        })
+        .getOrElse(
+          // Not a valid URI, but it isn't as bad as a MetadataError
+          Right(
+            (
+              propertyContext.node,
+              Array(propertyContext.makeWarning("invalid_property")),
+              PropertyType.Undefined
             )
-        }
-      })
-      .getOrElse(
-        // Not a valid URI, but it isn't as bad as a MetadataError
-        Right(
-          (
-            propertyContext.node,
-            Array(propertyContext.makeWarning("invalid_property")),
-            PropertyType.Undefined
           )
         )
-      )
+    }
   }
-}
 
   def normaliseCommonPropertyValue(context: NormContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings)] = {
     context.node match {
@@ -348,14 +309,6 @@ object Utils {
         })
     }
   }
-
-  def toAbsoluteUrl(possiblyRelativeUrl: String, baseUrl: String): String =
-    if (baseUrl.isEmpty) {
-      possiblyRelativeUrl
-    } else {
-      new URL(new URL(baseUrl), possiblyRelativeUrl).toString
-    }
-
 
   @tailrec
   def normaliseCommonPropertyObjectType(context: NormContext[ObjectNode], typePropertyName: String, typeNode: JsonNode): ParseResult[(JsonNode, MetadataWarnings)] = {
@@ -469,8 +422,8 @@ object Utils {
   }
 
   def normaliseUrlLinkProperty(
-                                    csvwPropertyType: PropertyType.Value
-                                  ): Normaliser = { context => {
+                                csvwPropertyType: PropertyType.Value
+                              ): Normaliser = { context => {
     context.node match {
       case urlNode: TextNode =>
         val urlValue = urlNode.asText()
@@ -496,8 +449,8 @@ object Utils {
   }
 
   def normaliseLanguageProperty(
-                                     csvwPropertyType: PropertyType.Value
-                                   ): Normaliser = { context => {
+                                 csvwPropertyType: PropertyType.Value
+                               ): Normaliser = { context => {
     context.node match {
       case s: TextNode
         if RegExpressions.Bcp47LanguagetagRegExp.matches(s.asText) =>
@@ -515,8 +468,8 @@ object Utils {
   }
 
   def normaliseColumnReferenceProperty(
-                                    csvwPropertyType: PropertyType.Value
-                                  ): Normaliser = { context => {
+                                        csvwPropertyType: PropertyType.Value
+                                      ): Normaliser = { context => {
     context.node match {
       case textNode: TextNode =>
         Right(
@@ -533,12 +486,12 @@ object Utils {
           .map({
             case (columnReference: TextNode, _) => Right((Some(columnReference), noWarnings))
             case (columnReferenceNode, index) => Left(
-                context
-                  .toChild(columnReferenceNode, index.toString)
-                  .makeError(
-                    s"Unexpected columnReference '${columnReferenceNode.toPrettyString}'"
-                  )
-              )
+              context
+                .toChild(columnReferenceNode, index.toString)
+                .makeError(
+                  s"Unexpected columnReference '${columnReferenceNode.toPrettyString}'"
+                )
+            )
           })
           .toArrayNodeAndWarnings
           .map(_ :+ csvwPropertyType)
@@ -565,6 +518,21 @@ object Utils {
         }
       )
 
+  def parseNodeAsText(
+                       valueNode: JsonNode,
+                       coerceToText: Boolean = false
+                     ): ParseResult[String] =
+    valueNode match {
+      case textNode: TextNode => Right(textNode.asText)
+      case node if coerceToText => Right(node.asText)
+      case node =>
+        Left(
+          MetadataError(
+            s"Unexpected value, expected string/text but got: ${node.toPrettyString}"
+          )
+        )
+    }
+
   def normaliseObjectNode(normalisers: Map[String, Normaliser], objectContext: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
     objectContext.node.getKeysAndValues
       .map({
@@ -579,11 +547,115 @@ object Utils {
       .toObjectNodeAndWarnings
 
   def asAbsoluteUrl(
-                             csvwPropertyType: PropertyType.Value
-                           ): Normaliser = { context =>
+                     csvwPropertyType: PropertyType.Value
+                   ): Normaliser = { context =>
 
     parseNodeAsText(context.node)
       .map(possiblyRelativeUrl => new TextNode(toAbsoluteUrl(possiblyRelativeUrl, context.baseUrl)))
       .map((_, noWarnings, csvwPropertyType))
+  }
+
+  def toAbsoluteUrl(possiblyRelativeUrl: String, baseUrl: String): String =
+    if (baseUrl.isEmpty) {
+      possiblyRelativeUrl
+    } else {
+      new URL(new URL(baseUrl), possiblyRelativeUrl).toString
+    }
+
+  def normaliseNaturalLanguageProperty(
+                                        csvwPropertyType: PropertyType.Value
+                                      ): Normaliser = {
+    case context =>
+      context.node match {
+        case s: TextNode =>
+          val languageMap = JsonNodeFactory.instance.objectNode()
+          val arrayForLang = JsonNodeFactory.instance.arrayNode()
+          arrayForLang.add(s.asText)
+          languageMap.set(context.language, arrayForLang)
+          Right((languageMap, noWarnings, csvwPropertyType))
+        case a: ArrayNode =>
+          val (validStrings, warnings) = getValidTextualElementsFromArray(context.withNode(a))
+          val arrayNode: ArrayNode = objectMapper.valueToTree(validStrings)
+          val languageMap = JsonNodeFactory.instance.objectNode()
+          languageMap.set(context.language, arrayNode)
+          Right((languageMap, warnings, csvwPropertyType))
+        case languageMapObject: ObjectNode =>
+          processNaturalLanguagePropertyObject(context.withNode(languageMapObject))
+            .map(_ :+ csvwPropertyType)
+        case _ =>
+          Right(
+            (
+              NullNode.getInstance(),
+              Array(context.makeWarning(invalidValueWarning)),
+              csvwPropertyType
+            )
+          )
+      }
+  }
+
+  def processNaturalLanguagePropertyObject(context: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
+    context.node
+      .getKeysAndValues
+      .map({ case (propertyName, childValue) =>
+        val childContext = context.toChild(childValue, propertyName)
+        if (Bcp47LanguagetagRegExp.matches(propertyName)) {
+          val (validStrings, warnings): (Array[String], MetadataWarnings) =
+            childValue match {
+              case s: TextNode => (Array(s.asText()), noWarnings)
+              case arrayNode: ArrayNode => Utils.getValidTextualElementsFromArray(childContext.withNode(arrayNode))
+              case _ =>
+                (
+                  Array[String](),
+                  Array(
+                    childContext.makeWarning(s"$invalidValueWarning - ${childValue.toPrettyString} is invalid, array or textual elements expected")
+                  )
+                )
+            }
+          val validStringsArrayNode: ArrayNode =
+            objectMapper.valueToTree(validStrings)
+          Right((propertyName, Some(validStringsArrayNode), warnings))
+        } else {
+          Right((propertyName, None, Array(childContext.makeWarning("invalid_language"))))
+        }
+      }).iterator.toObjectNodeAndWarnings
+
+  def getValidTextualElementsFromArray(context: NormContext[ArrayNode]): (Array[String], MetadataWarnings) =
+    context.node.elements()
+      .asScala
+      .zipWithIndex
+      .map({
+        case (s: TextNode, _) => Right(s.asText())
+        case (elementNode, index) =>
+          val elementContext = context.toChild(elementNode, index.toString)
+          Left(elementContext.makeWarning(context.node.toPrettyString + " is invalid, textual elements expected"))
+      })
+      .foldLeft((Array[String](), Array[MetadataWarning]()))({
+        case ((validColumnNames, existingWarnings), Right(validColumnName)) =>
+          (validColumnNames :+ validColumnName, existingWarnings)
+        case ((validColumnNames, existingWarnings), Left(newWarning)) =>
+          (validColumnNames, existingWarnings :+ newWarning)
+      })
+
+  /**
+    * Context when normalising a particular node wiithin the JSON document
+    *
+    * @param node         The node being normalised
+    * @param baseUrl      The baseUrl for the current JSON-LD document
+    * @param language     The language for the current JSON-LD document
+    * @param propertyPath The path from the root node to this particular node
+    */
+  case class NormContext[T <: JsonNode](node: T, baseUrl: String, language: String, propertyPath: PropertyPath) {
+    def withNode[TSpecial <: JsonNode](specialisedNode: TSpecial): NormContext[TSpecial] =
+      this.copy(node = specialisedNode)
+
+    def withNodeAs[TSpecial <: JsonNode](): NormContext[TSpecial] =
+      this.copy(node = this.node.asInstanceOf[TSpecial])
+
+    def toChild[TChild <: JsonNode](childNode: TChild, pathAddition: String): NormContext[TChild] =
+      this.copy(node = childNode, propertyPath = this.propertyPath :+ pathAddition)
+
+    def makeWarning(message: String): MetadataWarning = MetadataWarning(path = this.propertyPath, message = message)
+
+    def makeError(message: String): MetadataError = MetadataError(message = message, propertyPath = this.propertyPath)
   }
 }

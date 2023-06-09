@@ -61,29 +61,29 @@ object Table {
                           tableUrl: String,
                           inheritedDialect: Option[Dialect]
                         ): ParseResult[(Table, Array[WarningWithCsvContext])] = {
-      val notes = tableNode
-        .getMaybeNode("notes")
-        .map(_.asInstanceOf[ArrayNode])
+    val notes = tableNode
+      .getMaybeNode("notes")
+      .map(_.asInstanceOf[ArrayNode])
 
-      val tableSchemaWithInheritedProperties = InheritedProperties.copyInheritedProperties(tableNode, tableSchema)
-      for {
-        schemaWithWarnings <- TableSchema.fromJson(tableSchemaWithInheritedProperties)
-        dialect <- parseDialect(tableNode)
-      } yield {
-        val (tableSchema, warnings) = schemaWithWarnings
-        val stuff = (
-          new Table(
-            dialect = dialect.orElse(inheritedDialect),
-            url = tableUrl,
-            id = tableNode.getMaybeNode("@id").map(_.asText()),
-            notes = notes,
-            suppressOutput = tableNode.getMaybeNode("suppressOutput").exists(_.asBoolean),
-            schema = tableSchema
-          ),
-          warnings
-        )
-        stuff
-      }
+    val tableSchemaWithInheritedProperties = InheritedProperties.copyInheritedProperties(tableNode, tableSchema)
+    for {
+      schemaWithWarnings <- TableSchema.fromJson(tableSchemaWithInheritedProperties)
+      dialect <- parseDialect(tableNode)
+    } yield {
+      val (tableSchema, warnings) = schemaWithWarnings
+      val stuff = (
+        new Table(
+          dialect = dialect.orElse(inheritedDialect),
+          url = tableUrl,
+          id = tableNode.getMaybeNode("@id").map(_.asText()),
+          notes = notes,
+          suppressOutput = tableNode.getMaybeNode("suppressOutput").exists(_.asBoolean),
+          schema = tableSchema
+        ),
+        warnings
+      )
+      stuff
+    }
   }
 
   def parseDialect(tableOrGroupObjectNode: ObjectNode): ParseResult[Option[Dialect]] =

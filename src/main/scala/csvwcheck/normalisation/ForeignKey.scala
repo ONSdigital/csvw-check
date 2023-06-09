@@ -3,9 +3,8 @@ package csvwcheck.normalisation
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode}
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{MetadataError, MetadataWarning}
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, PropertyPath, invalidValueWarning, noWarnings, normaliseJsonProperty, parseNodeAsText}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, invalidValueWarning, noWarnings, normaliseJsonProperty}
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -22,15 +21,15 @@ object ForeignKey {
   )
 
   def normaliseForeignKeysProperty(
-                                csvwPropertyType: PropertyType.Value
-                              ): Normaliser = { context => {
+                                    csvwPropertyType: PropertyType.Value
+                                  ): Normaliser = { context => {
     context.node match {
       case arrayNode: ArrayNode =>
         arrayNode
           .elements()
           .asScala
           .zipWithIndex
-          .map({ case (element, index) => normaliseForeignKeyValue(context.toChild(element,index.toString)) })
+          .map({ case (element, index) => normaliseForeignKeyValue(context.toChild(element, index.toString)) })
           .toArrayNodeAndWarnings
           .map(_ :+ csvwPropertyType)
       case _ =>
@@ -43,9 +42,45 @@ object ForeignKey {
   }
   }
 
+  private def normaliseForeignKeyValue(context: NormContext[JsonNode]): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
+    context.node match {
+      case foreignKeyObjectNode: ObjectNode =>
+        foreignKeyObjectNode.getKeysAndValues
+          .map({ case (propertyName, value) =>
+            val propertyContext = context.toChild(value, propertyName)
+            if (RegExpressions.containsColon.matches(propertyName)) {
+              Left(
+                propertyContext.makeError(
+                  "foreignKey includes a prefixed (common) property"
+                )
+              )
+            } else {
+              normaliseJsonProperty(parsers, propertyName, propertyContext)
+                .map({
+                  case (parsedNode, Array(), PropertyType.ForeignKey) =>
+                    (propertyName, Some(parsedNode), noWarnings)
+                  case (_, warnings, _) =>
+                    (
+                      propertyName,
+                      None,
+                      warnings :+ propertyContext.makeWarning(invalidValueWarning)
+                    )
+                })
+            }
+          })
+          .iterator
+          .toObjectNodeAndWarnings
+          .map({
+            case (parsedNode, warnings) =>
+              (Some(parsedNode), warnings)
+          })
+      case _ => Right(None, Array(context.makeWarning("invalid_foreign_key")))
+    }
+  }
+
   private def normaliseForeignKeyReferenceProperty(
-                                        csvwPropertyType: PropertyType.Value
-                                      ): Normaliser = { context =>
+                                                    csvwPropertyType: PropertyType.Value
+                                                  ): Normaliser = { context =>
     context.node match {
       case referenceObjectNode: ObjectNode =>
         normaliseForeignKeyReferenceObjectNode(context.withNode(referenceObjectNode))
@@ -116,42 +151,6 @@ object ForeignKey {
           })
           .iterator
           .toObjectNodeAndWarnings
-    }
-  }
-
-  private def normaliseForeignKeyValue(context: NormContext[JsonNode]): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
-    context.node match {
-      case foreignKeyObjectNode: ObjectNode =>
-        foreignKeyObjectNode.getKeysAndValues
-          .map({ case (propertyName, value) =>
-            val propertyContext = context.toChild(value, propertyName)
-            if (RegExpressions.containsColon.matches(propertyName)) {
-              Left(
-                propertyContext.makeError(
-                  "foreignKey includes a prefixed (common) property"
-                )
-              )
-            } else {
-              normaliseJsonProperty(parsers, propertyName, propertyContext)
-                .map({
-                  case (parsedNode, Array(), PropertyType.ForeignKey) =>
-                    (propertyName, Some(parsedNode), noWarnings)
-                  case (_, warnings, _) =>
-                    (
-                      propertyName,
-                      None,
-                      warnings :+ propertyContext.makeWarning(invalidValueWarning)
-                    )
-                })
-            }
-          })
-          .iterator
-          .toObjectNodeAndWarnings
-          .map({
-            case (parsedNode, warnings) =>
-              (Some(parsedNode), warnings)
-          })
-      case _ => Right(None, Array(context.makeWarning("invalid_foreign_key")))
     }
   }
 }

@@ -4,10 +4,10 @@ import com.ibm.icu.text.DecimalFormat
 import csvwcheck.errors.MetadataError
 
 case class NumberFormat(
-    pattern: Option[String],
-    groupChar: Option[Char] = None,
-    decimalChar: Option[Char] = None
-) {
+                         pattern: Option[String],
+                         groupChar: Option[Char] = None,
+                         decimalChar: Option[Char] = None
+                       ) {
 
   /**
     * Raising an exception when a pattern is supplied as we cannot figure out how to actually use them in some scenarios.

@@ -3,9 +3,8 @@ package csvwcheck.normalisation
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode}
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.MetadataWarning
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, PropertyPath, invalidValueWarning, noWarnings, normaliseJsonProperty}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, invalidValueWarning, noWarnings, normaliseJsonProperty}
 import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -13,15 +12,18 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object Transformation {
   val normalisers: Map[String, Normaliser] = Map(
+    // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#h-transformation-definitions
     "@type" -> Utils.normaliseRequiredType(PropertyType.Common, "Template"),
-    "scriptFormat" -> Utils.normaliseDoNothing(PropertyType.Transformation),
-    "source" -> Utils.normaliseDoNothing(PropertyType.Transformation),
-    "targetFormat" -> Utils.normaliseDoNothing(PropertyType.Transformation),
+    "scriptFormat" -> Utils.normaliseUrlLinkProperty(PropertyType.Transformation),
+    "source" -> Utils.normaliseStringProperty(PropertyType.Transformation),
+    "targetFormat" -> Utils.normaliseUrlLinkProperty(PropertyType.Transformation),
+    "titles" -> Utils.normaliseNaturalLanguageProperty(PropertyType.Transformation),
+    "url" -> Utils.normaliseUrlLinkProperty(PropertyType.Transformation),
   ) ++ IdProperty.normaliser
 
   def normaliseTransformationsProperty(
-                                    csvwPropertyType: PropertyType.Value
-                                  ): Normaliser = { context => {
+                                        csvwPropertyType: PropertyType.Value
+                                      ): Normaliser = { context => {
     context.node match {
       case arrayNode: ArrayNode =>
         arrayNode
@@ -29,13 +31,13 @@ object Transformation {
           .asScala
           .zipWithIndex
           .map({
-                case (transformationNode: ObjectNode, index) =>
-                  normaliseTransformationElement(context.toChild(transformationNode, index.toString))
-                case (transformationNode, index) =>
-                  val elementContext = context.toChild(transformationNode, index.toString)
-                  Right(
-                    (None, Array(elementContext.makeWarning(s"invalid_transformation: ${transformationNode.toPrettyString}")))
-                  )
+            case (transformationNode: ObjectNode, index) =>
+              normaliseTransformationElement(context.toChild(transformationNode, index.toString))
+            case (transformationNode, index) =>
+              val elementContext = context.toChild(transformationNode, index.toString)
+              Right(
+                (None, Array(elementContext.makeWarning(s"invalid_transformation: ${transformationNode.toPrettyString}")))
+              )
           })
           .toArrayNodeAndWarnings
           .map(_ :+ csvwPropertyType)
@@ -54,12 +56,9 @@ object Transformation {
   def normaliseTransformationElement(context: NormContext[ObjectNode]): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
     context.node
       .getKeysAndValues
-      .map({case (propertyName, valueNode) =>
+      .map({ case (propertyName, valueNode) =>
         val propertyContext = context.toChild(valueNode, propertyName)
         propertyName match {
-          // todo: Hmm, really not sure about this random exclusion here.
-          case "url" | "titles" =>
-            Right((propertyName, Some(valueNode), noWarnings))
           case _ =>
             normaliseJsonProperty(normalisers, propertyName, propertyContext)
               .map({
