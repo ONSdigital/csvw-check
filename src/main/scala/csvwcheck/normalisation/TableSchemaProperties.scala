@@ -4,13 +4,12 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{MetadataError, MetadataWarning}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Context.getBaseUrlAndLanguageFromContext
-import csvwcheck.normalisation.Utils.{Normaliser, MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, ObjectPropertyNormaliserResult, PropertyPath, invalidValueWarning}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, ObjectPropertyNormaliserResult, PropertyPath, invalidValueWarning}
+import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
 
-import java.net.URL
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object TableSchemaProperties {
@@ -27,51 +26,23 @@ object TableSchemaProperties {
   def normaliseTableSchema(
                         csvwPropertyType: PropertyType.Value
                       ): Normaliser = {
-    def tableSchemaPropertyInternal(
-                                     value: JsonNode,
-                                     inheritedBaseUrlStr: String,
-                                     inheritedLanguage: String,
-                                     propertyPath: PropertyPath
-                                   ): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
-      val inheritedBaseUrl = new URL(inheritedBaseUrlStr)
-      value match {
+    def tableSchemaPropertyInternal(context: NormContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
+      context.node match {
         case textNode: TextNode =>
-          val schemaUrl = new URL(inheritedBaseUrl, textNode.asText())
+          val schemaUrl = Utils.toAbsoluteUrl(textNode.asText(), context.baseUrl)
           // todo: Need to use injected HTTP-boi to download the schema here.
-          val schemaNode =
-            objectMapper.readTree(schemaUrl).asInstanceOf[ObjectNode]
+          val schemaNode = objectMapper.readTree(schemaUrl).asInstanceOf[ObjectNode]
+          val inDocumentSchemaContext = context.withNode(schemaNode)
 
-          getBaseUrlAndLanguageFromContext(schemaUrl.toString, inheritedLanguage, schemaNode)
-            .map({ case (baseUrl, lang) => (new URL(baseUrl), lang) })
+          getBaseUrlAndLanguageFromContext(inDocumentSchemaContext)
             .flatMap({
-              case (tableSchemaBaseUrl, newLang) =>
-                schemaNode.fields.asScala
-                  .map(fieldAndValue =>
-                    normaliseTableSchemaObjectProperty(
-                      fieldAndValue.getKey,
-                      fieldAndValue.getValue,
-                      // N.B. The baseUrl of the child part of the document is now the URL where the table schema is
-                      // defined.
-                      tableSchemaBaseUrl,
-                      newLang,
-                      propertyPath :+ fieldAndValue.getKey
-                    )
-                  )
-                  .toObjectNodeAndWarnings
+              case (schemaBaseUrl, schemaLanguage) =>
+                val externalSchemaContext = inDocumentSchemaContext.copy(baseUrl = schemaBaseUrl, language = schemaLanguage)
+                normaliseSchemaObjectNode(externalSchemaContext)
                   .map(_ :+ csvwPropertyType)
             })
         case schemaNode: ObjectNode =>
-          schemaNode.fields.asScala
-            .map(fieldAndValue =>
-              normaliseTableSchemaObjectProperty(
-                fieldAndValue.getKey,
-                fieldAndValue.getValue,
-                inheritedBaseUrl,
-                inheritedLanguage,
-                propertyPath :+ fieldAndValue.getKey
-              )
-            )
-            .toObjectNodeAndWarnings
+          normaliseSchemaObjectNode(context.withNode(schemaNode))
             .map(_ :+ csvwPropertyType)
         case _ =>
           // If the supplied value of an object property is not a string or object (eg if it is an integer),
@@ -80,7 +51,7 @@ object TableSchemaProperties {
           Right(
             (
               JsonNodeFactory.instance.objectNode(),
-              Array(MetadataWarning(propertyPath, invalidValueWarning)),
+              Array(context.makeWarning(invalidValueWarning)),
               csvwPropertyType
             )
           )
@@ -90,16 +61,11 @@ object TableSchemaProperties {
     tableSchemaPropertyInternal
   }
 
-
-
   private def normaliseTableSchemaObjectProperty(
                                               propertyName: String,
-                                              value: JsonNode,
-                                              tableSchemaBaseUrl: URL,
-                                              language: String,
-                                              propertyPath: PropertyPath
+                                              propertyContext: NormContext[JsonNode]
                                             ): ObjectPropertyNormaliserResult = {
-      Utils.normaliseJsonProperty(normalisers, propertyPath, propertyName, value, tableSchemaBaseUrl.toString, language)
+      Utils.normaliseJsonProperty(normalisers, propertyName, propertyContext)
             .map({
               case (parsedValue, warnings, _) => (propertyName, Some(parsedValue), warnings)
             })
@@ -107,27 +73,41 @@ object TableSchemaProperties {
 
   private def normaliseColumnsProperty(
                             propertyType: PropertyType.Value
-                          ): Normaliser = (columnsNode, baseUrl, lang, propertyPath) => columnsNode match {
+                          ): Normaliser = context => context.node match {
     case columnsNode: ArrayNode =>
       columnsNode
         .elements()
         .asScala
         .zipWithIndex
         .map({
-          case (columnNode: ObjectNode, index) => Column.normaliseColumn(propertyType)(columnNode, baseUrl, lang, propertyPath :+ index.toString)
-            .map({ case (parsedColumnNode, warnings, _) => (Some(parsedColumnNode), warnings)})
+          case (columnNode: ObjectNode, index) =>
+            val columnNodeContext = context.toChild(columnNode.asInstanceOf[JsonNode], index.toString)
+            Column.normaliseColumn(propertyType)(columnNodeContext)
+              .map({ case (parsedColumnNode, warnings, _) => (Some(parsedColumnNode), warnings)})
           case (columnNode, index) =>
+            val columnNodeContext = context.toChild(columnNode, index.toString)
             // Any items within an array that are not valid objects of the type expected are ignored
-          Right(
+            Right(
               (
                 None,
-                Array(MetadataWarning(propertyPath :+ index.toString, s"Unexpected columns value: ${columnNode.toPrettyString}")),
+                Array(columnNodeContext.makeWarning(s"Unexpected columns value: ${columnNode.toPrettyString}")),
               )
             )
         })
         .toArrayNodeAndWarnings
         .map(_ :+ propertyType)
     case columnsNode =>
-      Left(MetadataError(s"Unexpected columns value: ${columnsNode.toPrettyString}", propertyPath))
+      Left(context.makeError(s"Unexpected columns value: ${columnsNode.toPrettyString}"))
+  }
+
+  private def normaliseSchemaObjectNode(context: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
+    context.node.getKeysAndValues
+      .map({ case (propertyName, value) =>
+        normaliseTableSchemaObjectProperty(propertyName, context.toChild(value, propertyName))
+      })
+      .iterator
+      .toObjectNodeAndWarnings
   }
 }
+
+

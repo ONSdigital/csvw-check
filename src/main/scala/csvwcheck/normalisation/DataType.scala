@@ -21,7 +21,10 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 object DataType {
   val normalisers: Map[String, Normaliser] = Map(
     "@id" ->normaliseDataTypeObjectIdNode(PropertyType.DataType),
-    "@base" -> normaliseDataTypeBase(PropertyType.DataType),
+    "base" -> normaliseDataTypeBase(PropertyType.DataType),
+
+    // The remaining properties are permitted, but are parsed collectively inside `normaliseDataTypeProperty`.
+    "format" -> Utils.normaliseDoNothing(PropertyType.DataType),
 
     "minInclusive" -> Utils.normaliseDoNothing(PropertyType.DataType),
     "maxInclusive" -> Utils.normaliseDoNothing(PropertyType.DataType),
@@ -33,7 +36,7 @@ object DataType {
     "maxLength" -> Utils.normaliseDoNothing(PropertyType.DataType),
   )
 
-  def normaliseDataTypeProperty(
+  def normaliseDataType(
                              csvwPropertyType: PropertyType.Value
                            ): Normaliser = context =>
     initialDataTypePropertyNormalisation(context)
@@ -54,7 +57,7 @@ object DataType {
       .map(formatNode => {
         val formatNodeContext = dataTypeContext.toChild(formatNode, "format")
         for {
-          baseDataType <- Utils.parseNodeAsText(dataTypeContext.node.get("@base"))
+          baseDataType <- Utils.parseNodeAsText(dataTypeContext.node.get("base"))
           dataTypeFormatNodeAndWarnings <- normaliseDataTypeFormat(formatNodeContext, baseDataType)
         } yield {
           val (formatNodeReplacement, newWarnings) =
@@ -73,7 +76,7 @@ object DataType {
           (parsedDataTypeNode, newWarnings)
         }
       })
-      .getOrElse(Right(()))
+      .getOrElse(Right((dataTypeContext.node, noWarnings)))
 
   private def normaliseDataTypeFormat(
                                        formatContext: NormContext[JsonNode],
@@ -263,14 +266,14 @@ object DataType {
         case (objectNode, warnings) =>
           // Make sure that the `base` node is set.
           objectNode
-            .getMaybeNode("@base")
+            .getMaybeNode("base")
             .map(_ => (context.withNode(objectNode), warnings))
             .getOrElse(
               (
                 context.withNode(
                   objectNode
                     .deepCopy()
-                    .set("@base", new TextNode(XsdDataTypes.types("string"))),
+                    .set("base", new TextNode(XsdDataTypes.types("string"))),
                 ),
                 warnings
               )
@@ -299,7 +302,7 @@ object DataType {
 
   private def normaliseDataTypeMinMaxValues(dataTypeContext: NormContext[ObjectNode]): ParseResult[Unit] = {
     dataTypeContext.node
-      .getMaybeNode("@base")
+      .getMaybeNode("base")
       .map({
         case baseDataTypeNode: TextNode =>
           normaliseDataTypeMinMaxValuesForBaseType(
@@ -514,7 +517,7 @@ object DataType {
 
   private def normaliseDataTypeLengths(dataTypeContext: NormContext[ObjectNode]): ParseResult[Unit] = {
     dataTypeContext.node
-      .getMaybeNode("@base")
+      .getMaybeNode("base")
       .map({
         case baseDataTypeNode: TextNode =>
           normaliseDataTypeWithBase(

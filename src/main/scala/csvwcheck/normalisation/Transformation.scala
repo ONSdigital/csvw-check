@@ -5,7 +5,8 @@ import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNo
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.MetadataWarning
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.normalisation.Utils.{Normaliser, MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, PropertyPath, invalidValueWarning, noWarnings, normaliseJsonProperty}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, PropertyPath, invalidValueWarning, noWarnings, normaliseJsonProperty}
+import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
@@ -20,8 +21,8 @@ object Transformation {
 
   def normaliseTransformationsProperty(
                                     csvwPropertyType: PropertyType.Value
-                                  ): Normaliser = { (value, baseUrl, lang, propertyPath) => {
-    value match {
+                                  ): Normaliser = { context => {
+    context.node match {
       case arrayNode: ArrayNode =>
         arrayNode
           .elements()
@@ -29,10 +30,11 @@ object Transformation {
           .zipWithIndex
           .map({
                 case (transformationNode: ObjectNode, index) =>
-                  normaliseTransformationElement(transformationNode, baseUrl, lang, propertyPath :+ index.toString)
+                  normaliseTransformationElement(context.toChild(transformationNode, index.toString))
                 case (transformationNode, index) =>
+                  val elementContext = context.toChild(transformationNode, index.toString)
                   Right(
-                    (None, Array(MetadataWarning(propertyPath :+ index.toString, s"invalid_transformation: ${transformationNode.toPrettyString}")))
+                    (None, Array(elementContext.makeWarning(s"invalid_transformation: ${transformationNode.toPrettyString}")))
                   )
           })
           .toArrayNodeAndWarnings
@@ -41,7 +43,7 @@ object Transformation {
         Right(
           (
             JsonNodeFactory.instance.arrayNode(0),
-            Array(MetadataWarning(propertyPath, invalidValueWarning)),
+            Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )
@@ -49,25 +51,17 @@ object Transformation {
   }
   }
 
-  def normaliseTransformationElement(
-                                  transformationElement: ObjectNode,
-                                  baseUrl: String,
-                                  lang: String,
-                                  propertyPath: PropertyPath
-                                ): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
-    transformationElement
-      .fields()
-      .asScala
-      .map(keyValuePair => {
-        val propertyName = keyValuePair.getKey
-        val valueNode = keyValuePair.getValue
-        val localPropertyPath = propertyPath :+ propertyName
+  def normaliseTransformationElement(context: NormContext[ObjectNode]): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
+    context.node
+      .getKeysAndValues
+      .map({case (propertyName, valueNode) =>
+        val propertyContext = context.toChild(valueNode, propertyName)
         propertyName match {
           // todo: Hmm, really not sure about this random exclusion here.
           case "url" | "titles" =>
             Right((propertyName, Some(valueNode), noWarnings))
           case _ =>
-            normaliseJsonProperty(normalisers, localPropertyPath, propertyName, valueNode, baseUrl, lang)
+            normaliseJsonProperty(normalisers, propertyName, propertyContext)
               .map({
                 case (
                   parsedTransformation,
@@ -81,11 +75,12 @@ object Transformation {
                   (
                     propertyName,
                     None,
-                    warnings :+ MetadataWarning(localPropertyPath, s"invalid_property '$propertyName' with type $propertyType")
+                    warnings :+ propertyContext.makeWarning(s"invalid_property '$propertyName' with type $propertyType")
                   )
               })
         }
       })
+      .iterator
       .toObjectNodeAndWarnings
       .map({
         case (objectNode, warnings) => (Some(objectNode), warnings)

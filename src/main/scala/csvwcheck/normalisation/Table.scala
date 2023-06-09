@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.node._
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, MetadataWarning}
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.normalisation.Utils.{Normaliser, MetadataErrorsOrParsedArrayElements, MetadataWarnings, PropertyPath, invalidValueWarning}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataWarnings, NormContext, Normaliser, PropertyPath, invalidValueWarning}
 import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
@@ -22,16 +22,16 @@ object Table {
     "url" -> Utils.normaliseUrlLinkProperty(PropertyType.Table),
   ) ++ InheritedProperties.normalisers ++ IdProperty.normaliser
 
-  def normaliseTable(propertyType: PropertyType.Value): Normaliser = (tableNode, baseUrl, lang, propertyPath) => tableNode match {
+  def normaliseTable(propertyType: PropertyType.Value): Normaliser = context => context.node match {
     case tableNode: ObjectNode =>
-      Utils.normaliseObjectNode(tableNode, normalisers, baseUrl, lang, propertyPath)
+      Utils.normaliseObjectNode(normalisers, context.withNode(tableNode))
         .map(_ :+ propertyType)
     case tableNode =>
       // Any items within an array that are not valid objects of the type expected are ignored
       Right(
         (
           NullNode.getInstance(),
-          Array(MetadataWarning(propertyPath, s"Unexpected table value: ${tableNode.toPrettyString}")),
+          Array(context.makeWarning(s"Unexpected table value: ${tableNode.toPrettyString}")),
           propertyType
         )
       )
@@ -41,20 +41,15 @@ object Table {
   private def normaliseNotesProperty(
                                   csvwPropertyType: PropertyType.Value
                                 ): Normaliser = {
-    def normaliseNotesPropertyInternal(
-                                    value: JsonNode,
-                                    baseUrl: String,
-                                    lang: String,
-                                    propertyPath: PropertyPath
-                                  ): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
-      value match {
+    def normaliseNotesPropertyInternal(context: NormContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
+      context.node match {
         case arrayNode: ArrayNode =>
           arrayNode
             .elements()
             .asScala
             .zipWithIndex
             .map({ case (element, index) =>
-              Utils.normaliseCommonPropertyValue(element, baseUrl, lang, propertyPath :+ index.toString)
+              Utils.normaliseCommonPropertyValue(context.toChild(element, index.toString))
                 .map({
                   case (elementNode, warnings) => (Some(elementNode), warnings)
                 })
@@ -65,7 +60,7 @@ object Table {
           Right(
             (
               JsonNodeFactory.instance.arrayNode(),
-              Array(MetadataWarning(propertyPath, invalidValueWarning)),
+              Array(context.makeWarning(invalidValueWarning)),
               csvwPropertyType
             )
           )

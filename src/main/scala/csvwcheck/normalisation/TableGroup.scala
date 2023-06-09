@@ -6,7 +6,7 @@ import csvwcheck.errors.{MetadataError, WarningWithCsvContext}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Constants.undefinedLanguage
 import csvwcheck.normalisation.Context.getBaseUrlAndLanguageFromContext
-import csvwcheck.normalisation.Utils.{NormContext, Normaliser}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, NormContext, Normaliser}
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -33,15 +33,15 @@ object TableGroup {
         val normalisedTableGroupStructure = normaliseSingleTableToTableGroupStructure(tableGroupNode)
 
         val rootNodeContext = NormContext(
-          node=tableGroupNode,
+          node=normalisedTableGroupStructure,
           baseUrl = baseUrl,
           language = lang,
           propertyPath = Array[String]()
         )
 
         getBaseUrlAndLanguageFromContext(rootNodeContext)
-          .flatMap({ case (baseUrl, lang) =>
-            Utils.normaliseObjectNode(normalisedTableGroupStructure, normalisers, baseUrl, lang, Array[String]())
+          .flatMap({ case (baseUrl, language) =>
+            Utils.normaliseObjectNode(normalisers, rootNodeContext.copy(baseUrl = baseUrl, language = language))
           })
           .map({
             case (normalisedTableGroupNode, warnings) =>
@@ -58,7 +58,14 @@ object TableGroup {
               )
             )
           })
-      case tableGroupNode => Left(MetadataError(s"Unexpected table group value ${tableGroupNode.toPrettyString}"))
+      case tableGroupNode =>
+        val rootNodeContext = NormContext(
+          node = tableGroupNode,
+          baseUrl = baseUrl,
+          language = lang,
+          propertyPath = Array[String]()
+        )
+        Left(rootNodeContext.makeError(s"Unexpected table group value ${tableGroupNode.toPrettyString}"))
     }
 
   private def normaliseSingleTableToTableGroupStructure(tableGroupNode: ObjectNode): ObjectNode = {
@@ -87,22 +94,23 @@ object TableGroup {
   }
 
 
-  private def normaliseTables(propertyType: PropertyType.Value): Normaliser = (tablesNode, baseUrl, lang, propertyPath) => tablesNode match {
+  private def normaliseTables(propertyType: PropertyType.Value): Normaliser = context => context.node match {
     case tablesArrayNode: ArrayNode if tablesArrayNode.isEmpty() =>
-      Left(MetadataError("Empty tables property"))
+      Left(context.makeError("Empty tables property"))
     case tablesArrayNode: ArrayNode =>
       tablesArrayNode
         .elements()
         .asScala
         .zipWithIndex
         .map({ case (tableNode, index) =>
-          Table.normaliseTable(PropertyType.TableGroup)(tableNode, baseUrl, lang, propertyPath :+ index.toString)
+          val tableContext = context.toChild(tableNode, index.toString)
+          Table.normaliseTable(PropertyType.TableGroup)(tableContext)
             .map({
               case (tableNode, warnings, _) => (Some(tableNode), warnings)
             })
         })
         .toArrayNodeAndWarnings
         .map(_ :+ propertyType)
-    case tablesNode => Left(MetadataError(s"Unexpected tables value: ${tablesNode.toPrettyString}", propertyPath))
+    case tablesNode => Left(context.makeError(s"Unexpected tables value: ${tablesNode.toPrettyString}"))
   }
 }

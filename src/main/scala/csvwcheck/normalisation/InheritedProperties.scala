@@ -13,7 +13,7 @@ object InheritedProperties {
   val normalisers: Map[String, Normaliser] = Map(
     // Inherited properties
     "aboutUrl" -> normaliseUriTemplateProperty(PropertyType.Inherited),
-    "datatype" -> DataType.normaliseDataTypeProperty(PropertyType.Inherited),
+    "datatype" -> DataType.normaliseDataType(PropertyType.Inherited),
     "default" -> Utils.normaliseStringProperty(PropertyType.Inherited),
     "lang" -> Utils.normaliseLanguageProperty(PropertyType.Inherited),
     "null" -> normaliseNullProperty(PropertyType.Inherited),

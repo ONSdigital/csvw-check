@@ -171,14 +171,14 @@ object Utils {
   def normaliseBooleanProperty(
                             csvwPropertyType: PropertyType.Value
                           ): Normaliser =
-    (value, _, _, path) => {
-      if (value.isBoolean) {
-        Right((value, noWarnings, csvwPropertyType))
+    context => {
+      if (context.node.isBoolean) {
+        Right((context.node, noWarnings, csvwPropertyType))
       } else {
         Right(
           (
             BooleanNode.getFalse,
-            Array(MetadataWarning(path, invalidValueWarning)),
+            Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )
@@ -187,26 +187,26 @@ object Utils {
 
   def normaliseNonNegativeIntegerProperty(
                                        csvwPropertyType: PropertyType.Value
-                                     ): Normaliser = { (value, _, _, path) =>
-    value match {
+                                     ): Normaliser = { context =>
+    context.node match {
       case value: IntNode if value.asInt() >= 0 =>
         Right((value, noWarnings, csvwPropertyType))
       case _ =>
         Right(
           (
             NullNode.getInstance(),
-            Array(MetadataWarning(path, invalidValueWarning)),
+            Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )
     }
   }
 
-  def normaliseJsonProperty[T <: JsonNode](
+  def normaliseJsonProperty(
                              normalisers: Map[String, Normaliser],
                              propertyName: String,
-                             propertyContext: NormContext[T]
-                     ): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
+                             propertyContext: NormContext[JsonNode]
+                     ): NormaliserResult = {
   if (normalisers.contains(propertyName)) {
     normalisers(propertyName)(propertyContext)
   } else if (
@@ -226,8 +226,8 @@ object Utils {
           case e: Exception =>
             Right(
               (
-                value,
-                Array(MetadataWarning(pathToPropertyValue, s"invalid_property ${e.getMessage}")),
+                propertyContext.node,
+                Array(propertyContext.makeWarning(s"invalid_property ${e.getMessage}")),
                 PropertyType.Undefined
               )
             )
@@ -237,8 +237,8 @@ object Utils {
         // Not a valid URI, but it isn't as bad as a MetadataError
         Right(
           (
-            value,
-            Array(MetadataWarning(pathToPropertyValue, "invalid_property")),
+            propertyContext.node,
+            Array(propertyContext.makeWarning("invalid_property")),
             PropertyType.Undefined
           )
         )
@@ -248,34 +248,33 @@ object Utils {
 
   def normaliseCommonPropertyValue(context: NormContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings)] = {
     context.node match {
-      case o: ObjectNode => normaliseCommonPropertyObject(context.withNode(o))
-      case _: TextNode =>
-        defaultLang match {
-          case lang if lang == undefinedLanguage =>
-            Right((commonPropertyValueNode, Array()))
+      case objectNode: ObjectNode => normaliseCommonPropertyObject(context.withNode(objectNode))
+      case textNode: TextNode =>
+        context.language match {
+          case language if language == undefinedLanguage =>
+            Right((textNode, noWarnings))
           case _ =>
             val objectNodeToReturn = JsonNodeFactory.instance.objectNode()
-            objectNodeToReturn.set("@value", commonPropertyValueNode)
-            objectNodeToReturn.set("@language", new TextNode(defaultLang))
-            Right((objectNodeToReturn, Array()))
+            objectNodeToReturn.set("@value", textNode)
+            objectNodeToReturn.set("@language", new TextNode(context.language))
+            Right((objectNodeToReturn, noWarnings))
         }
-      case a: ArrayNode =>
-        a.elements()
+      case arrayNode: ArrayNode =>
+        arrayNode.elements()
           .asScala
           .zipWithIndex
           .map({ case (elementNode, index) =>
-            val elementPropertyPath = propertyPath :+ index.toString
-            normaliseCommonPropertyValue(elementNode, baseUrl, defaultLang, elementPropertyPath)
+            normaliseCommonPropertyValue(context.toChild(elementNode, index.toString))
               .map({
                 case (parsedElementNode, warnings) =>
                   (Some(parsedElementNode), warnings)
               })
           })
           .toArrayNodeAndWarnings
-      case _ =>
+      case valueNode =>
         Left(
-          MetadataError(
-            s"Unexpected common property value ${commonPropertyValueNode.toPrettyString}"
+          context.makeError(
+            s"Unexpected common property value ${valueNode.toPrettyString}"
           )
         )
     }
@@ -285,58 +284,57 @@ object Utils {
     Option(new URI(property))
       .filter(uri => uri.getScheme != null && uri.getScheme.nonEmpty)
 
-  def normaliseCommonPropertyObject(context: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
-    context.node
+  def normaliseCommonPropertyObject(objectContext: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
+    objectContext.node
       .getKeysAndValues
       .map({ case (propertyName, valueNode) =>
+        val propertyContext = objectContext.toChild(valueNode, propertyName)
         (propertyName match {
           case "@context" | "@list" | "@set" =>
             Left(
-              MetadataError(
+              propertyContext.makeError(
                 s"$propertyName: common property has $propertyName property"
               )
             )
           case "@type" =>
             normaliseCommonPropertyObjectType(
-              context,
+              objectContext,
               propertyName,
               valueNode
             )
           case "@id" =>
-            normaliseCommonPropertyObjectId(baseUrl, propertyValueNode)
-              .map(v => (v, noWarnings))
+            normaliseCommonPropertyObjectId(propertyContext)
+              .map((_, noWarnings))
           case "@value" =>
-            processCommonPropertyObjectValue(objectNode)
-              .map(v => (v, noWarnings))
+            processCommonPropertyObjectValue(objectContext)
+              .map((_, noWarnings))
           case "@language" =>
-            normaliseCommonPropertyObjectLanguage(objectNode, propertyValueNode)
-              .map(v => (v, noWarnings))
-          case _ =>
+            normaliseCommonPropertyObjectLanguage(objectContext, propertyContext)
+              .map((_, noWarnings))
+          case propertyName =>
             if (propertyName(0).equals('@')) {
               Left(
-                MetadataError(
+                propertyContext.makeError(
                   s"common property has property other than @id, @type, @value or @language beginning with @ ($propertyName)"
                 )
               )
             } else {
-              Utils.normaliseCommonPropertyValue(propertyValueNode, baseUrl, defaultLang, childPropertyPath)
+              Utils.normaliseCommonPropertyValue(propertyContext)
             }
         }).map({
           case (valueNode, warnings) =>
             (propertyName, Some(valueNode), warnings)
         })
       })
+      .iterator
       .toObjectNodeAndWarnings
   }
 
-  def normaliseCommonPropertyObjectId(
-                                           baseUrl: String,
-                                           v: JsonNode
-                                         ): ParseResult[JsonNode] = {
-    if (baseUrl.isBlank) {
-      Right(v)
+  def normaliseCommonPropertyObjectId(idContext: NormContext[JsonNode]): ParseResult[JsonNode] = {
+    if (idContext.baseUrl.isBlank) {
+      Right(idContext.node)
     } else {
-      Utils.parseNodeAsText(v)
+      Utils.parseNodeAsText(idContext.node)
         .flatMap(idValue => {
           if (RegExpressions.startsWithUnderscore.matches(idValue)) {
             Left(
@@ -345,12 +343,19 @@ object Utils {
               )
             )
           } else {
-            val absoluteIdUrl = new URL(new URL(baseUrl), idValue)
-            Right(new TextNode(absoluteIdUrl.toString))
+            Right(new TextNode(toAbsoluteUrl(idValue, idContext.baseUrl)))
           }
         })
     }
   }
+
+  def toAbsoluteUrl(possiblyRelativeUrl: String, baseUrl: String): String =
+    if (baseUrl.isEmpty) {
+      possiblyRelativeUrl
+    } else {
+      new URL(new URL(baseUrl), possiblyRelativeUrl).toString
+    }
+
 
   @tailrec
   def normaliseCommonPropertyObjectType(context: NormContext[ObjectNode], typePropertyName: String, typeNode: JsonNode): ParseResult[(JsonNode, MetadataWarnings)] = {
@@ -410,75 +415,70 @@ object Utils {
     }
   }
 
-  def processCommonPropertyObjectValue(
-                                                value: ObjectNode
-                                              ): ParseResult[JsonNode] = {
-    if (
-      (!value
-        .path("@type")
-        .isMissingNode) && (!value // todo: Stop using missing node
-        .path("@language")
-        .isMissingNode) // todo: Stop using missing node
-    ) {
+  def processCommonPropertyObjectValue(objectContext: NormContext[ObjectNode]): ParseResult[JsonNode] = {
+    val objectNode = objectContext.node
+    val typeNode = objectNode.getMaybeNode("@type")
+    val languageNode = objectNode.getMaybeNode("@language")
+
+    if (typeNode.isDefined && languageNode.isDefined) {
       Left(
-        MetadataError(
+        objectContext.makeError(
           "common property with @value has both @language and @type"
         )
       )
     } else {
-      var fieldNames = Array.from(value.fieldNames().asScala)
-      fieldNames = fieldNames.filter(!_.contains("@type"))
-      fieldNames = fieldNames.filter(!_.contains("@language"))
-      if (fieldNames.length > 1) {
+      val otherPropertyNames = objectNode
+        .fieldNames()
+        .asScala
+        .toArray
+        .filter(fieldName => !Array("@type", "@language", "@value").contains(fieldName))
+
+      if (otherPropertyNames.nonEmpty) {
         Left(
-          MetadataError(
+          objectContext.makeError(
             "common property with @value has properties other than @language or @type"
           )
         )
       } else {
-        Right(value)
+        Right(objectNode)
       }
     }
   }
 
-  def normaliseCommonPropertyObjectLanguage(
-                                                 parentObjectNode: ObjectNode,
-                                                 languageValueNode: JsonNode
-                                               ): ParseResult[JsonNode] = {
-    parentObjectNode
+  def normaliseCommonPropertyObjectLanguage(parentObjectContext: NormContext[ObjectNode], languageNodeContext: NormContext[JsonNode]): ParseResult[JsonNode] = {
+    parentObjectContext
+      .node
       .getMaybeNode("@value")
-      .map(_ => {
-        val language = languageValueNode.asText()
-        if (language.isEmpty || !RegExpressions.Bcp47Language.r.matches(language)) {
-          Left(
-            MetadataError(
-              s"common property has invalid @language ($language)"
-            )
-          )
-        } else {
-          Right(languageValueNode)
-        }
-      })
+      .map(_ =>
+        parseNodeAsText(languageNodeContext.node)
+          .flatMap(language => {
+            if (language.isEmpty || !RegExpressions.Bcp47Language.r.matches(language)) {
+              Left(
+                parentObjectContext.makeError(
+                  s"common property has invalid @language ($language)"
+                )
+              )
+            } else {
+              Right(languageNodeContext.node)
+            }
+          })
+      )
       .getOrElse(
-        Left(MetadataError("common property with @language lacks a @value"))
+        Left(parentObjectContext.makeError("common property with @language lacks a @value"))
       )
   }
 
   def normaliseUrlLinkProperty(
                                     csvwPropertyType: PropertyType.Value
-                                  ): Normaliser = { (v, baseUrl, _, propertyPath) => {
-    v match {
+                                  ): Normaliser = { context => {
+    context.node match {
       case urlNode: TextNode =>
         val urlValue = urlNode.asText()
         if (RegExpressions.startsWithUnderscore.matches(urlValue)) {
           Left(MetadataError(s"'$urlValue' starts with _:"))
         } else {
-          val baseUrlCopy = baseUrl match {
-            case "" => urlValue
-            case _ => new URL(new URL(baseUrl), urlValue).toString
-          }
           Right(
-            (new TextNode(baseUrlCopy), noWarnings, csvwPropertyType)
+            (new TextNode(toAbsoluteUrl(urlValue, context.baseUrl)), noWarnings, csvwPropertyType)
           )
         }
       case _ =>
@@ -487,7 +487,7 @@ object Utils {
         Right(
           (
             new TextNode(""),
-            Array(MetadataWarning(propertyPath, invalidValueWarning)),
+            Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )
@@ -497,8 +497,8 @@ object Utils {
 
   def normaliseLanguageProperty(
                                      csvwPropertyType: PropertyType.Value
-                                   ): Normaliser = { (value, _, _, propertyPath) => {
-    value match {
+                                   ): Normaliser = { context => {
+    context.node match {
       case s: TextNode
         if RegExpressions.Bcp47LanguagetagRegExp.matches(s.asText) =>
         Right((s, noWarnings, csvwPropertyType))
@@ -506,7 +506,7 @@ object Utils {
         Right(
           (
             new TextNode(""),
-            Array(MetadataWarning(propertyPath, invalidValueWarning)),
+            Array(context.makeWarning(invalidValueWarning)),
             csvwPropertyType
           )
         )
@@ -516,8 +516,8 @@ object Utils {
 
   def normaliseColumnReferenceProperty(
                                     csvwPropertyType: PropertyType.Value
-                                  ): Normaliser = { (value, _, _, _) => {
-    value match {
+                                  ): Normaliser = { context => {
+    context.node match {
       case textNode: TextNode =>
         Right(
           (
@@ -529,44 +529,48 @@ object Utils {
       case arrayNode: ArrayNode =>
         arrayNode.elements()
           .asScala
+          .zipWithIndex
           .map({
-            case columnReference: TextNode => Right((Some(columnReference), noWarnings))
-            case columnReferenceNode => Left(
-                MetadataError(
-                  s"Unexpected columnReference '${columnReferenceNode.toPrettyString}'"
-                )
+            case (columnReference: TextNode, _) => Right((Some(columnReference), noWarnings))
+            case (columnReferenceNode, index) => Left(
+                context
+                  .toChild(columnReferenceNode, index.toString)
+                  .makeError(
+                    s"Unexpected columnReference '${columnReferenceNode.toPrettyString}'"
+                  )
               )
           })
           .toArrayNodeAndWarnings
           .map(_ :+ csvwPropertyType)
-      case _ =>
-        Left(MetadataError(s"Unexpected column reference value $value"))
+      case columnReferenceNode =>
+        Left(context.makeError(s"Unexpected column reference value ${columnReferenceNode.toPrettyString}"))
     }
   }
   }
 
   def normaliseDoNothing(propertyType: PropertyType.Value): Normaliser =
-    (value, _, _, _) => Right((value, noWarnings, propertyType))
+    context => Right((context.node, noWarnings, propertyType))
 
-  def normaliseRequiredType(propertyType: PropertyType.Value, requiredType: String): Normaliser = (value, _, _, _) =>
-    Utils.parseNodeAsText(value)
+  def normaliseRequiredType(propertyType: PropertyType.Value, requiredType: String): Normaliser = context =>
+    Utils.parseNodeAsText(context.node)
       .flatMap(declaredType =>
         if (declaredType == requiredType) {
-          Right((value, noWarnings, propertyType))
+          Right((context.node, noWarnings, propertyType))
         } else {
           Left(
-            MetadataError(
-              s"@type must be '{$requiredType}', found (${value.toPrettyString})"
+            context.makeError(
+              s"@type must be '{$requiredType}', found ($declaredType)"
             )
           )
         }
       )
 
   def normaliseObjectNode(normalisers: Map[String, Normaliser], objectContext: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
-    objectNode.getKeysAndValues
+    objectContext.node.getKeysAndValues
       .map({
         case (propertyName, value) =>
-          normaliseJsonProperty(normalisers, localPropertyPath, propertyName, value, baseUrl, lang)
+          val propertyContext = objectContext.toChild(value, propertyName)
+          normaliseJsonProperty(normalisers, propertyName, propertyContext)
             .map({
               case (jsonNode, warnings, _) => (propertyName, Some(jsonNode), warnings)
             })
@@ -576,17 +580,10 @@ object Utils {
 
   def asAbsoluteUrl(
                              csvwPropertyType: PropertyType.Value
-                           ): Normaliser = { (value, baseUrl, _, _) =>
+                           ): Normaliser = { context =>
 
-    parseNodeAsText(value)
-      .map(possiblyRelativeUrl => new TextNode(
-          new URL(
-            new URL(baseUrl),
-            possiblyRelativeUrl
-          )
-          .toString
-        )
-      )
+    parseNodeAsText(context.node)
+      .map(possiblyRelativeUrl => new TextNode(toAbsoluteUrl(possiblyRelativeUrl, context.baseUrl)))
       .map((_, noWarnings, csvwPropertyType))
   }
 }

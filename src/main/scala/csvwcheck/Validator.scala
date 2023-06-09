@@ -231,16 +231,34 @@ class Validator(
             )
           }
       case Left(GeneralCsvwLoadError(err)) =>
-        val error = ErrorWithCsvContext(
-          "metadata",
-          err.getClass.getName,
-          "",
-          "",
-          err.getMessage,
-          ""
-        )
+        val errorWithCsvContext = err match {
+          case metadataError: MetadataError =>
+            val cause = if (metadataError.cause == null) {
+              ""
+            } else {
+              s"(Caused by ${metadataError.cause.getMessage})"
+            }
+
+            ErrorWithCsvContext(
+              "metadata",
+              metadataError.getClass.getName,
+              "",
+              "",
+              s"${metadataError.propertyPath.mkString(".")}: ${metadataError.message} $cause",
+              ""
+            )
+          case generalError => ErrorWithCsvContext(
+            "unknown",
+            generalError.getClass.getName,
+            "",
+            "",
+            generalError.getMessage,
+            ""
+          )
+        }
+
         logger.debug(err)
-        Source(List(WarningsAndErrors(errors = Array(error))))
+        Source(List(WarningsAndErrors(errors = Array(errorWithCsvContext))))
       case Left(SchemaDoesNotContainCsvError(err)) =>
         logger.debug(err)
         findAndValidateCsvwSchemaFileForCsv(maybeCsvUri, untestedSchemaUris)
