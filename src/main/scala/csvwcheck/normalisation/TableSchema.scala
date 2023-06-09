@@ -1,14 +1,17 @@
 package csvwcheck.normalisation
 
-import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.{JsonMappingException, JsonNode}
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.enums.PropertyType
+import csvwcheck.errors.{CascadeToOtherFilesError, GeneralCsvwLoadError}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Context.getBaseUrlAndLanguageFromContext
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, invalidValueWarning}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormalisationContext, Normaliser, invalidValueWarning}
 import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
+import sttp.client3.basicRequest
+import sttp.model.Uri
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
@@ -27,20 +30,22 @@ object TableSchema {
   def normaliseTableSchema(
                             csvwPropertyType: PropertyType.Value
                           ): Normaliser = {
-    def tableSchemaPropertyInternal(context: NormContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
+    def tableSchemaPropertyInternal(context: NormalisationContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
       context.node match {
         case textNode: TextNode =>
           val schemaUrl = Utils.toAbsoluteUrl(textNode.asText(), context.baseUrl)
-          // todo: Need to use injected HTTP-boi to download the schema here.
-          val schemaNode = objectMapper.readTree(schemaUrl).asInstanceOf[ObjectNode]
-          val inDocumentSchemaContext = context.withNode(schemaNode)
 
-          getBaseUrlAndLanguageFromContext(inDocumentSchemaContext)
-            .flatMap({
-              case (schemaBaseUrl, schemaLanguage) =>
-                val externalSchemaContext = inDocumentSchemaContext.copy(baseUrl = schemaBaseUrl, language = schemaLanguage)
-                normaliseSchemaObjectNode(externalSchemaContext)
-                  .map(_ :+ csvwPropertyType)
+          fetchSchemaNode(context, schemaUrl)
+            .flatMap(schemaNode => {
+              val inDocumentSchemaContext = context.withNode(schemaNode)
+
+              getBaseUrlAndLanguageFromContext(inDocumentSchemaContext)
+                .flatMap({
+                  case (schemaBaseUrl, schemaLanguage) =>
+                    val externalSchemaContext = inDocumentSchemaContext.copy(baseUrl = schemaBaseUrl, language = schemaLanguage)
+                    normaliseSchemaObjectNode(externalSchemaContext)
+                      .map(_ :+ csvwPropertyType)
+                })
             })
         case schemaNode: ObjectNode =>
           normaliseSchemaObjectNode(context.withNode(schemaNode))
@@ -62,7 +67,20 @@ object TableSchema {
     tableSchemaPropertyInternal
   }
 
-  private def normaliseSchemaObjectNode(context: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
+  private def fetchSchemaNode(context: NormalisationContext[JsonNode], schemaUrl: String): ParseResult[ObjectNode] = {
+    val response = context.httpClient.send(basicRequest.get(Uri(schemaUrl)))
+    response.body match {
+      case Left(error) => Left(context.makeError(s"Could not fetch tableSchema at '$schemaUrl' - $error"))
+      case Right(body) =>
+        try {
+          Right(objectMapper.readTree(body).asInstanceOf[ObjectNode])
+        } catch {
+          case e: JsonMappingException => Left(context.makeError(s"Could not parse JSOn of tableSchema '$schemaUrl'", cause = e))
+        }
+    }
+  }
+
+  private def normaliseSchemaObjectNode(context: NormalisationContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
     context.node.getKeysAndValues
       .map({ case (propertyName, value) =>
         val propertyContext = context.toChild(value, propertyName)

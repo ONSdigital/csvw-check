@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode}
 import csvwcheck.enums.PropertyType
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, invalidValueWarning, noWarnings, normaliseJsonProperty}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormalisationContext, Normaliser, invalidValueWarning, noWarnings, normaliseJsonProperty}
 import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -53,7 +53,7 @@ object Transformation {
   }
   }
 
-  def normaliseTransformationElement(context: NormContext[ObjectNode]): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
+  def normaliseTransformationElement(context: NormalisationContext[ObjectNode]): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
     context.node
       .getKeysAndValues
       .map({ case (propertyName, valueNode) =>

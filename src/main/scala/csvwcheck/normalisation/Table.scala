@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.node._
 import csvwcheck.enums.PropertyType
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Constants.tableDirectionValidValues
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataWarnings, NormContext, Normaliser, invalidValueWarning, noWarnings}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataWarnings, NormalisationContext, Normaliser, invalidValueWarning, noWarnings}
 import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
@@ -50,7 +50,7 @@ object Table {
   def normaliseNotesProperty(
                               csvwPropertyType: PropertyType.Value
                             ): Normaliser = {
-    def normaliseNotesPropertyInternal(context: NormContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
+    def normaliseNotesPropertyInternal(context: NormalisationContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
       context.node match {
         case arrayNode: ArrayNode =>
           arrayNode

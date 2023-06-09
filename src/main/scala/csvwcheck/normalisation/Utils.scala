@@ -7,10 +7,11 @@ import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{MetadataError, MetadataWarning}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Constants.{CsvWDataTypes, undefinedLanguage}
-import csvwcheck.normalisation.RegExpressions.Bcp47LanguagetagRegExp
+import csvwcheck.normalisation.RegExpressions.Bcp47LanguageTagRegExp
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import csvwcheck.{NameSpaces, XsdDataTypes}
 import shapeless.syntax.std.tuple.productTupleOps
+import sttp.client3.{Identity, SttpBackend}
 
 import java.net.{URI, URL}
 import scala.annotation.tailrec
@@ -19,7 +20,7 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 object Utils {
   type MetadataWarnings = Array[MetadataWarning]
   type PropertyPath = Array[String]
-  type Normaliser = NormContext[JsonNode] => NormaliserResult
+  type Normaliser = NormalisationContext[JsonNode] => NormaliserResult
   type ObjectPropertyNormaliserResult =
     ParseResult[(String, Option[JsonNode], MetadataWarnings)]
   type ArrayElementNormaliserResult =
@@ -166,7 +167,7 @@ object Utils {
   def normaliseJsonProperty(
                              normalisers: Map[String, Normaliser],
                              propertyName: String,
-                             propertyContext: NormContext[JsonNode]
+                             propertyContext: NormalisationContext[JsonNode]
                            ): NormaliserResult = {
     if (normalisers.contains(propertyName)) {
       normalisers(propertyName)(propertyContext)
@@ -207,7 +208,7 @@ object Utils {
     }
   }
 
-  def normaliseCommonPropertyValue(context: NormContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings)] = {
+  def normaliseCommonPropertyValue(context: NormalisationContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings)] = {
     context.node match {
       case objectNode: ObjectNode => normaliseCommonPropertyObject(context.withNode(objectNode))
       case textNode: TextNode =>
@@ -245,7 +246,7 @@ object Utils {
     Option(new URI(property))
       .filter(uri => uri.getScheme != null && uri.getScheme.nonEmpty)
 
-  def normaliseCommonPropertyObject(objectContext: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
+  def normaliseCommonPropertyObject(objectContext: NormalisationContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
     objectContext.node
       .getKeysAndValues
       .map({ case (propertyName, valueNode) =>
@@ -291,7 +292,7 @@ object Utils {
       .toObjectNodeAndWarnings
   }
 
-  def normaliseCommonPropertyObjectId(idContext: NormContext[JsonNode]): ParseResult[JsonNode] = {
+  def normaliseCommonPropertyObjectId(idContext: NormalisationContext[JsonNode]): ParseResult[JsonNode] = {
     if (idContext.baseUrl.isBlank) {
       Right(idContext.node)
     } else {
@@ -311,7 +312,7 @@ object Utils {
   }
 
   @tailrec
-  def normaliseCommonPropertyObjectType(context: NormContext[ObjectNode], typePropertyName: String, typeNode: JsonNode): ParseResult[(JsonNode, MetadataWarnings)] = {
+  def normaliseCommonPropertyObjectType(context: NormalisationContext[ObjectNode], typePropertyName: String, typeNode: JsonNode): ParseResult[(JsonNode, MetadataWarnings)] = {
     val valueNode = context.node.getMaybeNode("@value")
     typeNode match {
       case s: TextNode =>
@@ -368,7 +369,7 @@ object Utils {
     }
   }
 
-  def processCommonPropertyObjectValue(objectContext: NormContext[ObjectNode]): ParseResult[JsonNode] = {
+  def processCommonPropertyObjectValue(objectContext: NormalisationContext[ObjectNode]): ParseResult[JsonNode] = {
     val objectNode = objectContext.node
     val typeNode = objectNode.getMaybeNode("@type")
     val languageNode = objectNode.getMaybeNode("@language")
@@ -398,7 +399,7 @@ object Utils {
     }
   }
 
-  def normaliseCommonPropertyObjectLanguage(parentObjectContext: NormContext[ObjectNode], languageNodeContext: NormContext[JsonNode]): ParseResult[JsonNode] = {
+  def normaliseCommonPropertyObjectLanguage(parentObjectContext: NormalisationContext[ObjectNode], languageNodeContext: NormalisationContext[JsonNode]): ParseResult[JsonNode] = {
     parentObjectContext
       .node
       .getMaybeNode("@value")
@@ -453,7 +454,7 @@ object Utils {
                                ): Normaliser = { context => {
     context.node match {
       case s: TextNode
-        if RegExpressions.Bcp47LanguagetagRegExp.matches(s.asText) =>
+        if RegExpressions.Bcp47LanguageTagRegExp.matches(s.asText) =>
         Right((s, noWarnings, csvwPropertyType))
       case _ =>
         Right(
@@ -533,7 +534,7 @@ object Utils {
         )
     }
 
-  def normaliseObjectNode(normalisers: Map[String, Normaliser], objectContext: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
+  def normaliseObjectNode(normalisers: Map[String, Normaliser], objectContext: NormalisationContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
     objectContext.node.getKeysAndValues
       .map({
         case (propertyName, value) =>
@@ -593,12 +594,12 @@ object Utils {
       }
   }
 
-  def processNaturalLanguagePropertyObject(context: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
+  def processNaturalLanguagePropertyObject(context: NormalisationContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
     context.node
       .getKeysAndValues
       .map({ case (propertyName, childValue) =>
         val childContext = context.toChild(childValue, propertyName)
-        if (Bcp47LanguagetagRegExp.matches(propertyName)) {
+        if (Bcp47LanguageTagRegExp.matches(propertyName)) {
           val (validStrings, warnings): (Array[String], MetadataWarnings) =
             childValue match {
               case s: TextNode => (Array(s.asText()), noWarnings)
@@ -619,7 +620,7 @@ object Utils {
         }
       }).iterator.toObjectNodeAndWarnings
 
-  def getValidTextualElementsFromArray(context: NormContext[ArrayNode]): (Array[String], MetadataWarnings) =
+  def getValidTextualElementsFromArray(context: NormalisationContext[ArrayNode]): (Array[String], MetadataWarnings) =
     context.node.elements()
       .asScala
       .zipWithIndex
@@ -644,18 +645,18 @@ object Utils {
     * @param language     The language for the current JSON-LD document
     * @param propertyPath The path from the root node to this particular node
     */
-  case class NormContext[T <: JsonNode](node: T, baseUrl: String, language: String, propertyPath: PropertyPath) {
-    def withNode[TSpecial <: JsonNode](specialisedNode: TSpecial): NormContext[TSpecial] =
+  case class NormalisationContext[T <: JsonNode](node: T, baseUrl: String, language: String, propertyPath: PropertyPath, httpClient: SttpBackend[Identity, Any]) {
+    def withNode[TSpecial <: JsonNode](specialisedNode: TSpecial): NormalisationContext[TSpecial] =
       this.copy(node = specialisedNode)
 
-    def withNodeAs[TSpecial <: JsonNode](): NormContext[TSpecial] =
+    def withNodeAs[TSpecial <: JsonNode](): NormalisationContext[TSpecial] =
       this.copy(node = this.node.asInstanceOf[TSpecial])
 
-    def toChild[TChild <: JsonNode](childNode: TChild, pathAddition: String): NormContext[TChild] =
+    def toChild[TChild <: JsonNode](childNode: TChild, pathAddition: String): NormalisationContext[TChild] =
       this.copy(node = childNode, propertyPath = this.propertyPath :+ pathAddition)
 
     def makeWarning(message: String): MetadataWarning = MetadataWarning(path = this.propertyPath, message = message)
 
-    def makeError(message: String): MetadataError = MetadataError(message = message, propertyPath = this.propertyPath)
+    def makeError(message: String, cause: Throwable = null): MetadataError = MetadataError(message = message, propertyPath = this.propertyPath, cause = cause)
   }
 }

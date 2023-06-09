@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode}
 import csvwcheck.enums.PropertyType
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormContext, Normaliser, invalidValueWarning, noWarnings, normaliseJsonProperty}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormalisationContext, Normaliser, invalidValueWarning, noWarnings, normaliseJsonProperty}
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -42,7 +42,7 @@ object ForeignKey {
   }
   }
 
-  private def normaliseForeignKeyValue(context: NormContext[JsonNode]): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
+  private def normaliseForeignKeyValue(context: NormalisationContext[JsonNode]): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
     context.node match {
       case foreignKeyObjectNode: ObjectNode =>
         foreignKeyObjectNode.getKeysAndValues
@@ -99,7 +99,7 @@ object ForeignKey {
     }
   }
 
-  private def normaliseForeignKeyReferenceObjectNode(context: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
+  private def normaliseForeignKeyReferenceObjectNode(context: NormalisationContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
     val foreignKeyObjectNode = context.node
     val columnReferenceProperty =
       foreignKeyObjectNode.getMaybeNode("columnReference")

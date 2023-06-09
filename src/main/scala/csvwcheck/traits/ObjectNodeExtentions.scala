@@ -2,12 +2,12 @@ package csvwcheck.traits
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
-import csvwcheck.normalisation.Utils.NormContext
+import csvwcheck.normalisation.Utils.NormalisationContext
 
 object ObjectNodeExtentions {
   implicit class IteratorHasGetKeysAndValues(objectNode: ObjectNode) {
 
-    def normaliseChildren(context: NormContext[ObjectNode]): Array[NormContext[JsonNode]] =
+    def normaliseChildren(context: NormalisationContext[ObjectNode]): Array[NormalisationContext[JsonNode]] =
       objectNode
         .getKeysAndValues
         .map({ case (propertyName, valueNode) => context.toChild(valueNode, propertyName) })

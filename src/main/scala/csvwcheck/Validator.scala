@@ -116,7 +116,7 @@ class Validator(
   }
 
   private def normaliseTableGroup(possibleSchemaUri: URI, tableGroupNode: ObjectNode): Either[GeneralCsvwLoadError, WithWarningsAndErrors[TableGroup]] = {
-    val normalisedTableGroupWithWarningsAndErrors = normalisation.TableGroup.normaliseTableGroup(tableGroupNode, possibleSchemaUri.toString)
+    val normalisedTableGroupWithWarningsAndErrors = normalisation.TableGroup.normaliseTableGroup(tableGroupNode, possibleSchemaUri.toString, httpClient)
       .flatMap({ case (normalisedTableGroup, warnings) =>
         for {
           tableGroupWithWarningsAndErrors <- TableGroup.fromJson(normalisedTableGroup)

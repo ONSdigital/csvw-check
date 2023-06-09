@@ -6,9 +6,10 @@ import csvwcheck.errors.WarningWithCsvContext
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Constants.undefinedLanguage
 import csvwcheck.normalisation.Context.getBaseUrlAndLanguageFromContext
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, NormContext, Normaliser}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, NormalisationContext, Normaliser}
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import shapeless.syntax.std.tuple.productTupleOps
+import sttp.client3.{Identity, SttpBackend}
 
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
@@ -34,16 +35,17 @@ object TableGroup {
     * @param lang           The default language for the loaded JSON document
     * @return
     */
-  def normaliseTableGroup(tableGroupNode: ObjectNode, baseUrl: String, lang: String = undefinedLanguage): ParseResult[(ObjectNode, Array[WarningWithCsvContext])] =
+  def normaliseTableGroup(tableGroupNode: ObjectNode, baseUrl: String, httpClient: SttpBackend[Identity, Any], lang: String = undefinedLanguage): ParseResult[(ObjectNode, Array[WarningWithCsvContext])] =
     tableGroupNode match {
       case tableGroupNode: ObjectNode =>
         val normalisedTableGroupStructure = normaliseSingleTableToTableGroupStructure(tableGroupNode)
 
-        val rootNodeContext = NormContext(
+        val rootNodeContext = NormalisationContext(
           node = normalisedTableGroupStructure,
           baseUrl = baseUrl,
           language = lang,
-          propertyPath = Array[String]()
+          propertyPath = Array[String](),
+          httpClient = httpClient
         )
 
         getBaseUrlAndLanguageFromContext(rootNodeContext)
@@ -66,11 +68,12 @@ object TableGroup {
               )
           })
       case tableGroupNode =>
-        val rootNodeContext = NormContext(
+        val rootNodeContext = NormalisationContext(
           node = tableGroupNode,
           baseUrl = baseUrl,
           language = lang,
-          propertyPath = Array[String]()
+          propertyPath = Array[String](),
+          httpClient = httpClient
         )
         Left(rootNodeContext.makeError(s"Unexpected table group value ${tableGroupNode.toPrettyString}"))
     }

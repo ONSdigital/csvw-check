@@ -3,7 +3,7 @@ package csvwcheck.normalisation
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node._
 import csvwcheck.enums.PropertyType
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, NormContext, Normaliser, ObjectPropertyNormaliserResult, invalidValueWarning, noWarnings, normaliseJsonProperty}
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, NormalisationContext, Normaliser, ObjectPropertyNormaliserResult, invalidValueWarning, noWarnings, normaliseJsonProperty}
 import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -55,7 +55,7 @@ object Dialect {
   }
   }
 
-  private def normaliseDialectObjectProperty(propertyName: String, propertyContext: NormContext[JsonNode]): ObjectPropertyNormaliserResult = {
+  private def normaliseDialectObjectProperty(propertyName: String, propertyContext: NormalisationContext[JsonNode]): ObjectPropertyNormaliserResult = {
     normaliseJsonProperty(normalisers, propertyName, propertyContext)
       .map({
         case (parsedValueNode, propertyWarnings, propertyType) =>

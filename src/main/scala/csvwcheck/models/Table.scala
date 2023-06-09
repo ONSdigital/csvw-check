@@ -71,7 +71,7 @@ object Table {
       dialect <- parseDialect(tableNode)
     } yield {
       val (tableSchema, warnings) = schemaWithWarnings
-      val stuff = (
+      (
         new Table(
           dialect = dialect.orElse(inheritedDialect),
           url = tableUrl,
@@ -82,7 +82,6 @@ object Table {
         ),
         warnings
       )
-      stuff
     }
   }
 

@@ -8,7 +8,7 @@ import csvwcheck.enums.PropertyType
 import csvwcheck.errors.DateFormatError
 import csvwcheck.models.DateFormat
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.normalisation.Utils.{MetadataWarnings, NormContext, Normaliser, invalidValueWarning, noWarnings, normaliseUrlLinkProperty, parseNodeAsText}
+import csvwcheck.normalisation.Utils.{MetadataWarnings, NormalisationContext, Normaliser, invalidValueWarning, noWarnings, normaliseUrlLinkProperty, parseNodeAsText}
 import csvwcheck.numberformatparser.LdmlNumberFormatParser
 import csvwcheck.traits.NumberParser
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
@@ -55,7 +55,7 @@ object DataType {
         }
       })
 
-  private def normaliseDataTypeFormat(dataTypeContext: NormContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
+  private def normaliseDataTypeFormat(dataTypeContext: NormalisationContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] =
     dataTypeContext.node
       .getMaybeNode("format")
       .map(formatNode => {
@@ -83,7 +83,7 @@ object DataType {
       .getOrElse(Right((dataTypeContext.node, noWarnings)))
 
   private def normaliseDataTypeFormat(
-                                       formatContext: NormContext[JsonNode],
+                                       formatContext: NormalisationContext[JsonNode],
                                        baseDataType: String
                                      ): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
     if (Constants.RegExpFormatDataTypes.contains(baseDataType)) {
@@ -145,7 +145,7 @@ object DataType {
 
 
   @tailrec
-  private def normaliseDataTypeFormatNumeric(formatContext: NormContext[JsonNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
+  private def normaliseDataTypeFormatNumeric(formatContext: NormalisationContext[JsonNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
     formatContext.node match {
       case _: TextNode =>
         val formatObjectNode = JsonNodeFactory.instance.objectNode()
@@ -175,7 +175,7 @@ object DataType {
     }
 
 
-  private def normaliseNumericFormatObjectNode(formatContext: NormContext[ObjectNode]): (ObjectNode, MetadataWarnings) = {
+  private def normaliseNumericFormatObjectNode(formatContext: NormalisationContext[ObjectNode]): (ObjectNode, MetadataWarnings) = {
     def parseMaybeStringAt(propertyName: String): ParseResult[Option[String]] =
       formatContext.node
         .getMaybeNode(propertyName)
@@ -212,7 +212,7 @@ object DataType {
     }
   }
 
-  private def initialDataTypePropertyNormalisation(dataTypeContext: NormContext[JsonNode]): ParseResult[(NormContext[ObjectNode], MetadataWarnings)] = {
+  private def initialDataTypePropertyNormalisation(dataTypeContext: NormalisationContext[JsonNode]): ParseResult[(NormalisationContext[ObjectNode], MetadataWarnings)] = {
     dataTypeContext.node match {
       case dataTypeObjectNode: ObjectNode => normaliseDataTypeObject(dataTypeContext.withNode(dataTypeObjectNode))
       case x: TextNode if XsdDataTypes.types.contains(x.asText()) =>
@@ -250,7 +250,7 @@ object DataType {
     }
   }
 
-  private def normaliseDataTypeObjectIdNode(propertyType: PropertyType.Value): Normaliser = (context: NormContext[JsonNode]) =>
+  private def normaliseDataTypeObjectIdNode(propertyType: PropertyType.Value): Normaliser = (context: NormalisationContext[JsonNode]) =>
     parseNodeAsText(context.node)
       .flatMap(idValue => {
         if (XsdDataTypes.types.values.toList.contains(idValue)) {
@@ -264,7 +264,7 @@ object DataType {
         }
       })
 
-  private def normaliseDataTypeObject(context: NormContext[ObjectNode]): ParseResult[(NormContext[ObjectNode], MetadataWarnings)] = {
+  private def normaliseDataTypeObject(context: NormalisationContext[ObjectNode]): ParseResult[(NormalisationContext[ObjectNode], MetadataWarnings)] = {
     Utils.normaliseObjectNode(normalisers, context)
       .map({
         case (objectNode, warnings) =>
@@ -304,7 +304,7 @@ object DataType {
       })
   }
 
-  private def normaliseDataTypeMinMaxValues(dataTypeContext: NormContext[ObjectNode]): ParseResult[Unit] = {
+  private def normaliseDataTypeMinMaxValues(dataTypeContext: NormalisationContext[ObjectNode]): ParseResult[Unit] = {
     dataTypeContext.node
       .getMaybeNode("base")
       .map({
@@ -324,7 +324,7 @@ object DataType {
   }
 
   private def normaliseDataTypeMinMaxValuesForBaseType(
-                                                        dataTypeContext: NormContext[ObjectNode],
+                                                        dataTypeContext: NormalisationContext[ObjectNode],
                                                         baseDataType: String
                                                       ): ParseResult[Unit] = {
     val dataTypeNode = dataTypeContext.node
@@ -377,7 +377,7 @@ object DataType {
   }
 
   private def normaliseMinMaxRanges(
-                                     dataTypeContext: NormContext[ObjectNode],
+                                     dataTypeContext: NormalisationContext[ObjectNode],
                                      baseDataType: String,
                                      minimumNode: Option[JsonNode],
                                      maximumNode: Option[JsonNode],
@@ -479,7 +479,7 @@ object DataType {
   }
 
   private def normaliseMinMaxNumericRanges(
-                                            dataTypeContext: NormContext[ObjectNode],
+                                            dataTypeContext: NormalisationContext[ObjectNode],
                                             minInclusive: Option[String],
                                             maxInclusive: Option[String],
                                             minExclusive: Option[String],
@@ -519,7 +519,7 @@ object DataType {
     }
   }
 
-  private def normaliseDataTypeLengths(dataTypeContext: NormContext[ObjectNode]): ParseResult[Unit] = {
+  private def normaliseDataTypeLengths(dataTypeContext: NormalisationContext[ObjectNode]): ParseResult[Unit] = {
     dataTypeContext.node
       .getMaybeNode("base")
       .map({
@@ -538,7 +538,7 @@ object DataType {
       .getOrElse(Right(()))
   }
 
-  private def normaliseDataTypeWithBase(dataTypeContext: NormContext[ObjectNode], baseDataType: String): ParseResult[Unit] = {
+  private def normaliseDataTypeWithBase(dataTypeContext: NormalisationContext[ObjectNode], baseDataType: String): ParseResult[Unit] = {
     val dataTypeNode = dataTypeContext.node
 
     val lengthNode = dataTypeNode.getMaybeNode("length")
@@ -617,7 +617,7 @@ object DataType {
   }
 
   private def normaliseMinMaxDateTimeRanges(
-                                             dataTypeContext: NormContext[ObjectNode],
+                                             dataTypeContext: NormalisationContext[ObjectNode],
                                              minInclusive: Option[String],
                                              maxInclusive: Option[String],
                                              minExclusive: Option[String],
