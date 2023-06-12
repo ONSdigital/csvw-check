@@ -7,6 +7,7 @@ import com.typesafe.scalalogging.Logger
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
 import csvwcheck.models
 import csvwcheck.models.ParseResult.ParseResult
+import csvwcheck.models.Table.csvDownloadsTemporaryDirectory
 import csvwcheck.normalisation.InheritedProperties
 import csvwcheck.normalisation.Utils.parseNodeAsText
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
@@ -14,10 +15,13 @@ import csvwcheck.traits.LoggerExtensions.LogDebugException
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import org.apache.commons.csv.{CSVFormat, CSVParser, CSVRecord}
 import shapeless.syntax.std.tuple.productTupleOps
+import sttp.client3.{Identity, SttpBackend, asFile, basicRequest}
+import sttp.model.Uri
 
 import java.io.File
 import java.net.URI
 import java.nio.charset.Charset
+import java.nio.file.{Files, Path}
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
@@ -31,6 +35,9 @@ object Table {
     Map[ReferencedTableForeignKeyReference, Set[KeyWithContext]]
   type PrimaryKeysAndErrors =
     (mutable.Set[List[Any]], ArrayBuffer[ErrorWithCsvContext])
+
+  private val csvDownloadsTemporaryDirectory: Path = Files.createTempDirectory("csvw-check-downloads")
+  csvDownloadsTemporaryDirectory.toFile.deleteOnExit()
 
   def fromJson(standardisedTableObjectNode: ObjectNode, inheritedDialect: Option[Dialect] = None): ParseResult[(Table, Array[WarningWithCsvContext])] =
     getUrl(standardisedTableObjectNode)
@@ -142,7 +149,7 @@ case class Table private(
       case _ => false
     }
 
-  def parseCsv(degreeOfParallelism: Int, rowGrouping: Int): Source[
+  def parseCsv(degreeOfParallelism: Int, rowGrouping: Int, httpClient: SttpBackend[Identity, Any]): Source[
     (
       WarningsAndErrors,
         MapForeignKeyDefinitionToValues,
@@ -153,14 +160,15 @@ case class Table private(
     val dialect = this.dialect.getOrElse(Dialect())
     val format = getCsvFormat(dialect)
 
-    getParser(dialect, format) match {
+    getParser(dialect, format, httpClient) match {
       case Right(parser) =>
         readAndValidateTableWithParser(
           format,
           parser,
           dialect,
           degreeOfParallelism,
-          rowGrouping
+          rowGrouping,
+          httpClient
         ).recover {
           case NonFatal(err) =>
             logger.debug(err)
@@ -194,7 +202,7 @@ case class Table private(
     }
   }
 
-  def getCsvFormat(dialect: Dialect): CSVFormat = {
+  private def getCsvFormat(dialect: Dialect): CSVFormat = {
     var formatBuilder = CSVFormat.RFC4180
       .builder()
       .setDelimiter(dialect.delimiter)
@@ -214,7 +222,7 @@ case class Table private(
     formatBuilder.build()
   }
 
-  def validateHeader(
+  private def validateHeader(
                       header: CSVRecord
                     ): WarningsAndErrors = {
     var warnings: Array[WarningWithCsvContext] = Array()
@@ -272,7 +280,8 @@ case class Table private(
                                               parser: CSVParser,
                                               dialect: Dialect,
                                               degreeOfParallelism: Int,
-                                              rowGrouping: Int
+                                              rowGrouping: Int,
+                                              httpClient: SttpBackend[Identity, Any]
                                             ): Source[
     (
       WarningsAndErrors,
@@ -307,7 +316,7 @@ case class Table private(
           )
       }
       .flatMapConcat(accumulatedTableKeyValues => {
-        val parser: CSVParser = getParser(dialect, format)
+        val parser: CSVParser = getParser(dialect, format, httpClient)
           .getOrElse(
             throw new Exception(
               "Could not fetch CSV parser. This should never happen."
@@ -327,63 +336,87 @@ case class Table private(
 
   private def getParser(
                          dialect: Dialect,
-                         format: CSVFormat
+                         format: CSVFormat,
+                         httpClient: SttpBackend[Identity, Any]
                        ): Either[WarningsAndErrors, CSVParser] = {
     val tableUri = new URI(url)
     if (tableUri.getScheme == "file") {
-      val tableCsvFile = new File(tableUri)
-      if (!tableCsvFile.exists) {
-        Left(
-          WarningsAndErrors(
-            Array(),
-            Array(
-              ErrorWithCsvContext(
-                "file_not_found",
-                "",
-                "",
-                "",
-                s"File named ${tableUri.toString} cannot be located",
-                ""
-              )
-            )
-          )
-        )
-      }
-      Right(
-        CSVParser.parse(
-          tableCsvFile,
-          mapAvailableCharsets(dialect.encoding),
-          format
-        )
-      )
+      getParserForCsvFile(dialect, format, tableUri, new File(tableUri))
+    } else {
+      downloadAndGetParserForHttpUri(dialect, format, httpClient, tableUri)
+    }
+  }
+
+  private def downloadAndGetParserForHttpUri(dialect: Dialect, format: CSVFormat, httpClient: SttpBackend[Identity, Any], tableUri: URI): Either[WarningsAndErrors, CSVParser] = {
+    val artifactFile = csvDownloadsTemporaryDirectory.resolve(s"${tableUri.hashCode()}.csv").toFile
+    val csvFile: Either[WarningsAndErrors, File] = if (artifactFile.exists()) {
+      // Effectively caching downloads - we parse the file twice to check primary key violations,
+      // so this is likely optimal for most use-cases. We could end up with hash-collisions,
+      // but it's very unlikely.
+      Right(artifactFile)
     } else {
       try {
-        val csvParser = CSVParser.parse(
-          tableUri.toURL,
-          mapAvailableCharsets(dialect.encoding),
-          format
+        val response = httpClient.send(
+          basicRequest
+            .response(asFile(artifactFile))
+            .get(Uri(tableUri))
         )
-        Right(csvParser)
-      } catch {
-        case NonFatal(e) =>
-          logger.debug(e)
-          Left(
-            WarningsAndErrors(
-              Array(),
-              Array(
-                ErrorWithCsvContext(
-                  "url_cannot_be_fetched",
-                  "",
-                  "",
-                  "",
-                  s"Url ${tableUri.toString} cannot be fetched",
-                  ""
-                )
-              )
+
+        response.body match {
+          case Left(error) => Left(WarningsAndErrors(Array(), Array(
+            ErrorWithCsvContext(
+              "csv_cannot_be_downloaded",
+              "",
+              "",
+              "",
+              s"Url ${tableUri.toString} could not be downloaded: $error",
+              ""
             )
+          )))
+          case Right(file) => Right(file)
+        }
+
+      } catch {
+        case NonFatal(error) => Left(WarningsAndErrors(Array(), Array(
+          ErrorWithCsvContext(
+            "csv_cannot_be_downloaded",
+            "",
+            "",
+            "",
+            s"Url ${tableUri.toString} could not be downloaded: $error",
+            ""
           )
+        )))
       }
     }
+    csvFile.flatMap(getParserForCsvFile(dialect, format, tableUri, _))
+  }
+
+  private def getParserForCsvFile(dialect: Dialect, format: CSVFormat, tableUri: URI, tableCsvFile: File): Either[WarningsAndErrors, CSVParser] = {
+    if (!tableCsvFile.exists) {
+      Left(
+        WarningsAndErrors(
+          Array(),
+          Array(
+            ErrorWithCsvContext(
+              "file_not_found",
+              "",
+              "",
+              "",
+              s"File named ${tableUri.toString} cannot be located",
+              ""
+            )
+          )
+        )
+      )
+    }
+    Right(
+      CSVParser.parse(
+        tableCsvFile,
+        mapAvailableCharsets(dialect.encoding),
+        format
+      )
+    )
   }
 
   private def accumulateTableKeyValuesForRowGroup(

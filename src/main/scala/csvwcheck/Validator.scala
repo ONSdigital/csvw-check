@@ -222,7 +222,7 @@ class Validator(
       case Right(normalisedTableGroupWithWarningsAndErrors) =>
         val normalisedTableGroup = normalisedTableGroupWithWarningsAndErrors.component
         normalisedTableGroup
-          .validateCsvsAgainstTables(numParallelThreads, csvRowBatchSize)
+                  .validateCsvsAgainstTables(numParallelThreads, csvRowBatchSize, httpClient)
           .map { wAndE2 =>
             WarningsAndErrors(
               wAndE2.warnings ++ normalisedTableGroupWithWarningsAndErrors.warningsAndErrors.warnings,

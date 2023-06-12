@@ -999,7 +999,7 @@ Feature: CSVW Validation Tests
 	# processors MUST attempt to locate a metadata documents through site-wide configuration.
   Scenario: manifest-validation#test116 file-metadata with query component not found
     Given I have a CSV file called "test116.csv"
-    And it is stored at the url "https://w3c.github.io/csvw/tests/test116.csv?query"
+    And it is stored at the url "https://w3c.github.io/csvw/tests/test116.csv"
     And I have a file called "test116.csv-metadata.json" at the url "https://w3c.github.io/csvw/tests/test116.csv-metadata.json"
     And there is no file at the url "https://w3c.github.io/.well-known/csvm"
     And there is no file at the url "https://w3c.github.io/csvw/tests/test116.csv-metadata.json"

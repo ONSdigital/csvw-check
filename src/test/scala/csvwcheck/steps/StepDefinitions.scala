@@ -82,24 +82,28 @@ class StepDefinitions extends ScalaDsl with EN {
         .whenRequestMatches(req => {
           req.uri.toString == fileMock.remoteFileUrl
         })
-        .thenRespond({
+        .thenRespondF({ req =>
           fileMock.localFileName
             .map(localFileName => {
               val localFilePath = fixturesPath./(localFileName)
               val source = Source.fromFile(localFilePath.toString, "utf-8")
-              val fileContents = source.getLines().mkString
-              source.close()
+              val fileResponseBody = if(req.response.toString.contains("File")) {
+                // Response wants a file.
+                Right(new java.io.File(localFilePath.toString))
+              } else {
+                source.getLines().mkString
+              }
 
               fileMock.linkHeader
                 .map(linkHeaderValue =>
                   Response(
-                    fileContents,
+                    fileResponseBody,
                     StatusCode.Ok,
                     "OK",
                     Seq(Header("Link", linkHeaderValue))
                   )
                 )
-                .getOrElse(Response(fileContents, StatusCode.Ok))
+                .getOrElse(Response(fileResponseBody, StatusCode.Ok))
             })
             .getOrElse(Response("", StatusCode.NotFound))
         })

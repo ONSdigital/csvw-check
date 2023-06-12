@@ -12,6 +12,7 @@ import csvwcheck.normalisation.InheritedProperties
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
 import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
 import shapeless.syntax.std.tuple.productTupleOps
+import sttp.client3.{Identity, SttpBackend}
 
 import scala.math.sqrt
 import scala.util.matching.Regex
@@ -346,10 +347,7 @@ case class TableGroup private(
       MapTableToForeignKeyReferences
     )
 
-  def validateCsvsAgainstTables(
-                                 parallelism: Int,
-                                 rowGrouping: Int
-                               ): Source[WarningsAndErrors, NotUsed] = {
+  def validateCsvsAgainstTables(parallelism: Int, rowGrouping: Int, httpClient: SttpBackend[Identity, Any]): Source[WarningsAndErrors, NotUsed] = {
     val degreeOfParallelism =
       math.min(tables.size, sqrt(parallelism).floor.toInt)
     val degreeOfParallelismInTable = parallelism / degreeOfParallelism
@@ -359,7 +357,7 @@ case class TableGroup private(
         degreeOfParallelism,
         table =>
           table
-            .parseCsv(degreeOfParallelismInTable, rowGrouping)
+            .parseCsv(degreeOfParallelismInTable, rowGrouping, httpClient)
             .map(_ :+ table)
       )
       .fold[TableState](
