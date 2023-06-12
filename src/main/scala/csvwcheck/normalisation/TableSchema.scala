@@ -13,6 +13,8 @@ import shapeless.syntax.std.tuple.productTupleOps
 import sttp.client3.basicRequest
 import sttp.model.Uri
 
+import java.io.{File, FileNotFoundException}
+import java.net.URI
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object TableSchema {
@@ -68,15 +70,25 @@ object TableSchema {
   }
 
   private def fetchSchemaNode(context: NormalisationContext[JsonNode], schemaUrl: String): ParseResult[ObjectNode] = {
-    val response = context.httpClient.send(basicRequest.get(Uri(schemaUrl)))
-    response.body match {
-      case Left(error) => Left(context.makeError(s"Could not fetch tableSchema at '$schemaUrl' - $error"))
-      case Right(body) =>
-        try {
-          Right(objectMapper.readTree(body).asInstanceOf[ObjectNode])
-        } catch {
-          case e: JsonMappingException => Left(context.makeError(s"Could not parse JSOn of tableSchema '$schemaUrl'", cause = e))
-        }
+    val schemaUri = new URI(schemaUrl)
+    if (schemaUri.getScheme == "file") {
+      try {
+        Right(objectMapper.readTree(new File(schemaUri)).asInstanceOf[ObjectNode])
+      } catch {
+        case error: FileNotFoundException => Left(context.makeError(s"Could not fetch tableSchema at '$schemaUrl' - $error'", cause=error))
+        case error: JsonMappingException => Left(context.makeError(s"Could not parse JSON of tableSchema '$schemaUrl' - $error", cause = error))
+      }
+    } else {
+      val response = context.httpClient.send(basicRequest.get(Uri(schemaUrl)))
+      response.body match {
+        case Left(error) => Left(context.makeError(s"Could not fetch tableSchema at '$schemaUrl' - $error"))
+        case Right(body) =>
+          try {
+            Right(objectMapper.readTree(body).asInstanceOf[ObjectNode])
+          } catch {
+            case error: JsonMappingException => Left(context.makeError(s"Could not parse JSON of tableSchema '$schemaUrl' - $error", cause = error))
+          }
+      }
     }
   }
 
