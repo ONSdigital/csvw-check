@@ -700,14 +700,14 @@ object Utils {
           case error: JsonMappingException => Left(context.makeError(s"Could not parse JSON of object at '$remoteRelativeUrl' - $error", cause = error))
         }
       } else {
-        val response = context.httpClient.send(basicRequest.get(Uri(remoteRelativeUrl)))
+        val response = context.httpClient.send(basicRequest.get(Uri(remoteAbsoluteUri)))
         response.body match {
-          case Left(error) => Left(context.makeError(s"Could not fetch object at '$remoteRelativeUrl' - $error"))
+          case Left(error) => Left(context.makeError(s"Could not fetch object at '$remoteAbsoluteUri' - $error"))
           case Right(body) =>
             try {
               Right(objectMapper.readTree(body).asInstanceOf[ObjectNode])
             } catch {
-              case error: JsonMappingException => Left(context.makeError(s"Could not parse JSON of object at '$remoteRelativeUrl' - $error", cause = error))
+              case error: JsonMappingException => Left(context.makeError(s"Could not parse JSON of object at '$remoteAbsoluteUri' - $error", cause = error))
             }
         }
       }

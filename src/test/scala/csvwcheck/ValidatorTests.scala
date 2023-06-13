@@ -14,14 +14,39 @@ import scala.concurrent.duration.DurationInt
 class ValidatorTests extends AnyFunSuite {
   val csvwExamplesBaseDir = "src/test/resources/csvwExamples/"
   implicit val system: ActorSystem = ActorSystem("actor-system")
-  test("set warning when title is empty for a column") {
-    val uri =
-      s"file://${new File(s"${csvwExamplesBaseDir}observations_missing_headers.csv-metadata.json").getAbsolutePath}"
-    val validator = new Validator(Some(uri))
+
+    test("Non-mocked over-HTTP CSV-W Validation") {
+      val validator = new Validator(Some("https://w3c.github.io/csvw/tests/test011/tree-ops.csv-metadata.json"))
+      val warningsAndErrors = runValidationInAkka(validator)
+      assert(warningsAndErrors.errors.isEmpty)
+      assert(warningsAndErrors.warnings.isEmpty)
+    }
+
+
+  // todo: Test should be brought back in once we can find a valid test case here.
+//  test("Non-mocked over-HTTP CSV-W Validation with separate relative tableSchema document") {
+//    val validator = new Validator(Some("https://w3c.github.io/csvw/tests/test034/csv-metadata.json"))
+//    val warningsAndErrors = runValidationInAkka(validator)
+//    assert(warningsAndErrors.errors.isEmpty)
+//    assert(warningsAndErrors.warnings.isEmpty)
+//  }
+
+  def runValidationInAkka(validator: Validator): WarningsAndErrors = {
     var warningsAndErrors = WarningsAndErrors()
     val akkaStream =
       validator.validate().map(wAndE => warningsAndErrors = wAndE)
     Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+
+    warningsAndErrors
+  }
+
+  test("set warning when title is empty for a column") {
+    val uri =
+      s"file://${new File(s"${csvwExamplesBaseDir}observations_missing_headers.csv-metadata.json").getAbsolutePath}"
+    val validator = new Validator(Some(uri))
+
+    val warningsAndErrors = runValidationInAkka(validator)
+
     assert(warningsAndErrors.warnings.length === 1)
     val warning = warningsAndErrors.warnings(0)
     assert(warning.`type` === "Empty column name")
@@ -35,10 +60,7 @@ class ValidatorTests extends AnyFunSuite {
     val uri =
       s"file://${new File(s"${csvwExamplesBaseDir}observations_missing_headers.csv-metadata.json").getAbsolutePath}"
     val validator = new Validator(Some(uri))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     assert(warningsAndErrors.errors.length === 1)
     val error = warningsAndErrors.errors(0)
     assert(error.`type` === "Invalid Header")
@@ -52,10 +74,7 @@ class ValidatorTests extends AnyFunSuite {
     val uri =
       s"file://${new File(s"${csvwExamplesBaseDir}observations_duplicate_headers.csv-metadata.json").getAbsolutePath}"
     val validator = new Validator(Some(uri))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     assert(warningsAndErrors.warnings.length === 1)
     val warning = warningsAndErrors.warnings(0)
     assert(warning.`type` === "Duplicate column name")
@@ -69,10 +88,7 @@ class ValidatorTests extends AnyFunSuite {
     val uri =
       s"file://${new File(s"${csvwExamplesBaseDir}observations_duplicate_headers.csv-metadata.json").getAbsolutePath}"
     val validator = new Validator(Some(uri))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     assert(warningsAndErrors.errors.length === 1)
     val error = warningsAndErrors.errors(0)
     assert(error.`type` === "Invalid Header")
@@ -84,10 +100,7 @@ class ValidatorTests extends AnyFunSuite {
     val uri =
       s"file://${new File(s"${csvwExamplesBaseDir}observations_duplicate_primary_key.csv-metadata.json").getAbsolutePath}"
     val validator = new Validator(Some(uri))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     assert(warningsAndErrors.errors.length === 1)
     val error = warningsAndErrors.errors(0)
     assert(error.`type` === "duplicate_key")
@@ -103,10 +116,7 @@ class ValidatorTests extends AnyFunSuite {
     val uri =
       s"file://${new File(s"${csvwExamplesBaseDir}observations_primary_key_datetime.csv-metadata.json").getAbsolutePath}"
     val validator = new Validator(Some(uri))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     assert(warningsAndErrors.errors.length === 0)
   }
 
@@ -116,10 +126,7 @@ class ValidatorTests extends AnyFunSuite {
     val uri =
       s"file://${new File(s"${csvwExamplesBaseDir}observations_primary_key_datetime_violation.csv-metadata.json").getAbsolutePath}"
     val validator = new Validator(Some(uri))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     assert(warningsAndErrors.errors.length === 1)
     val error = warningsAndErrors.errors(0)
     assert(
@@ -133,10 +140,7 @@ class ValidatorTests extends AnyFunSuite {
     val uri =
       s"file://${new File(s"${csvwExamplesBaseDir}obs_decimal_primary_key_vio.csv-metadata.json").getAbsolutePath}"
     val validator = new Validator(Some(uri))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     assert(warningsAndErrors.errors.length === 1)
     val error = warningsAndErrors.errors(0)
     assert(error.`type` === "duplicate_key")
@@ -152,10 +156,7 @@ class ValidatorTests extends AnyFunSuite {
     val uri =
       s"file://${new File(s"${csvwExamplesBaseDir}foreignKeyValidationTest.csv-metadata.json").getAbsolutePath}"
     val validator = new Validator(Some(uri))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     assert(warningsAndErrors.errors.length === 0)
   }
 
@@ -165,10 +166,7 @@ class ValidatorTests extends AnyFunSuite {
     val uri =
       s"file://${new File(s"${csvwExamplesBaseDir}foreignKeyViolationTest.csv-metadata.json").getAbsolutePath}"
     val validator = new Validator(Some(uri))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     val errors = warningsAndErrors.errors
     assert(errors.length === 1)
     assert(errors(0).`type` === "unmatched_foreign_key_reference")
@@ -181,10 +179,7 @@ class ValidatorTests extends AnyFunSuite {
     val uri =
       s"file://${new File(s"${csvwExamplesBaseDir}foreignKeyValidationTestmultiple_parent_rows_matched.csv-metadata.json").getAbsolutePath}"
     val validator = new Validator(Some(uri))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     val errors = warningsAndErrors.errors
     assert(errors.length === 1)
     assert(errors(0).`type` === "multiple_matched_rows")
@@ -262,10 +257,7 @@ class ValidatorTests extends AnyFunSuite {
 
     val validator =
       new Validator(Some(s"file://${testCaseFile.getAbsolutePath}"))
-    var warningsAndErrors = WarningsAndErrors()
-    val akkaStream =
-      validator.validate().map(wAndE => warningsAndErrors = wAndE)
-    Await.ready(akkaStream.runWith(Sink.ignore), 10.seconds)
+    val warningsAndErrors = runValidationInAkka(validator)
     val errors = warningsAndErrors.errors
     assert(errors.isEmpty)
   }
