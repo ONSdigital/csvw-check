@@ -53,7 +53,7 @@ object Transformation {
   }
   }
 
-  def normaliseTransformationElement(context: NormalisationContext[ObjectNode]): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
+  private def normaliseTransformationElement(context: NormalisationContext[ObjectNode]): ParseResult[(Option[JsonNode], MetadataWarnings)] = {
     context.node
       .getKeysAndValues
       .map({ case (propertyName, valueNode) =>

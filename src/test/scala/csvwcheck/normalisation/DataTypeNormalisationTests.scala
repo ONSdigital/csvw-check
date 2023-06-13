@@ -414,4 +414,83 @@ class DataTypeNormalisationTests extends AnyFunSuite {
       assert(warnings.containsWarningWith("invalid_date_format 'dd/ZZ/yyyy'"))
     }
 
+    test(
+      "should insert pattern key under format if format is textual for Numeric format datatypes"
+    ) {
+      val dataTypeNode = jsonToObjectNode(
+        """
+          |{
+          | "base": "decimal",
+          | "format": "0.###E0"
+          |}
+          |""".stripMargin
+      )
+
+      val Right((normalisedValue, warnings, _)) = DataType.normaliseDataType(PropertyType.Undefined)(
+        starterContext.withNode(dataTypeNode)
+      )
+
+      assertJsonNodesEquivalent(normalisedValue, jsonToObjectNode(
+        """
+          |{
+          | "base": "http://www.w3.org/2001/XMLSchema#decimal",
+          | "format": {
+          |   "pattern": "0.###E0"
+          | }
+          |}
+          |""".stripMargin))
+      assert(warnings.isEmpty)
+    }
+
+    test("should populate warnings for invalid number format datatypes") {
+      val dataTypeNode = jsonToObjectNode(
+        """
+          |{
+          | "base": "decimal",
+          | "format": "0.#00#"
+          |}
+          |""".stripMargin
+      )
+
+      val Right((normalisedValue, warnings, _)) = DataType.normaliseDataType(PropertyType.Undefined)(
+        starterContext.withNode(dataTypeNode)
+      )
+
+      assertJsonNodesEquivalent(normalisedValue, jsonToObjectNode(
+        """
+          |{
+          | "base": "http://www.w3.org/2001/XMLSchema#decimal",
+          | "format": {}
+          |}
+          |""".stripMargin))
+
+      assert(warnings.containsWarningWith("invalid_number_format"))
+    }
+
+    test(
+      "should populate warnings for invalid format for regex format datatypes"
+    ) {
+      val dataTypeNode = jsonToObjectNode(
+        """
+          |{
+          | "base": "yearMonthDuration",
+          | "format": "[("
+          |}
+          |""".stripMargin
+      )
+
+      val Right((normalisedValue, warnings, _)) = DataType.normaliseDataType(PropertyType.Undefined)(
+        starterContext.withNode(dataTypeNode)
+      )
+
+      assertJsonNodesEquivalent(normalisedValue, jsonToObjectNode(
+        """
+          |{
+          | "base": "http://www.w3.org/2001/XMLSchema#yearMonthDuration"
+          |}
+          |""".stripMargin))
+
+      assert(warnings.containsWarningWith("invalid_regex"))
+    }
+
 }

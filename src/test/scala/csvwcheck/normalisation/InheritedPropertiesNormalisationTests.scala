@@ -97,4 +97,83 @@ class InheritedPropertiesNormalisationTests extends AnyFunSuite {
     assert(warnings.isEmpty, warnings)
   }
 
+
+  test("set invalid value warnings when Uri template property is valid") {
+      val warnings = assertObjectNormalisation(
+        InheritedProperties.normalisers,
+        """
+          |{
+          | "propertyUrl": "https://example.com/{+something}"
+          |}
+          |""".stripMargin,
+        """
+          |{
+          | "propertyUrl": "https://example.com/{+something}"
+          |}
+          |""".stripMargin
+      )
+
+      assert(warnings.isEmpty)
+    }
+
+  test("set value and warnings correctly when Uri template property is not string") {
+      val warnings = assertObjectNormalisation(
+        InheritedProperties.normalisers,
+        """
+          |{
+          | "propertyUrl": 3.5
+          |}
+          |""".stripMargin,
+        """
+          |{
+          | "propertyUrl": ""
+          |}
+          |""".stripMargin
+      )
+
+      assert(warnings.containsWarningWith("invalid_value"))
+    }
+
+
+    test(
+      "set correct value and warnings correctly when textDirection property is valid"
+    ) {
+      val warnings = assertObjectNormalisation(
+        InheritedProperties.normalisers,
+        """
+          |{
+          | "textDirection": "rtl"
+          |}
+          |""".stripMargin,
+        """
+          |{
+          | "textDirection": "rtl"
+          |}
+          |""".stripMargin
+      )
+
+      assert(warnings.isEmpty)
+    }
+
+    test(
+      "set correct value and warnings correctly when textDirection property is Invalid"
+    ) {
+      val warnings = assertObjectNormalisation(
+        InheritedProperties.normalisers,
+        """
+          |{
+          | "textDirection": "not a valid text direction"
+          |}
+          |""".stripMargin,
+        """
+          |{
+          | "textDirection": "inherit"
+          |}
+          |""".stripMargin
+      )
+
+      assert(warnings.containsWarningWith("invalid_value"))
+    }
+
+
 }
