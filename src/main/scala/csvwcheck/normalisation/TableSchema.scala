@@ -1,20 +1,13 @@
 package csvwcheck.normalisation
 
-import com.fasterxml.jackson.databind.{JsonMappingException, JsonNode}
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
-import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.enums.PropertyType
-import csvwcheck.errors.{CascadeToOtherFilesError, GeneralCsvwLoadError}
 import csvwcheck.models.ParseResult.ParseResult
-import csvwcheck.normalisation.Context.getBaseUrlAndLanguageFromContext
 import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormalisationContext, Normaliser, invalidValueWarning}
 import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
-import sttp.client3.basicRequest
-import sttp.model.Uri
 
-import java.io.{File, FileNotFoundException}
-import java.net.URI
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object TableSchema {
@@ -35,20 +28,10 @@ object TableSchema {
     def tableSchemaPropertyInternal(context: NormalisationContext[JsonNode]): ParseResult[(JsonNode, MetadataWarnings, PropertyType.Value)] = {
       context.node match {
         case textNode: TextNode =>
-          val schemaUrl = Utils.toAbsoluteUrl(textNode.asText(), context.baseUrl)
-
-          fetchSchemaNode(context, schemaUrl)
-            .flatMap(schemaNode => {
-              val inDocumentSchemaContext = context.withNode(schemaNode)
-
-              getBaseUrlAndLanguageFromContext(inDocumentSchemaContext)
-                .flatMap({
-                  case (schemaBaseUrl, schemaLanguage) =>
-                    val externalSchemaContext = inDocumentSchemaContext.copy(baseUrl = schemaBaseUrl, language = schemaLanguage)
-                    normaliseSchemaObjectNode(externalSchemaContext)
-                      .map(_ :+ csvwPropertyType)
-                })
-            })
+          // This is an object node and hence can be defined in a separate document
+          Utils.fetchRemoteObjectPropertyNode(context, textNode.asText())
+            .flatMap(normaliseSchemaObjectNode)
+            .map(_ :+ csvwPropertyType)
         case schemaNode: ObjectNode =>
           normaliseSchemaObjectNode(context.withNode(schemaNode))
             .map(_ :+ csvwPropertyType)
@@ -67,29 +50,6 @@ object TableSchema {
     }
 
     tableSchemaPropertyInternal
-  }
-
-  private def fetchSchemaNode(context: NormalisationContext[JsonNode], schemaUrl: String): ParseResult[ObjectNode] = {
-    val schemaUri = new URI(schemaUrl)
-    if (schemaUri.getScheme == "file") {
-      try {
-        Right(objectMapper.readTree(new File(schemaUri)).asInstanceOf[ObjectNode])
-      } catch {
-        case error: FileNotFoundException => Left(context.makeError(s"Could not fetch tableSchema at '$schemaUrl' - $error'", cause=error))
-        case error: JsonMappingException => Left(context.makeError(s"Could not parse JSON of tableSchema '$schemaUrl' - $error", cause = error))
-      }
-    } else {
-      val response = context.httpClient.send(basicRequest.get(Uri(schemaUrl)))
-      response.body match {
-        case Left(error) => Left(context.makeError(s"Could not fetch tableSchema at '$schemaUrl' - $error"))
-        case Right(body) =>
-          try {
-            Right(objectMapper.readTree(body).asInstanceOf[ObjectNode])
-          } catch {
-            case error: JsonMappingException => Left(context.makeError(s"Could not parse JSON of tableSchema '$schemaUrl' - $error", cause = error))
-          }
-      }
-    }
   }
 
   private def normaliseSchemaObjectNode(context: NormalisationContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {

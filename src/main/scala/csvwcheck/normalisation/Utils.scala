@@ -1,18 +1,21 @@
 package csvwcheck.normalisation
 
-import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.{JsonMappingException, JsonNode}
 import com.fasterxml.jackson.databind.node._
 import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.enums.PropertyType
 import csvwcheck.errors.{MetadataError, MetadataWarning}
 import csvwcheck.models.ParseResult.ParseResult
 import csvwcheck.normalisation.Constants.{CsvWDataTypes, undefinedLanguage}
+import csvwcheck.normalisation.Context.getBaseUrlAndLanguageFromContext
 import csvwcheck.normalisation.RegExpressions.Bcp47LanguageTagRegExp
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import csvwcheck.{NameSpaces, XsdDataTypes}
 import shapeless.syntax.std.tuple.productTupleOps
-import sttp.client3.{Identity, SttpBackend}
+import sttp.client3.{Identity, SttpBackend, basicRequest}
+import sttp.model.Uri
 
+import java.io.{File, FileNotFoundException}
 import java.net.{URI, URL}
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.IteratorHasAsScala
@@ -513,7 +516,7 @@ object Utils {
         } else {
           Left(
             context.makeError(
-              s"@type must be '{$requiredType}', found ($declaredType)"
+              s"@type must be '$requiredType', found ($declaredType)"
             )
           )
         }
@@ -658,5 +661,58 @@ object Utils {
     def makeWarning(message: String): MetadataWarning = MetadataWarning(path = this.propertyPath, message = message)
 
     def makeError(message: String, cause: Throwable = null): MetadataError = MetadataError(message = message, propertyPath = this.propertyPath, cause = cause)
+  }
+
+  /**
+    * Object nodes can be extracted from a JSON document and stored elsewhere in a separate file.
+    * This function retrieves said object node from the remote location and returns the appropriate context for
+    * parsing it.
+    *
+    * https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#dfn-object-property
+    *
+    * @param context The NormalisationContext of the object node in the parent document
+    * @param remoteRelativeUrl The (potentially) relative URL to the object node's document.
+    * @return
+    */
+  def fetchRemoteObjectPropertyNode(context: NormalisationContext[JsonNode], remoteRelativeUrl: String): ParseResult[NormalisationContext[ObjectNode]] = {
+    resolveRemoteObjectNode(context, remoteRelativeUrl)
+      .map(context.withNode(_))
+      .flatMap(initialObjectNormalisationContext => {
+        getBaseUrlAndLanguageFromContext(initialObjectNormalisationContext)
+          .map({
+            case (schemaBaseUrl, schemaLanguage) =>
+              val objectNodeWithoutContext = initialObjectNormalisationContext.node.deepCopy()
+              objectNodeWithoutContext.remove("@context")
+              initialObjectNormalisationContext.copy(node = objectNodeWithoutContext, baseUrl = schemaBaseUrl, language = schemaLanguage)
+          })
+      })
+  }
+
+  private def resolveRemoteObjectNode(context: NormalisationContext[JsonNode], remoteRelativeUrl: String): ParseResult[ObjectNode] = {
+    val remoteAbsoluteUrl = Utils.toAbsoluteUrl(remoteRelativeUrl, context.baseUrl)
+    try {
+      val remoteAbsoluteUri = new URI(remoteAbsoluteUrl)
+      if (remoteAbsoluteUri.getScheme == "file") {
+        try {
+          Right(objectMapper.readTree(new File(remoteAbsoluteUri)).asInstanceOf[ObjectNode])
+        } catch {
+          case error: FileNotFoundException => Left(context.makeError(s"Could not fetch object at '$remoteRelativeUrl' - $error'", cause = error))
+          case error: JsonMappingException => Left(context.makeError(s"Could not parse JSON of object at '$remoteRelativeUrl' - $error", cause = error))
+        }
+      } else {
+        val response = context.httpClient.send(basicRequest.get(Uri(remoteRelativeUrl)))
+        response.body match {
+          case Left(error) => Left(context.makeError(s"Could not fetch object at '$remoteRelativeUrl' - $error"))
+          case Right(body) =>
+            try {
+              Right(objectMapper.readTree(body).asInstanceOf[ObjectNode])
+            } catch {
+              case error: JsonMappingException => Left(context.makeError(s"Could not parse JSON of object at '$remoteRelativeUrl' - $error", cause = error))
+            }
+        }
+      }
+    } catch {
+      case uriSyntaxError: java.net.URISyntaxException => Left(context.makeError(s"Invalid URI: '$remoteAbsoluteUrl'", uriSyntaxError))
+    }
   }
 }

@@ -4,6 +4,7 @@ import akka.actor.ActorSystem
 import akka.stream.scaladsl.Sink
 import better.files.Dsl.unzip
 import better.files.File
+import csvwcheck.TestPaths.fixturesPath
 import csvwcheck.Validator
 import csvwcheck.models.WarningsAndErrors
 import io.cucumber.scala.{EN, ScalaDsl}
@@ -18,12 +19,6 @@ import scala.concurrent.duration.Duration
 import scala.io.Source
 
 class StepDefinitions extends ScalaDsl with EN {
-  val fixturesPath: File = File(System.getProperty("user.dir"))
-    ./("src")
-    ./("test")
-    ./("resources")
-    ./("features")
-    ./("fixtures")
   private var warningsAndErrors: WarningsAndErrors = WarningsAndErrors()
   private var schemaUrl: Option[String] = None
   private var csvUrl: Option[String] = None

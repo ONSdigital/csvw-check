@@ -40,8 +40,11 @@ object NormalisationTestUtils {
     metadataError
   }
 
-  def jsonToObjectNode(nodeJson: String) =
+  def jsonToObjectNode(nodeJson: String): ObjectNode =
     objectMapper.readTree(nodeJson).asInstanceOf[ObjectNode]
+
+  def jsonToNode[T <: JsonNode](nodeJson: String): T =
+    objectMapper.readTree(nodeJson).asInstanceOf[T]
 
 
   implicit class MetadataWarningsExtensions(warnings: MetadataWarnings) {

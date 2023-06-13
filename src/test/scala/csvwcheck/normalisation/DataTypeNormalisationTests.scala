@@ -5,7 +5,7 @@ import csvwcheck.normalisation.NormalisationTestUtils.{MetadataWarningsExtension
 import org.scalatest.funsuite.AnyFunSuite
 
 
-class DataTypeTests extends AnyFunSuite {
+class DataTypeNormalisationTests extends AnyFunSuite {
   test(
       "datatype normaliser returns expected value for object with correct base and format"
   ) {

@@ -1,9 +1,10 @@
 package csvwcheck.normalisation
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode}
+import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
 import csvwcheck.enums.PropertyType
 import csvwcheck.models.ParseResult.ParseResult
+import csvwcheck.normalisation.TableSchema.normaliseSchemaObjectNode
 import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormalisationContext, Normaliser, invalidValueWarning, noWarnings, normaliseJsonProperty}
 import csvwcheck.traits.ObjectNodeExtentions.{IteratorHasGetKeysAndValues, ObjectNodeGetMaybeNode}
 import shapeless.syntax.std.tuple.productTupleOps
@@ -11,11 +12,16 @@ import shapeless.syntax.std.tuple.productTupleOps
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
 object ForeignKey {
-  val parsers: Map[String, Normaliser] = Map(
+  val normalisers: Map[String, Normaliser] = Map(
+    // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#dfn-foreign-key-definition
     // Foreign Key Properties
     "columnReference" -> Utils.normaliseColumnReferenceProperty(PropertyType.ForeignKey),
     "reference" -> normaliseForeignKeyReferenceProperty(PropertyType.ForeignKey),
-    // foreignKey reference properties
+
+  )
+
+  private val referenceNormalisers: Map[String, Normaliser] = Map(
+    "columnReference" -> Utils.normaliseColumnReferenceProperty(PropertyType.ForeignKey),
     "resource" -> Utils.asAbsoluteUrl(PropertyType.ForeignKeyReference),
     "schemaReference" -> Utils.asAbsoluteUrl(PropertyType.ForeignKeyReference)
   )
@@ -55,7 +61,7 @@ object ForeignKey {
                 )
               )
             } else {
-              normaliseJsonProperty(parsers, propertyName, propertyContext)
+              normaliseJsonProperty(normalisers, propertyName, propertyContext)
                 .map({
                   case (parsedNode, Array(), PropertyType.ForeignKey) =>
                     (propertyName, Some(parsedNode), noWarnings)
@@ -84,6 +90,11 @@ object ForeignKey {
     context.node match {
       case referenceObjectNode: ObjectNode =>
         normaliseForeignKeyReferenceObjectNode(context.withNode(referenceObjectNode))
+          .map(_ :+ csvwPropertyType)
+      case textNode: TextNode =>
+        // This is an object node and hence can be defined in a separate document
+        Utils.fetchRemoteObjectPropertyNode(context, textNode.asText())
+          .flatMap(normaliseForeignKeyReferenceObjectNode)
           .map(_ :+ csvwPropertyType)
       case _ =>
         // If the supplied value of an object property is not a string or object (eg if it is an integer),
@@ -128,8 +139,8 @@ object ForeignKey {
           .map({ case (propertyName, value) =>
             val propertyContext = context.toChild(value, propertyName)
             // Check if property is included in the valid properties for a foreign key object
-            if (parsers.contains(propertyName)) {
-              normaliseJsonProperty(parsers, propertyName, propertyContext)
+            if (referenceNormalisers.contains(propertyName)) {
+              normaliseJsonProperty(referenceNormalisers, propertyName, propertyContext)
                 .map({
                   case (newValue, Array(), _) =>
                     (propertyName, Some(newValue), noWarnings)

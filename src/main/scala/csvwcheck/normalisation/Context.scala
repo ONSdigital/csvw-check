@@ -57,7 +57,10 @@ object Context {
               )
           })
       )
-      .getOrElse(Right((rootNodeContext.baseUrl, rootNodeContext.language)))
+      // The top-level object of a metadata document or object referenced through an object property
+      // (whether it is a table group description, table description, schema, dialect description or
+      // transformation definition) MUST have a @context property.
+      .getOrElse(Left(rootNodeContext.makeError(s"A @context node must be defined.")))
   }
 
   private def getStandardContextNode(baseUrl: String, language: String) = {

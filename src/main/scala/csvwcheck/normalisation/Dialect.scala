@@ -3,7 +3,9 @@ package csvwcheck.normalisation
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node._
 import csvwcheck.enums.PropertyType
-import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, NormalisationContext, Normaliser, ObjectPropertyNormaliserResult, invalidValueWarning, noWarnings, normaliseJsonProperty}
+import csvwcheck.models.ParseResult.ParseResult
+import csvwcheck.normalisation.TableSchema.normaliseSchemaObjectNode
+import csvwcheck.normalisation.Utils.{MetadataErrorsOrParsedArrayElements, MetadataErrorsOrParsedObjectProperties, MetadataWarnings, NormalisationContext, Normaliser, ObjectPropertyNormaliserResult, invalidValueWarning, noWarnings, normaliseJsonProperty}
 import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
 import shapeless.syntax.std.tuple.productTupleOps
 
@@ -34,10 +36,12 @@ object Dialect {
                               ): Normaliser = { context => {
     context.node match {
       case objectNode: ObjectNode =>
-        objectNode.getKeysAndValues
-          .map({ case (propertyName, value) => normaliseDialectObjectProperty(propertyName, context.toChild(value, propertyName)) })
-          .iterator
-          .toObjectNodeAndWarnings
+        normaliseDialectObject(context.withNode(objectNode))
+          .map(_ :+ csvwPropertyType)
+      case textNode: TextNode =>
+        // This is an object node and hence can be defined in a separate document
+        Utils.fetchRemoteObjectPropertyNode(context, textNode.asText())
+          .flatMap(normaliseDialectObject)
           .map(_ :+ csvwPropertyType)
       case _ =>
         // May be we might need to support dialect property of type other than ObjectNode.
@@ -53,6 +57,13 @@ object Dialect {
         )
     }
   }
+  }
+
+  private def normaliseDialectObject(context: NormalisationContext[ObjectNode]): ParseResult[(ObjectNode, MetadataWarnings)] = {
+    context.node.getKeysAndValues
+      .map({ case (propertyName, value) => normaliseDialectObjectProperty(propertyName, context.toChild(value, propertyName)) })
+      .iterator
+      .toObjectNodeAndWarnings
   }
 
   private def normaliseDialectObjectProperty(propertyName: String, propertyContext: NormalisationContext[JsonNode]): ObjectPropertyNormaliserResult = {

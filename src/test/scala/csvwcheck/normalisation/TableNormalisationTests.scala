@@ -39,6 +39,4 @@ class TableNormalisationTests extends AnyFunSuite {
       assert(notes(1).isInstanceOf[TextNode])
       assert(notes(1).asText() == "secondNote")
     }
-
-
 }

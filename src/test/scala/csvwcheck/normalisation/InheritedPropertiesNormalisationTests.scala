@@ -5,7 +5,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import NormalisationTestUtils.MetadataWarningsExtensions
 
 
-class InheritedPropertiesTests extends AnyFunSuite {
+class InheritedPropertiesNormalisationTests extends AnyFunSuite {
   test("null property returns value in array without warnings on valid value") {
     val warnings = assertObjectNormalisation(
       InheritedProperties.normalisers,
@@ -72,7 +72,7 @@ class InheritedPropertiesTests extends AnyFunSuite {
       """,
       """
         {
-          "separator": ""
+          "separator": null
         }
       """
     )
