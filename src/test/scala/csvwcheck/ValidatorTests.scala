@@ -11,7 +11,7 @@ import scala.collection.mutable
 import scala.concurrent.Await
 import scala.concurrent.duration.DurationInt
 
-class ValidatorTest extends AnyFunSuite {
+class ValidatorTests extends AnyFunSuite {
   val csvwExamplesBaseDir = "src/test/resources/csvwExamples/"
   implicit val system: ActorSystem = ActorSystem("actor-system")
   test("set warning when title is empty for a column") {

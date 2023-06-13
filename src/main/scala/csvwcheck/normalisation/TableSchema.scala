@@ -13,7 +13,6 @@ import scala.jdk.CollectionConverters.IteratorHasAsScala
 object TableSchema {
   private val normalisers: Map[String, Normaliser] = Map(
     // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#h-schemas
-    "@context" -> Context.normaliseContext(PropertyType.Context),
     "@type" -> Utils.normaliseRequiredType(PropertyType.Common, "Schema"),
     // Schema Properties
     "columns" -> normaliseColumnsProperty(PropertyType.Schema),
