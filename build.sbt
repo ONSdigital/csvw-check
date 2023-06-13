@@ -2,12 +2,15 @@ name := "csvwcheck"
 
 organization := "ONS"
 version := "0.1"
+maintainer := "csvcubed@gsscogs.uk"
+
 scalaVersion := "2.13.4"
 scalacOptions ++= Seq("-deprecation", "-feature")
 autoCompilerPlugins := true
 
 enablePlugins(JavaAppPackaging)
 enablePlugins(DockerPlugin)
+enablePlugins(UniversalPlugin)
 
 dockerBaseImage := "openjdk:11"
 dockerEntrypoint := Seq("bash")
