@@ -1,7 +1,7 @@
-name := "csvwcheck"
+name := "csvw-check"
 
 organization := "ONS"
-version := "0.1"
+version := "0.0.1"
 maintainer := "csvcubed@gsscogs.uk"
 
 scalaVersion := "2.13.4"

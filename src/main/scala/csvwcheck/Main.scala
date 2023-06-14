@@ -27,9 +27,12 @@ object Main extends App {
   private val builder = OParser.builder[Config]
   private val parser = {
     import builder._
+
+    val csvwCheckPackage = this.getClass.getPackage
+
     OParser.sequence(
-      programName("CSVW-Validation"),
-      head("CSVW-Validation", "1.0"),
+      programName(csvwCheckPackage.getImplementationTitle),
+      head(csvwCheckPackage.getImplementationTitle, csvwCheckPackage.getImplementationVersion),
       opt[String]('s', "schema")
         .action((schema, c) => c.copy(inputSchema = Some(schema)))
         .text("filename of Schema/metadata file"),
@@ -38,7 +41,8 @@ object Main extends App {
         .text("filename of CSV file"),
       opt[Level]('l', "log-level")
         .action((logLevel, c) => c.copy(logLevel = logLevel))
-        .text(s"${Level.OFF}|${Level.ERROR}|${Level.WARN}|${Level.INFO}|${Level.DEBUG}|${Level.TRACE}")
+        .text(s"${Level.OFF}|${Level.ERROR}|${Level.WARN}|${Level.INFO}|${Level.DEBUG}|${Level.TRACE}"),
+      help('h', "help").text("prints this usage text")
     )
   }
   private val newLine = sys.props("line.separator")
