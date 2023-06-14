@@ -62,7 +62,7 @@ jobs:
           rel_cand_substring='rc'
           vers_num_lower_case=${vers_num,,}
 
-          local_param="csvw-check:$vers_num"
+          local_param="csvwcheck:$vers_num"
           remote_param="gsscogs/csvw-check"
           push_param="$remote_param:v$vers_num"
           latest_param="$remote_param:latest"
