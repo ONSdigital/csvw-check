@@ -1,5 +1,6 @@
-package csvwcheck
-object PropertyCheckerConstants {
+package csvwcheck.normalisation
+
+object Constants {
   val StringDataTypes: Array[String] = Array[String](
     "http://www.w3.org/1999/02/22-rdf-syntax-ns#XMLLiteral",
     "http://www.w3.org/1999/02/22-rdf-syntax-ns#HTML",
@@ -108,5 +109,16 @@ object PropertyCheckerConstants {
     "utf-16le",
     "x-user-defined"
   )
-
+  val CsvWDataTypes: Array[String] = Array(
+    "TableGroup",
+    "Table",
+    "Schema",
+    "Column",
+    "Dialect",
+    "Template",
+    "Datatype"
+  )
+  val undefinedLanguage: String = "und"
+  val tableDirectionValidValues = Set("rtl", "ltr", "auto")
+  val validTextDirectionValues = Set("ltr", "rtl", "auto", "inherit")
 }

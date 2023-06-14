@@ -6,8 +6,6 @@ import csvwcheck.ConfiguredObjectMapper.objectMapper
 import csvwcheck.errors.{ErrorWithoutContext, WarningWithCsvContext}
 import org.scalatest.funsuite.AnyFunSuite
 
-import scala.collection.mutable
-
 //noinspection HttpUrlsUsage
 class ColumnTest extends AnyFunSuite {
   def getColumnWithFormat(formatJson: Option[String]): Column = {
@@ -20,12 +18,9 @@ class ColumnTest extends AnyFunSuite {
          |""".stripMargin
 
     val jsonNode = objectMapper.readTree(json)
-    val (column, _) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map[String, JsonNode]()
+      jsonNode.asInstanceOf[ObjectNode]
     )
     column
   }
@@ -39,12 +34,9 @@ class ColumnTest extends AnyFunSuite {
         |""".stripMargin
 
     val jsonNode = objectMapper.readTree(json)
-    val (column, _) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map[String, JsonNode]()
+      jsonNode.asInstanceOf[ObjectNode]
     )
 
     val datatypeDefaultValue = "http://www.w3.org/2001/XMLSchema#string"
@@ -53,15 +45,14 @@ class ColumnTest extends AnyFunSuite {
     assert(column.baseDataType === datatypeDefaultValue)
     assert(column.lang === "und")
     assert(column.textDirection === "inherit")
-    assert(column.annotations === mutable.Map[String, JsonNode]())
     assert(!column.virtual)
     assert(column.columnOrdinal == 1)
     assert(!column.ordered)
     assert(!column.required)
     assert(!column.suppressOutput)
-    assert(column.aboutUrl.isEmpty)
+    assert(column.urls.aboutUrl.isEmpty)
     assert(column.default == "")
-    assert(column.propertyUrl.isEmpty)
+    assert(column.urls.propertyUrl.isEmpty)
     assert(column.separator.isEmpty)
     assert(column.titleValues.isEmpty)
   }
@@ -72,76 +63,52 @@ class ColumnTest extends AnyFunSuite {
       """
         |{
         |   "name": "countryCode",
-        |   "titles": "countryCode",
+        |   "titles": {
+        |     "en": ["countryCode"]
+        |   },
         |   "propertyUrl": "http://www.geonames.org/ontology",
         |   "aboutUrl": "sampleUrl",
-        |   "datatype": "integer",
+        |   "datatype": {
+        |     "@id": "http://www.w3.org/2001/XMLSchema#integer"
+        |   },
         |   "lang": "en",
         |   "default": "00",
-        |   "null": "-",
+        |   "null": ["-"],
         |   "ordered": true,
         |   "propertyUrl": "http://www.geonames.org/ontology",
-        |   "required": true, 
+        |   "required": true,
         |   "separator": ",",
         |   "suppressOutput": true,
         |   "textDirection": "rtl",
-        |   "titles": [ "countryCode" ],
         |   "valueUrl": "http://www.geonames.org/ontology",
         |   "virtual": true
         |}
         |""".stripMargin
 
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "en",
-      mutable.Map()
+      jsonNode.asInstanceOf[ObjectNode]
     )
     val expectedDataType = "http://www.w3.org/2001/XMLSchema#integer"
 
     assert(column.name.get === "countryCode")
     assert(column.columnOrdinal === 1)
     assert(column.id === None)
-    assert(column.aboutUrl.get === "sampleUrl")
+    assert(column.urls.aboutUrl.get === "sampleUrl")
     assert(column.baseDataType === expectedDataType)
     assert(column.default === "00")
     assert(column.lang === "en")
     assert(column.nullParam === Array[String]("-"))
     assert(column.ordered === true)
-    assert(column.propertyUrl.get === "http://www.geonames.org/ontology")
+    assert(column.urls.propertyUrl.get === "http://www.geonames.org/ontology")
     assert(column.required === true)
     assert(column.separator.get === ",")
     assert(column.suppressOutput === true)
     assert(column.textDirection === "rtl")
     assert(column.titleValues("en") === Array("countryCode"))
-    assert(column.valueUrl.get === "http://www.geonames.org/ontology")
+    assert(column.urls.valueUrl.get === "http://www.geonames.org/ontology")
     assert(column.virtual === true)
-    assert(column.annotations === mutable.Map[String, JsonNode]())
-    assert(warnings === Array[WarningWithCsvContext]())
-  }
-
-  test("it should generate warnings for null values of unexpected type") {
-    val json =
-      """
-        |{
-        |   "name": "countryCode",
-        |   "null": true
-        |}
-        |""".stripMargin
-
-    val jsonNode = objectMapper.readTree(json)
-    val (_, warnings) = Column.fromJson(
-      1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map()
-    )
-    assert(warnings(0).`type` === "invalid_value")
-    assert(warnings(0).content === "null: true")
-    assert(warnings.length === 1)
   }
 
   test("it should return no warnings for a null value of null") {
@@ -155,34 +122,27 @@ class ColumnTest extends AnyFunSuite {
         |""".stripMargin
 
     val jsonNode = objectMapper.readTree(json)
-    val (column, warnings) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map()
+      jsonNode.asInstanceOf[ObjectNode]
     )
-    assert(warnings.length === 0)
     assert(column.nullParam === Array[String](""))
   }
 
   test("should set the correct datatype") {
     val json =
       """
-        |{ 
-        |   "name": "Id", 
-        |   "required": true, 
+        |{
+        |   "name": "Id",
+        |   "required": true,
         |   "datatype": { "base": "string", "minLength": 3 }
         |}
         |""".stripMargin
 
     val jsonNode = objectMapper.readTree(json)
-    val (column, _) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map()
+      jsonNode.asInstanceOf[ObjectNode]
     )
     val expectedDatatypeValue: ObjectNode = JsonNodeFactory.instance
       .objectNode()
@@ -194,7 +154,7 @@ class ColumnTest extends AnyFunSuite {
 
     assert(column.name.get === "Id")
     assert(column.required)
-    assert(column.minLength.get === 3)
+    assert(column.lengthRestrictions.minLength.get === 3)
   }
 
   // Tests for processFloatDatatype method
@@ -667,7 +627,7 @@ class ColumnTest extends AnyFunSuite {
   test(
     "should process Y as true for boolean datatype when appropriate format is provided"
   ) {
-    val (columnWithFormat, _) = {
+    val Right((columnWithFormat)) = {
       val json =
         s"""
            |{
@@ -682,10 +642,7 @@ class ColumnTest extends AnyFunSuite {
       val jsonNode = objectMapper.readTree(json)
       Column.fromJson(
         1,
-        jsonNode.asInstanceOf[ObjectNode],
-        "https://www.w3.org/",
-        "und",
-        mutable.Map[String, JsonNode]()
+        jsonNode.asInstanceOf[ObjectNode]
       )
     }
     val result = columnWithFormat.processBooleanDatatype("Y")
@@ -725,12 +682,9 @@ class ColumnTest extends AnyFunSuite {
       |}
       |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, _) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map[String, JsonNode]()
+      jsonNode.asInstanceOf[ObjectNode]
     )
 
     val errors = column.validateLength("12")
@@ -750,12 +704,9 @@ class ColumnTest extends AnyFunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, _) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map[String, JsonNode]()
+      jsonNode.asInstanceOf[ObjectNode]
     )
 
     val errors = column.validateLength("ABCDEFG")
@@ -776,12 +727,9 @@ class ColumnTest extends AnyFunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, _) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map[String, JsonNode]()
+      jsonNode.asInstanceOf[ObjectNode]
     )
     val errors = column.validateLength("ABC4")
     assert(errors.length == 1)
@@ -803,12 +751,9 @@ class ColumnTest extends AnyFunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, _) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map[String, JsonNode]()
+      jsonNode.asInstanceOf[ObjectNode]
     )
     val error1 =
       column.validateValue(5)
@@ -864,12 +809,9 @@ class ColumnTest extends AnyFunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, _) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map[String, JsonNode]()
+      jsonNode.asInstanceOf[ObjectNode]
     )
     val error1 =
       column.validateValue(3)
@@ -927,12 +869,9 @@ class ColumnTest extends AnyFunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, _) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map[String, JsonNode]()
+      jsonNode.asInstanceOf[ObjectNode]
     )
     val error1 =
       column.validateValue(3)
@@ -984,12 +923,9 @@ class ColumnTest extends AnyFunSuite {
         |}
         |""".stripMargin
     val jsonNode = objectMapper.readTree(json)
-    val (column, _) = Column.fromJson(
+    val Right(column) = Column.fromJson(
       1,
-      jsonNode.asInstanceOf[ObjectNode],
-      "https://www.w3.org/",
-      "und",
-      mutable.Map[String, JsonNode]()
+      jsonNode.asInstanceOf[ObjectNode]
     )
     val error1 =
       column.validateValue(BigDecimal("9223372036854771000"))

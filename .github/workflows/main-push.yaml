@@ -1,0 +1,15 @@
+name: Test csvcubed on main branch push
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test_in_environments:
+    strategy:
+      matrix:
+        # Test on Ubuntu
+        os: [ubuntu-latest]
+    uses: ./.github/workflows/reusable-test.yaml
+    with:
+      os: ${{ matrix.os }}

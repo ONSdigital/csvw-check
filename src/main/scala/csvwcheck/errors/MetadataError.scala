@@ -1,6 +1,7 @@
 package csvwcheck.errors
 
-final case class MetadataError(
-    message: String = "",
-    cause: Throwable = None.orNull
-) extends Exception(message, cause)
+case class MetadataError(
+                          message: String = "",
+                          propertyPath: Array[String] = Array(),
+                          cause: Throwable = None.orNull
+                        ) extends Exception(message, cause)

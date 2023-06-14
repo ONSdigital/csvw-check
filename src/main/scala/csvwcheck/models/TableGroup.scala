@@ -1,465 +1,527 @@
 package csvwcheck.models
 
+import akka.NotUsed
+import akka.stream.scaladsl.Source
 import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.node.{ArrayNode, JsonNodeFactory, ObjectNode, TextNode}
-import csvwcheck.enums.PropertyType
+import com.fasterxml.jackson.databind.node.ObjectNode
 import csvwcheck.errors.{ErrorWithCsvContext, MetadataError, WarningWithCsvContext}
+import csvwcheck.models.ParseResult.ParseResult
+import csvwcheck.models.Table.{MapForeignKeyDefinitionToValues, MapForeignKeyReferenceToValues, parseDialect}
+import csvwcheck.models.WarningsAndErrors.TolerableErrors
+import csvwcheck.normalisation.InheritedProperties
 import csvwcheck.traits.JavaIteratorExtensions.IteratorHasAsScalaArray
-import csvwcheck.traits.ObjectNodeExtentions.IteratorHasGetKeysAndValues
-import csvwcheck.{PropertyChecker, models}
-import org.apache.commons.csv.CSVRecord
+import csvwcheck.traits.ObjectNodeExtentions.ObjectNodeGetMaybeNode
+import shapeless.syntax.std.tuple.productTupleOps
+import sttp.client3.{Identity, SttpBackend}
 
-import java.net.URL
-import scala.collection.mutable
-import scala.collection.mutable.{ArrayBuffer, Map}
+import scala.math.sqrt
 import scala.util.matching.Regex
 
 object TableGroup {
-  val csvwContextUri = "http://www.w3.org/ns/csvw"
-  val validProperties: Array[String] = Array[String]("tables", "notes", "@type")
   val containsWhitespaces: Regex = ".*\\s.*".r
 
   def fromJson(
-      tableGroupNodeIn: ObjectNode,
-      baseUri: String
-  ): (TableGroup, WarningsAndErrors) = {
-    var baseUrl = baseUri.trim
-    var errors = Array[ErrorWithCsvContext]()
-    var warnings = Array[WarningWithCsvContext]()
-    val matcher = containsWhitespaces.pattern.matcher(baseUrl)
-    if (matcher.matches()) {
-      println(
-        "Warning: The path/url has whitespaces in it, please ensure its correctness. Proceeding with received " +
-          "path/url .."
+                standardisedTableGroupNode: ObjectNode
+              ): ParseResult[WithWarningsAndErrors[TableGroup]] = {
+    val (baseUrl, _) = parseContext(standardisedTableGroupNode)
+
+    val warnings = if (containsWhitespaces.matches(baseUrl)) {
+      Array(
+        WarningWithCsvContext(
+          "invalid_url",
+          "metadata",
+          "",
+          "",
+          "Base URL has whitespaces in it, please ensure its correctness. Proceeding with received path/url ..",
+          ""
+        )
       )
-    }
-    val processContextResult =
-      processContextGetBaseUrlLang(tableGroupNodeIn, baseUrl, "und")
-    baseUrl = processContextResult._1
-    val lang = processContextResult._2
-    warnings = Array.concat(warnings, processContextResult._3)
-    val tableGroupNode = restructureIfNodeIsSingleTable(tableGroupNodeIn)
-
-    val (annotations, commonProperties, inheritedProperties, w1) =
-      classifyPropertiesBasedOnPropertyTypeAndSetWarnings(
-        tableGroupNode,
-        baseUrl,
-        lang
-      )
-    warnings = Array.concat(warnings, w1)
-    val id = getId(commonProperties)
-    ensureTypeofTableGroup(tableGroupNode)
-
-    val (tables, warningsAndErrors) = createTableObjectsAndSetWarnings(
-      tableGroupNode,
-      baseUrl,
-      lang,
-      commonProperties,
-      inheritedProperties
-    )
-    warnings = warnings.concat(warningsAndErrors.warnings)
-    errors = errors.concat(warningsAndErrors.errors)
-
-    findForeignKeysLinkToReferencedTables(baseUrl, tables)
-
-    val tableGroup = TableGroup(
-      baseUrl,
-      id,
-      tables,
-      commonProperties.get("notes"),
-      annotations
-    )
-    (tableGroup, models.WarningsAndErrors(warnings = warnings, errors = errors))
-  }
-
-  private def restructureIfNodeIsSingleTable(
-      tableGroupNode: ObjectNode
-  ): ObjectNode = {
-    if (tableGroupNode.path("tables").isMissingNode) {
-      if (!tableGroupNode.path("url").isMissingNode) {
-        val newTableGroup = JsonNodeFactory.instance.objectNode()
-        val tables = JsonNodeFactory.instance.arrayNode()
-        tables.insert(0, tableGroupNode)
-        newTableGroup.set("tables", tables)
-        return newTableGroup
-      }
-    }
-    tableGroupNode
-  }
-
-  def processContextGetBaseUrlLang(
-      rootNode: ObjectNode,
-      baseUrl: String,
-      lang: String
-  ): (String, String, Array[WarningWithCsvContext]) = {
-    val context = rootNode.get("@context")
-
-    val (baseUrlNew, langNew, warnings) = context match {
-      case a: ArrayNode => validateContextArrayNode(a, baseUrl, lang)
-      case s: TextNode if s.asText == csvwContextUri =>
-        (baseUrl, lang, Array[WarningWithCsvContext]())
-      case _ => throw MetadataError("Invalid Context")
-    }
-    rootNode.remove("@context")
-    (baseUrlNew, langNew, warnings)
-  }
-
-  // https://www.w3.org/TR/2015/REC-tabular-metadata-20151217/#top-level-properties
-  def validateContextArrayNode(
-      context: ArrayNode,
-      baseUrl: String,
-      lang: String
-  ): (String, String, Array[WarningWithCsvContext]) = {
-    def validateFirstItemInContext(): Unit = {
-      context.get(0) match {
-        case s: TextNode if s.asText == csvwContextUri =>
-        case _ =>
-          throw MetadataError(
-            s"First item in @context must be string $csvwContextUri "
-          )
-      }
+    } else {
+      Array[WarningWithCsvContext]()
     }
 
-    context.size() match {
-      case 2 =>
-        // if @context contains 2 elements, the first element will be the namespace for csvw - http://www.w3.org/ns/csvw
-        // The second element can be @language or @base - "@context": ["http://www.w3.org/ns/csvw", {"@language": "en"}]
-        validateFirstItemInContext()
-        context.get(1) match {
-          case contextBaseAndLangObject: ObjectNode =>
-            getAndValidateBaseAndLangFromContextObject(
-              contextBaseAndLangObject,
-              baseUrl,
-              lang
-            )
-          case _ =>
-            throw MetadataError(
-              "Second @context array value must be an object"
-            )
-        }
-      case 1 =>
-        // If @context contains just one element, the namespace for csvw should always be http://www.w3.org/ns/csvw
-        // "@context": "http://www.w3.org/ns/csvw"
-        validateFirstItemInContext()
-        (baseUrl, lang, Array[WarningWithCsvContext]())
-      case l =>
-        throw MetadataError(s"Unexpected @context array length $l")
-    }
-  }
-
-  /**
-    * This function validates the second item in context property.
-    * The second element can be @language or @base - "@context": ["http://www.w3.org/ns/csvw", {"@language": "en"}]
-    * @param contextBaseAndLangObject - The context object.
-    * @param baseUrl - The base URL of the CSV-W
-    * @param lang - The language.
-    * @return newBaseUrl, newLang, warnings (if any)
-    */
-  def getAndValidateBaseAndLangFromContextObject(
-      contextBaseAndLangObject: ObjectNode,
-      baseUrl: String,
-      lang: String
-  ): (String, String, Array[WarningWithCsvContext]) = {
-    var baseUrlNew = baseUrl
-    var langNew: String = lang
-    var warnings = Array[WarningWithCsvContext]()
-
-    for ((property, value) <- contextBaseAndLangObject.getKeysAndValues) {
-      val (newValue, w, csvwPropertyType) = PropertyChecker
-        .checkProperty(property, value, baseUrl, lang)
-      if (w.isEmpty) {
-        if (csvwPropertyType == PropertyType.Context) {
-          property match {
-            case "@base"     => baseUrlNew = newValue.asText()
-            case "@language" => langNew = newValue.asText()
-          }
-        } else {
-          throw MetadataError(
-            s"@context contains properties other than @base or @language $property)"
-          )
-        }
-      } else {
-        if (!Array[String]("@base", "@language").contains(property)) {
-          throw MetadataError(
-            s"@context contains properties other than @base or @language $property)"
-          )
-        }
-        warnings = warnings.concat(w.map { w =>
-          WarningWithCsvContext(
-            w,
-            "metadata",
-            "",
-            "",
-            s"$property: $value",
-            ""
-          )
-        })
-      }
-    }
-    (baseUrlNew, langNew, warnings)
-  }
-
-  private def findForeignKeysLinkToReferencedTables(
-      baseUrl: String,
-      tables: mutable.Map[String, Table]
-  ): Unit = {
-    for ((tableUrl, table) <- tables) {
-      table.schema.map(s => {
-        for ((foreignKey, i) <- s.foreignKeys.zipWithIndex) {
-          val reference = foreignKey.jsonObject.get("reference")
-          val parentTable: Table = setReferencedTableOrThrowException(
+    parseTables(standardisedTableGroupNode)
+      .flatMap({
+        case tablesWithWarningsAndErrors =>
+          linkForeignKeysToReferencedTables(tablesWithWarningsAndErrors.component)
+            .map(tables => tablesWithWarningsAndErrors.copy(component = tables))
+      })
+      .flatMap(tablesWithWarningsAndErrors => {
+        for {
+          dialect <- parseDialect(standardisedTableGroupNode)
+        } yield {
+          val tableGroup = TableGroup(
             baseUrl,
-            tables,
-            tableUrl,
-            i,
-            reference
+            getId(standardisedTableGroupNode),
+            tablesWithWarningsAndErrors.component,
+            standardisedTableGroupNode.getMaybeNode("notes"),
+            dialect
           )
-          val mapNameToColumn: mutable.Map[String, Column] = mutable.Map()
-          parentTable.schema.map(parentSchema => {
-            for (column <- parentSchema.columns) {
-              column.name
-                .foreach(columnName => mapNameToColumn += (columnName -> column))
-            }
-          })
 
-          val parentReferencedColumns: Array[Column] = reference
-            .get("columnReference")
-            .elements()
-            .asScalaArray
-            .map(columnReference => {
-              mapNameToColumn.get(columnReference.asText()) match {
-                case Some(column) => column
-                case None =>
-                  throw MetadataError(
-                    s"column named ${columnReference.asText()} does not exist in ${parentTable.url}," +
-                      s" $$.tables[?(@.url = '$tableUrl')].tableSchema.foreign_keys[$i].reference.columnReference"
-                  )
-              }
-            })
-
-          val foreignKeyWithTable =
-            ParentTableForeignKeyReference(
-              foreignKey,
-              parentTable,
-              parentReferencedColumns,
-              table
+          WithWarningsAndErrors(
+            tableGroup,
+            WarningsAndErrors(
+              warnings = warnings ++ tablesWithWarningsAndErrors.warningsAndErrors.warnings,
+              errors = tablesWithWarningsAndErrors.warningsAndErrors.errors
             )
-          parentTable.foreignKeyReferences :+= foreignKeyWithTable
-          tables += (parentTable.url -> parentTable)
+          )
         }
       })
-    }
   }
 
-  private def setReferencedTableOrThrowException(
-                                                  baseUrl: String,
-                                                  tables: mutable.Map[String, Table],
-                                                  tableUrl: String,
-                                                  foreignKeyArrayIndex: Int,
-                                                  reference: JsonNode
-  ): Table = {
-    val resourceNode = reference.path("resource")
-    if (resourceNode.isMissingNode) {
-      val schemaReferenceNode =
-        reference.get(
-          "schemaReference"
-        ) // Perform more checks and provide useful error messages if schemaReference is not present
-      val schemaUrl =
-        new URL(new URL(baseUrl), schemaReferenceNode.asText()).toString
-      val referencedTables = List.from(
-        tables.values
-          .filter(t =>
-            t.schema
-              .flatMap(s => s.schemaId)
-              .exists(schemaId => schemaId == schemaUrl)
-          )
+  def parseContext(
+                    tableGroupObjectNode: ObjectNode
+                  ): (String, String) = {
+    val contextObject = tableGroupObjectNode
+      .get("@context")
+      .elements()
+      .asScalaArray
+      .apply(1)
+      .asInstanceOf[ObjectNode]
+
+    val baseUrl = contextObject.get("@base").asText
+    val language = contextObject.get("@language").asText
+
+    (baseUrl, language)
+  }
+
+
+  private def linkForeignKeysToReferencedTables(
+                                                 tables: Map[String, Table]
+                                               ): ParseResult[Map[String, Table]] = {
+    tables.foldLeft[ParseResult[Map[String, Table]]](Right(tables))({
+      case (err@Left(_), _) => err
+      case (Right(tables), (_, originTable)) =>
+        linkForeignKeysDefinedOnTable(tables, originTable)
+    })
+  }
+
+  private def linkForeignKeysDefinedOnTable(
+                                             tables: Map[String, Table],
+                                             definitionTable: Table
+                                           ): ParseResult[Map[String, Table]] = {
+    definitionTable.schema
+      .map(tableSchema =>
+        tableSchema.foreignKeys.zipWithIndex
+          .foldLeft[ParseResult[Map[String, Table]]](Right(tables))({
+            case (err@Left(_), _) => err
+            case (Right(tables), (foreignKey, foreignKeyOrdinal)) =>
+              linkForeignKeyToReferencedTable(
+                tables,
+                definitionTable,
+                foreignKey,
+                foreignKeyOrdinal
+              )
+          })
       )
-      referencedTables match {
-        case referencedTable :: _ => referencedTable
-        case Nil =>
-          throw MetadataError(
-            s"Could not find foreign key referenced schema $schemaUrl, " +
-              s"$$.tables[?(@.url = '$tableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference.SchemaReference"
-          )
-      }
-    } else {
-      val referencedTableUrl = new URL(
-        new URL(baseUrl),
-        resourceNode.asText()
-      ).toString
-      tables.get(referencedTableUrl) match {
-        case Some(refTable) =>
-          refTable
-        case None =>
-          throw MetadataError(
-            s"Could not find foreign key referenced table $referencedTableUrl, " +
-              s"$$.tables[?(@.url = '$tableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference.resource"
-          )
-      }
-    }
+      .getOrElse(Right(tables))
   }
 
-  private def ensureTypeofTableGroup(tableGroupNode: ObjectNode): Unit = {
-    val typeNode = tableGroupNode.path("@type")
-    if (!typeNode.isMissingNode && typeNode.asText != "TableGroup") {
-      throw MetadataError(
-        s"@type of table group is not 'TableGroup', found @type to be a '${typeNode.asText()}'"
-      )
-    }
-  }
-
-  def classifyPropertiesBasedOnPropertyTypeAndSetWarnings(
-      tableGroupNode: ObjectNode,
-      baseUrl: String,
-      lang: String
-  ): (
-      mutable.Map[String, JsonNode],
-      mutable.Map[String, JsonNode],
-      mutable.Map[String, JsonNode],
-      Array[WarningWithCsvContext]
-  ) = {
-    val annotations = mutable.Map[String, JsonNode]()
-    val commonProperties = mutable.Map[String, JsonNode]()
-    val inheritedProperties = mutable.Map[String, JsonNode]()
-    val warnings = ArrayBuffer.empty[WarningWithCsvContext]
-    for ((property, value) <- tableGroupNode.getKeysAndValues) {
-      if (!validProperties.contains(property)) {
-        val (newValue, w, csvwPropertyType) =
-          PropertyChecker.checkProperty(property, value, baseUrl, lang)
-        warnings.addAll(
-          w.map(x =>
-            WarningWithCsvContext(
-              x,
-              "metadata",
-              "",
-              "",
-              s"$property : ${value.toPrettyString}",
-              ""
+  private def linkForeignKeyToReferencedTable(
+                                               tables: Map[String, Table],
+                                               definitionTable: Table,
+                                               foreignKey: ForeignKeyDefinition,
+                                               foreignKeyOrdinal: Int
+                                             ): ParseResult[Map[String, Table]] = {
+    foreignKey.jsonObject
+      .getMaybeNode("reference")
+      .map({
+        case referenceObjectNode: ObjectNode =>
+          getReferencedTableForForeignKey(
+            tables,
+            definitionTable.url,
+            foreignKeyOrdinal,
+            referenceObjectNode
+          ).flatMap(referencedTable =>
+            referencedTable.schema
+              .map(
+                setForeignKeyOnReferencedTable(
+                  definitionTable,
+                  foreignKey,
+                  referencedTable,
+                  _,
+                  referenceObjectNode,
+                  foreignKeyOrdinal
+                )
+              )
+              .getOrElse(
+                Left(
+                  MetadataError(
+                    s"Unable to locate schema for table '${definitionTable.url}'"
+                  )
+                )
+              )
+          )
+            .map(referencedTable =>
+              tables.updated(referencedTable.url, referencedTable)
             )
+        case referenceNode =>
+          Left(
+            MetadataError(
+              s"Foreign Key reference was not an object: ${referenceNode.toPrettyString}"
+            )
+          )
+      })
+      .getOrElse(
+        Left(
+          MetadataError(
+            s"Foreign key reference node unset on '${definitionTable.url}' foreign key at index $foreignKeyOrdinal."
           )
         )
-        csvwPropertyType match {
-          case PropertyType.Annotation => annotations += (property -> newValue)
-          case PropertyType.Common     => commonProperties += (property -> newValue)
-          case PropertyType.Inherited =>
-            inheritedProperties += (property -> newValue)
-          case _ =>
-            warnings.addOne(
-              WarningWithCsvContext(
-                "invalid_property",
-                "metadata",
-                "",
-                "",
-                property,
-                ""
-              )
-            )
-        }
-      }
-      ()
-    }
-    (annotations, commonProperties, inheritedProperties, warnings.toArray)
+      )
   }
 
-  private def createTableObjectsAndSetWarnings(
-      tableGroupNode: ObjectNode,
-      baseUrl: String,
-      lang: String,
-      commonProperties: mutable.Map[String, JsonNode],
-      inheritedProperties: mutable.Map[String, JsonNode]
-  ): (mutable.Map[String, Table], WarningsAndErrors) = {
-    tableGroupNode.path("tables") match {
-      case t: ArrayNode if t.isEmpty() =>
-        throw MetadataError("Empty tables property")
-      case t: ArrayNode =>
-        extractTablesFromNode(
-          t,
-          baseUrl,
-          lang,
-          commonProperties,
-          inheritedProperties
+  private def getReferencedTableForForeignKey(
+                                               tables: Map[String, Table],
+                                               originTableUrl: String,
+                                               foreignKeyArrayIndex: Int,
+                                               referenceObject: ObjectNode
+                                             ): ParseResult[Table] = {
+    referenceObject
+      .getMaybeNode("resource")
+      .map(resourceNode => {
+        val referencedTableUrl = resourceNode.asText
+        tables
+          .get(referencedTableUrl)
+          .map(Right(_))
+          .getOrElse(
+            Left(
+              MetadataError(
+                s"Could not find foreign key referenced table $referencedTableUrl, " +
+                  s"$$.tables[?(@.url = '$originTableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference.resource"
+              )
+            )
+          )
+      })
+      .getOrElse(
+        referenceObject
+          .getMaybeNode("schemaReference")
+          .map(schemaReferenceNode => {
+            val schemaUrl = schemaReferenceNode.asText
+            tables.values
+              .filter(table =>
+                table.schema.exists(s => s.schemaId.contains(schemaUrl))
+              )
+              .toList
+              .headOption
+              .map(Right(_))
+              .getOrElse(
+                Left(
+                  MetadataError(
+                    s"Could not find foreign key referenced schema $schemaUrl, " +
+                      s"$$.tables[?(@.url = '$originTableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference.SchemaReference"
+                  )
+                )
+              )
+          })
+          .getOrElse(
+            Left(
+              MetadataError(
+                s"Could not find foreign `resource` or `schemaReference` on " +
+                  s"$$.tables[?(@.url = '$originTableUrl')].tableSchema.foreignKeys[$foreignKeyArrayIndex].reference"
+              )
+            )
+          )
+      )
+  }
+
+  private def setForeignKeyOnReferencedTable(
+                                              definitionTable: Table,
+                                              foreignKeyDefinition: ForeignKeyDefinition,
+                                              referencedTable: Table,
+                                              referencedTableSchema: TableSchema,
+                                              referenceNode: ObjectNode,
+                                              foreignKeyOrdinal: Int
+                                            ): ParseResult[Table] = {
+    val mapNameToColumn = referencedTableSchema.columns
+      .flatMap(col => col.name.map((_, col)))
+      .toMap
+
+    referenceNode
+      .getMaybeNode("columnReference")
+      .map(columnReferenceNode => {
+        columnReferenceNode
+          .elements()
+          .asScalaArray
+          .map(columnReference => {
+            mapNameToColumn
+              .get(columnReference.asText)
+              .map(Right(_))
+              .getOrElse(
+                Left(
+                  MetadataError(
+                    s"column named ${
+                      columnReference
+                        .asText()
+                    } does not exist in ${referencedTable.url}," +
+                      s" $$.tables[?(@.url = '${definitionTable.url}')].tableSchema.foreign_keys[$foreignKeyOrdinal].reference.columnReference"
+                  )
+                )
+              )
+          })
+          .foldLeft[ParseResult[Array[Column]]](Right(Array[Column]()))({
+            case (err@Left(_), _) => err
+            case (_, Left(newErr)) => Left(newErr)
+            case (Right(columns), Right(newColumn)) =>
+              Right(columns :+ newColumn)
+          })
+      })
+      .getOrElse(
+        Left(MetadataError("Did not find columnReference node."))
+      )
+      .map(referencedTableColumns =>
+        referencedTable.copy(
+          foreignKeyReferences =
+            referencedTable.foreignKeyReferences :+ ReferencedTableForeignKeyReference(
+              foreignKeyDefinition,
+              referencedTable,
+              referencedTableColumns,
+              definitionTable
+            )
         )
-      case n if n.isMissingNode => throw MetadataError("No tables property")
-      case _                    => throw MetadataError("Tables property is not an array")
-    }
+      )
   }
 
-  def extractTablesFromNode(
-                             tablesArrayNode: ArrayNode,
-                             baseUrl: String,
-                             lang: String,
-                             commonProperties: mutable.Map[String, JsonNode],
-                             inheritedProperties: mutable.Map[String, JsonNode]
-  ): (mutable.Map[String, Table], WarningsAndErrors) = {
-    val warnings = ArrayBuffer.empty[WarningWithCsvContext]
-    val errors = ArrayBuffer.empty[ErrorWithCsvContext]
-    val tables = mutable.Map[String, Table]()
-    for (tableElement <- tablesArrayNode.elements().asScalaArray) {
-      tableElement match {
-        case tableElementObject: ObjectNode =>
-          var tableUrl = tableElement.get("url")
-          if (!tableUrl.isTextual) {
-            errors.addOne(
-              ErrorWithCsvContext(
-                "invalid_url",
-                "metadata",
-                "",
-                "",
-                s"url: $tableUrl",
-                ""
-              )
-            )
-            tableUrl = new TextNode("")
-          }
-          tableUrl = new TextNode(
-            new URL(new URL(baseUrl), tableUrl.asText()).toString
-          )
-          tableElementObject.set("url", tableUrl)
-          val (table, w) = Table.fromJson(
-            tableElementObject,
-            baseUrl,
-            lang,
-            commonProperties,
-            inheritedProperties
-          )
-          tables += (tableUrl.asText -> table)
-          warnings.addAll(w)
-        case _ =>
-          warnings.addOne(
-            WarningWithCsvContext(
+  private def parseTables(tableGroupNode: ObjectNode): ParseResult[WithWarningsAndErrors[Map[String, Table]]] = {
+    tableGroupNode.get("tables")
+      .elements()
+      .asScalaArray
+      .foldLeft[ParseResult[WithWarningsAndErrors[Map[String, Table]]]](
+        Right(WithWarningsAndErrors(Map(), WarningsAndErrors()))
+      )({
+        case (err@Left(_), _) => err
+        case (
+          Right(WithWarningsAndErrors(tables, warningsAndErrors)),
+          tableObjectNode: ObjectNode
+          ) =>
+          Table
+            .fromJson(InheritedProperties.copyInheritedProperties(tableGroupNode, tableObjectNode))
+            .map({
+              case (table, warnings) =>
+                WithWarningsAndErrors(
+                  tables + (table.url -> table),
+                  warningsAndErrors.copy(
+                    warnings = warningsAndErrors.warnings ++ warnings
+                  )
+                )
+            })
+        case (
+          Right(WithWarningsAndErrors(tables, warningsAndErrors)),
+          tableElement
+          ) =>
+          val newWarningsAndErrors = warningsAndErrors.copy(warnings =
+            warningsAndErrors.warnings :+ WarningWithCsvContext(
               "invalid_table_description",
               "metadata",
               "",
               "",
-              s"Value must be instance of object, found: ${tableElement.toPrettyString}",
+              s"Table must be instance of object, found: $tableElement",
               ""
             )
           )
-      }
-    }
-    (
-      tables,
-      WarningsAndErrors(errors = errors.toArray, warnings = warnings.toArray)
-    )
+          Right(WithWarningsAndErrors(tables, newWarningsAndErrors))
+      })
   }
 
-  private def getId(commonProperties: mutable.Map[String, JsonNode]) = {
-    commonProperties
-      .get("@id")
-      .map(idNode => idNode.asText())
+  private def getId(tableGroupNode: ObjectNode): Option[String] = {
+    tableGroupNode.getMaybeNode("@id")
+      .map(_.asText)
   }
-
 }
-case class TableGroup private (
-                                baseUrl: String,
-                                id: Option[String],
-                                tables: mutable.Map[String, Table],
-                                notes: Option[JsonNode],
-                                annotations: mutable.Map[String, JsonNode]
-) {
 
-  def validateHeader(
-      header: CSVRecord,
-      tableUrl: String
-  ): WarningsAndErrors = tables(tableUrl).validateHeader(header)
+case class TableGroup private(
+                               baseUrl: String,
+                               id: Option[String],
+                               tables: Map[String, Table],
+                               notes: Option[JsonNode],
+                               dialect: Option[Dialect]
+                             ) {
+  type MapTableToForeignKeyDefinitions =
+    Map[Table, MapForeignKeyDefinitionToValues]
+  type MapTableToForeignKeyReferences =
+    Map[Table, MapForeignKeyReferenceToValues]
+
+  type TableState = (
+    WarningsAndErrors,
+      MapTableToForeignKeyDefinitions,
+      MapTableToForeignKeyReferences
+    )
+
+  def validateCsvsAgainstTables(parallelism: Int, rowGrouping: Int, httpClient: SttpBackend[Identity, Any]): Source[WarningsAndErrors, NotUsed] = {
+    val degreeOfParallelism =
+      math.min(tables.size, sqrt(parallelism).floor.toInt)
+    val degreeOfParallelismInTable = parallelism / degreeOfParallelism
+    Source
+      .fromIterator(() => tables.values.iterator)
+      .flatMapMerge(
+        degreeOfParallelism,
+        table =>
+          table
+            .parseCsv(degreeOfParallelismInTable, rowGrouping, httpClient)
+            .map(_ :+ table)
+      )
+      .fold[TableState](
+        (
+          WarningsAndErrors(),
+          Map(),
+          Map()
+        )
+      ) {
+        case (
+          (
+            warningsAndErrorsAccumulator,
+            foreignKeysAccumulator,
+            foreignKeyReferencesAccumulator
+            ),
+          (
+            warningsAndErrorsSource,
+            foreignKeysSource,
+            foreignKeyReferencesSource,
+            table
+            )
+          ) =>
+          (
+            WarningsAndErrors(
+              warningsAndErrorsAccumulator.warnings ++ warningsAndErrorsSource.warnings,
+              warningsAndErrorsAccumulator.errors ++ warningsAndErrorsSource.errors
+            ),
+            foreignKeysAccumulator.updated(table, foreignKeysSource),
+            foreignKeyReferencesAccumulator.updated(
+              table,
+              foreignKeyReferencesSource
+            )
+          )
+      }
+      .map {
+        case (
+          warningsAndErrors,
+          allForeignKeyDefinitions,
+          allForeignKeyReferences
+          ) =>
+          WarningsAndErrors(
+            errors = warningsAndErrors.errors ++ validateForeignKeyIntegrity(
+              allForeignKeyDefinitions,
+              allForeignKeyReferences
+            ),
+            warnings = warningsAndErrors.warnings
+          )
+      }
+  }
+
+  private def validateForeignKeyIntegrity(
+                                           foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+                                           foreignKeyReferencesByTable: MapTableToForeignKeyReferences
+                                         ): TolerableErrors = {
+    // Origin/Definition Table : Referenced Table
+    // Country, Year, Population  : Country, Name
+    // UK, 2021, 67M  : UK, United Kingdom
+    // EU, 2021, 448M : EU, Europe
+    val errorsPerForeignKeyReference = for {
+      (referencedTable, mapForeignKeyReferenceToAllPossibleValues) <-
+        foreignKeyReferencesByTable
+
+      (parentTableForeignKeyReference, allPossibleParentTableValues) <-
+        mapForeignKeyReferenceToAllPossibleValues
+    } yield validateForeignKeyIntegrity(
+      foreignKeyDefinitionsByTable,
+      referencedTable,
+      parentTableForeignKeyReference,
+      allPossibleParentTableValues
+    )
+
+    errorsPerForeignKeyReference.flatten.toArray
+  }
+
+  private def validateForeignKeyIntegrity(
+                                           foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+                                           referencedTable: Table,
+                                           foreignKeyReference: ReferencedTableForeignKeyReference,
+                                           allValidValues: Set[KeyWithContext]
+                                         ): TolerableErrors = {
+    val keysReferencesInOriginTable = getKeysReferencedInOriginTable(
+      foreignKeyDefinitionsByTable,
+      referencedTable,
+      foreignKeyReference
+    )
+
+    getUnmatchedForeignKeyReferences(
+      allValidValues,
+      keysReferencesInOriginTable
+    ) ++
+      getDuplicateKeysInReferencedTable(
+        allValidValues,
+        keysReferencesInOriginTable
+      )
+  }
+
+  private def getDuplicateKeysInReferencedTable(
+                                                 allPossibleParentTableValues: Set[KeyWithContext],
+                                                 keysReferencesInOriginTable: Set[KeyWithContext]
+                                               ): TolerableErrors = {
+    val duplicateKeysInParent = allPossibleParentTableValues
+      .intersect(keysReferencesInOriginTable)
+      .filter(k => k.isDuplicate)
+
+    if (duplicateKeysInParent.nonEmpty) {
+      duplicateKeysInParent
+        .map(k =>
+          ErrorWithCsvContext(
+            "multiple_matched_rows",
+            "schema",
+            k.rowNumber.toString,
+            "",
+            k.keyValuesToString(),
+            ""
+          )
+        )
+        .toArray
+    } else {
+      Array.empty
+    }
+  }
+
+  private def getUnmatchedForeignKeyReferences(
+                                                allPossibleParentTableValues: Set[KeyWithContext],
+                                                keysReferencesInOriginTable: Set[KeyWithContext]
+                                              ): TolerableErrors = {
+    val keyValuesNotDefinedInParent =
+      keysReferencesInOriginTable.diff(allPossibleParentTableValues)
+    if (keyValuesNotDefinedInParent.nonEmpty) {
+      keyValuesNotDefinedInParent
+        .map(k =>
+          ErrorWithCsvContext(
+            "unmatched_foreign_key_reference",
+            "schema",
+            k.rowNumber.toString,
+            "",
+            k.keyValuesToString(),
+            ""
+          )
+        )
+        .toArray
+    } else {
+      Array.empty
+    }
+  }
+
+  private def getKeysReferencedInOriginTable(
+                                              foreignKeyDefinitionsByTable: MapTableToForeignKeyDefinitions,
+                                              referencedTable: Table,
+                                              parentTableForeignKeyReference: ReferencedTableForeignKeyReference
+                                            ): Set[KeyWithContext] = {
+    val foreignKeyDefinitionsOnTable = foreignKeyDefinitionsByTable
+      .getOrElse(
+        parentTableForeignKeyReference.definitionTable,
+        throw MetadataError(
+          s"Could not find corresponding origin table(${parentTableForeignKeyReference.definitionTable.url}) for referenced table ${referencedTable.url}"
+        )
+      )
+    foreignKeyDefinitionsOnTable
+      .getOrElse(
+        parentTableForeignKeyReference.foreignKeyDefinition,
+        throw MetadataError(
+          s"Could not find foreign key against origin table." + parentTableForeignKeyReference.foreignKeyDefinition.jsonObject.toPrettyString
+        )
+      )
+  }
 }

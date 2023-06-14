@@ -8,5 +8,4 @@ import org.junit.runner.RunWith
   features = Array("src/test/resources/features"),
   tags = "not @ignore"
 )
-//@CucumberOptions(tags = "@runThisTest")
 class RunCucumberTest

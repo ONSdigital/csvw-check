@@ -1,0 +1,5 @@
+{
+  "@context": "http://www.w3.org/ns/csvw",
+  "resource": "something.csv",
+  "columnReference": "Some Column"
+}

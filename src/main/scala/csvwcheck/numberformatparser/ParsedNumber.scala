@@ -22,6 +22,7 @@ case class PerMillePart() extends ScalingFactorPart {
 
 /**
   * Indicates whether the parsed number is positive or negative.
+  *
   * @param isPositive - Whether or not the sign is positive.
   */
 case class SignPart(isPositive: Boolean) extends ParsedNumberPart
@@ -35,7 +36,7 @@ case class IntegerDigitsPart(digits: String) extends DigitsPart
 case class FractionalDigitsPart(digits: String) extends DigitsPart
 
 case class ExponentPart(isPositive: Boolean, exponent: DigitsPart)
-    extends ParsedNumberPart {
+  extends ParsedNumberPart {
   override def toString: String = {
     val sign = if (isPositive) "+" else "-"
     "E" + sign + exponent.digits
@@ -44,18 +45,19 @@ case class ExponentPart(isPositive: Boolean, exponent: DigitsPart)
 
 /**
   * Brings together the parts of a parsed number and allows conversion to a numeric representation.
-  * @param sign - The sign +/- of the number.
-  * @param integerDigits - The integer digits part of the number.
+  *
+  * @param sign             - The sign +/- of the number.
+  * @param integerDigits    - The integer digits part of the number.
   * @param fractionalDigits - Fractional digits part of the number.
-  * @param exponent - The exponent part of the number.
+  * @param exponent         - The exponent part of the number.
   */
 case class ParsedNumber(
-    var sign: Option[SignPart] = None,
-    var integerDigits: Option[IntegerDigitsPart] = None,
-    var fractionalDigits: Option[FractionalDigitsPart] = None,
-    var exponent: Option[ExponentPart] = None,
-    var scalingFactor: Option[ScalingFactorPart] = None
-) {
+                         var sign: Option[SignPart] = None,
+                         var integerDigits: Option[IntegerDigitsPart] = None,
+                         var fractionalDigits: Option[FractionalDigitsPart] = None,
+                         var exponent: Option[ExponentPart] = None,
+                         var scalingFactor: Option[ScalingFactorPart] = None
+                       ) {
   def toBigDecimal: BigDecimal = {
     val signPart = sign.map(s => if (s.isPositive) "+" else "-").getOrElse("+")
     val integerPart = integerDigits.map(i => i.digits).getOrElse("0")

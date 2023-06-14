@@ -13,7 +13,8 @@ import scala.util.matching.Regex
 object DateFormat {
   private val xmlSchemaBaseUrl = "http://www.w3.org/2001/XMLSchema#"
   private val digit = "[0-9]"
-  private val yearGrp = s"(?<${RegExGroups.years}>-?([1-9]$digit{3,}|0$digit{3}))"
+  private val yearGrp =
+    s"(?<${RegExGroups.years}>-?([1-9]$digit{3,}|0$digit{3}))"
   private val monthGrp = s"(?<${RegExGroups.months}>(0[1-9]|1[0-2]))"
   private val dayGrp = s"(?<${RegExGroups.days}>(0[1-9]|[12]$digit|3[01]))"
   private val hourGrp = s"(?<${RegExGroups.hours}>([01]$digit|2[0-3]))"
@@ -38,6 +39,7 @@ object DateFormat {
     s"${xmlSchemaBaseUrl}time" -> s"^($hourGrp:$minuteGrp:$secondGrp|$endOfDay)($timeZone)?$$".r
   )
   private val dateTimeFormatEndingWithX: Regex = ".*[^Xx][Xx]$".r
+
   /**
     * Each XSD date/time datatype has a default format. `mapDataTypeToDefaultValueRegEx` contains regular expressions
     * describing these default formats.
@@ -134,7 +136,9 @@ object DateFormat {
     )
   }
 }
+
 case class DateFormat(format: Option[String], dataType: String) {
+
   import csvwcheck.models.DateFormat._
 
   val simpleDateFormatter: Option[SimpleDateFormat] = format.map(f => {
@@ -145,14 +149,14 @@ case class DateFormat(format: Option[String], dataType: String) {
   def parse(inputDate: String): Either[String, ZonedDateTime] = {
     simpleDateFormatter match {
       case Some(formatter) => parseWithUts35FormatString(formatter, inputDate)
-      case None            => parseWithDefaultFormatForDataType(inputDate)
+      case None => parseWithDefaultFormatForDataType(inputDate)
     }
   }
 
   private def parseWithUts35FormatString(
-      formatter: SimpleDateFormat,
-      inputDate: String
-  ): Either[String, ZonedDateTime] = {
+                                          formatter: SimpleDateFormat,
+                                          inputDate: String
+                                        ): Either[String, ZonedDateTime] = {
     val parsedDateTime =
       parseInputDateTimeRetainTimeZoneInfo(formatter, inputDate)
     formatter.setTimeZone(parsedDateTime.getTimeZone)
@@ -186,8 +190,8 @@ case class DateFormat(format: Option[String], dataType: String) {
   }
 
   private def getZonedDateTimeForIcuCalendar(
-      parsedDateTime: GregorianCalendar
-  ): ZonedDateTime = {
+                                              parsedDateTime: GregorianCalendar
+                                            ): ZonedDateTime = {
     val zoneOffset =
       ZoneOffset.ofTotalSeconds(parsedDateTime.getTimeZone.getRawOffset / 1000)
     val dateTime = LocalDateTime.ofEpochSecond(
@@ -204,9 +208,9 @@ case class DateFormat(format: Option[String], dataType: String) {
   }
 
   private def parseInputDateTimeRetainTimeZoneInfo(
-      formatter: SimpleDateFormat,
-      inputDate: String
-  ) = {
+                                                    formatter: SimpleDateFormat,
+                                                    inputDate: String
+                                                  ) = {
     val calendar = new GregorianCalendar(
       // Default timezone where the user's string does not specify one.
       com.ibm.icu.util.TimeZone.getTimeZone("UTC")
@@ -218,8 +222,8 @@ case class DateFormat(format: Option[String], dataType: String) {
   }
 
   private def parseWithDefaultFormatForDataType(
-      inputDate: String
-  ): Either[String, ZonedDateTime] = {
+                                                 inputDate: String
+                                               ): Either[String, ZonedDateTime] = {
     /*
      * We expect the datatype to be known, why wouldn't it be?
      * We cannot generate a UTS-35 format string which defines the default format for xsd date/time datatypes.
@@ -264,9 +268,9 @@ case class DateFormat(format: Option[String], dataType: String) {
   }
 
   private def parseDateAndTimeForDefaultFormat(
-      defaultFormatRegExMatcher: Matcher,
-      namedGroupsExpected: Set[String]
-  ): (LocalDate, LocalTime) = {
+                                                defaultFormatRegExMatcher: Matcher,
+                                                namedGroupsExpected: Set[String]
+                                              ): (LocalDate, LocalTime) = {
     val years = getMaybeNamedGroup(
       defaultFormatRegExMatcher,
       namedGroupsExpected,
@@ -337,10 +341,10 @@ case class DateFormat(format: Option[String], dataType: String) {
   }
 
   private def getMaybeNamedGroup(
-      defaultFormatRegExMatcher: Matcher,
-      namedGroupsExpected: Set[String],
-      groupName: String
-  ): Option[String] = {
+                                  defaultFormatRegExMatcher: Matcher,
+                                  namedGroupsExpected: Set[String],
+                                  groupName: String
+                                ): Option[String] = {
     if (namedGroupsExpected.contains(groupName)) {
       Option(defaultFormatRegExMatcher.group(groupName))
     } else {
@@ -349,9 +353,9 @@ case class DateFormat(format: Option[String], dataType: String) {
   }
 
   private def parseTimeZoneIdForDefaultFormat(
-      defaultFormatRegExMatcher: Matcher,
-      namedGroupsExpected: Set[String]
-  ): ZoneId = {
+                                               defaultFormatRegExMatcher: Matcher,
+                                               namedGroupsExpected: Set[String]
+                                             ): ZoneId = {
     if (
       getMaybeNamedGroup(
         defaultFormatRegExMatcher,
@@ -422,7 +426,9 @@ case class DateFormat(format: Option[String], dataType: String) {
     *
     * @param pattern - The date time format pattern
     */
-  private def ensureDateTimeFormatContainsRecognizedSymbols(pattern: String): Unit = {
+  private def ensureDateTimeFormatContainsRecognizedSymbols(
+                                                             pattern: String
+                                                           ): Unit = {
     var testPattern = pattern
     // Fractional sections are variable length so are dealt with outside of the `fields` map.
     testPattern = testPattern.replaceAll("S+", "")

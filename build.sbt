@@ -2,38 +2,42 @@ name := "csvwcheck"
 
 organization := "ONS"
 version := "0.1"
+maintainer := "csvcubed@gsscogs.uk"
+
 scalaVersion := "2.13.4"
+scalacOptions ++= Seq("-deprecation", "-feature")
 autoCompilerPlugins := true
 
-// Want to use a published library in your project?
-// You can define other libraries as dependencies in your build like this:
-
+enablePlugins(JavaAppPackaging)
 enablePlugins(DockerPlugin)
+enablePlugins(UniversalPlugin)
+
 dockerBaseImage := "openjdk:11"
 dockerEntrypoint := Seq("bash")
 dockerEnvVars := Map("PATH" -> "$PATH:/opt/docker/bin")
 Docker / packageName := "csvwcheck"
 
-libraryDependencies += "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2"
-
-libraryDependencies += "io.cucumber" %% "cucumber-scala" % "8.3.2" % Test
-libraryDependencies += "io.cucumber" % "cucumber-junit" % "7.3.3" % Test
+libraryDependencies += "io.cucumber" %% "cucumber-scala" % "8.14.1" % Test
+libraryDependencies += "io.cucumber" % "cucumber-junit" % "7.11.1" % Test
 libraryDependencies += "com.novocode" % "junit-interface" % "0.11" % Test
-libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.12" % Test
+libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.15" % Test
+libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.9.2" % Test
 
+libraryDependencies += "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2"
 libraryDependencies += "io.spray" %% "spray-json" % "1.3.6"
 libraryDependencies += "org.apache.jena" % "jena-arq" % "4.4.0"
-libraryDependencies += "joda-time" % "joda-time" % "2.10.14"
-libraryDependencies += "com.github.scopt" %% "scopt" % "4.0.1"
-libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.6.19"
-libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.2.11"
-libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.4"
-libraryDependencies += "com.fasterxml.jackson.core" % "jackson-databind" % "2.13.3"
-libraryDependencies += "com.fasterxml.jackson.core" % "jackson-annotations" % "2.13.3"
-libraryDependencies += "com.fasterxml.jackson.core" % "jackson-core" % "2.13.3"
-libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.6.1"
-libraryDependencies += "com.ibm.icu" % "icu4j" % "71.1"
-libraryDependencies += "org.apache.commons" % "commons-csv" % "1.9.0"
+libraryDependencies += "joda-time" % "joda-time" % "2.12.2"
+libraryDependencies += "com.github.scopt" %% "scopt" % "4.1.0"
+libraryDependencies += "com.typesafe.akka" %% "akka-stream" % "2.8.0"
+libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.4.6"
+libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.9.5"
+libraryDependencies += "com.fasterxml.jackson.core" % "jackson-databind" % "2.14.2"
+libraryDependencies += "com.fasterxml.jackson.core" % "jackson-annotations" % "2.14.2"
+libraryDependencies += "com.fasterxml.jackson.core" % "jackson-core" % "2.14.2"
+libraryDependencies += "com.softwaremill.sttp.client3" %% "core" % "3.8.15"
+libraryDependencies += "com.ibm.icu" % "icu4j" % "72.1"
+libraryDependencies += "org.apache.commons" % "commons-csv" % "1.10.0"
+libraryDependencies += "com.chuusai" %% "shapeless" % "2.3.10"
 // Here, `libraryDependencies` is a set of dependencies, and by using `+=`,
 // we're adding the scala-parser-combinators dependency to the set of dependencies
 // that sbt will go and fetch when it starts up.
@@ -82,14 +86,3 @@ libraryDependencies += "org.apache.commons" % "commons-csv" % "1.9.0"
 
 // To learn more about multi-project builds, head over to the official sbt
 // documentation at http://www.scala-sbt.org/documentation.html
-
-enablePlugins(JavaAppPackaging)
-
-Compile / resourceGenerators += Def.task {
-  import sys.process._
-  val path = "pwd".!!.trim
-  s"$path/src/main/ruby/GenerateTests.rb".!
-  val file =
-    (Compile / resourceManaged).value / ".." / ".." / ".." / ".." / "src" / "test" / "resources" / "features" / "csvw_validation_tests.feature"
-  Seq(file)
-}.taskValue

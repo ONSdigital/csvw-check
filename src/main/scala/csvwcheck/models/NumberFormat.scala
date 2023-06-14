@@ -1,13 +1,13 @@
 package csvwcheck.models
 
 import com.ibm.icu.text.DecimalFormat
-import csvwcheck.errors.{MetadataError, NumberFormatError}
+import csvwcheck.errors.MetadataError
 
 case class NumberFormat(
-    pattern: Option[String],
-    groupChar: Option[Char] = None,
-    decimalChar: Option[Char] = None
-) {
+                         pattern: Option[String],
+                         groupChar: Option[Char] = None,
+                         decimalChar: Option[Char] = None
+                       ) {
 
   /**
     * Raising an exception when a pattern is supplied as we cannot figure out how to actually use them in some scenarios.
@@ -38,10 +38,10 @@ case class NumberFormat(
         df.applyPattern(p)
         df.setParseStrict(true)
       case _ =>
-        // Figure out what the default pattern should be
+      // Figure out what the default pattern should be
     }
   } catch {
-    case e: Exception => throw NumberFormatError(e.getMessage, e)
+    case e: Exception => throw MetadataError(e.getMessage, cause = e)
   }
 
   def parse(value: String): Number = {

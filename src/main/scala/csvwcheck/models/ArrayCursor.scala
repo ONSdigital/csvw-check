@@ -18,10 +18,9 @@ case class ArrayCursor[T: ClassTag](private val values: Seq[T]) {
 
   def hasNext: Boolean = hasValue(1)
 
-  def hasPrevious: Boolean = hasValue(-1)
-
   /**
     * Whether or not the Array has a value `offset` items relative to the current index.
+    *
     * @param offset - The offset from the current position at which to check for a value
     * @return Boolean
     */
@@ -31,8 +30,11 @@ case class ArrayCursor[T: ClassTag](private val values: Seq[T]) {
     maxIndex >= 0 && offsetPosition >= 0 && offsetPosition <= maxIndex
   }
 
+  def hasPrevious: Boolean = hasValue(-1)
+
   /**
     * Set the index to `currentIndex + 1`
+    *
     * @return the next value
     */
   def next(): T = {

@@ -7,6 +7,7 @@ object LoggerExtensions {
 
     /**
       * Extension method to support automatically printing message & stack trace when debugging exceptions.
+      *
       * @param error - The exception which is to be logged at the debug level.
       */
     def debug(error: Throwable): Unit = {
