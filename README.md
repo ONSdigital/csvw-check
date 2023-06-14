@@ -30,6 +30,6 @@ Valid CSV-W
 Acquire the latest universal 'binary' ZIP file from the releases tab (e.g. [csvw-check-0.0.3.zip](https://github.com/GSS-Cogs/csvw-check/releases/download/v0.0.3/csvw-check-0.0.3.zip)).
 
 ```bash
-$ bin/csvwcheck -s https://w3c.github.io/csvw/tests/test011/tree-ops.csv-metadata.json
+$ bin/csvw-check -s https://w3c.github.io/csvw/tests/test011/tree-ops.csv-metadata.json
 Valid CSV-W
 ```
