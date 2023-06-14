@@ -45,7 +45,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: csvw-check-universal
-          path: target/universal/csvwcheck-*.zip
+          path: target/universal/csvw-check-*.zip
 
       - name: Login to DockerHub
         uses: docker/login-action@v1
