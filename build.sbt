@@ -2,7 +2,7 @@ name := "csvw-check"
 
 organization := "ONS"
 version := "0.0.1"
-maintainer := "csvcubed@gsscogs.uk"
+maintainer := "IDPS.Dissemination@ons.gov.uk"
 
 scalaVersion := "2.13.4"
 scalacOptions ++= Seq("-deprecation", "-feature")
