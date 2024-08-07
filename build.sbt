@@ -47,3 +47,7 @@ credentials += Credentials(
   "gss-cogs",
   sys.env.getOrElse("GITHUB_TOKEN", "")
 )
+
+organizationName := "Crown Copyright (Office for National Statistics)"
+startYear := Some(2020)
+licenses += ("Apache-2.0", new URL("https://www.apache.org/licenses/LICENSE-2.0.txt"))
