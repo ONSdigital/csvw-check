@@ -12,15 +12,16 @@ jobs:
 
     runs-on: ubuntu-latest
     steps:
-      - name: Set up Scala
-        uses: actions/setup-java@v2
-        with:
-          distribution: adopt
-          java-version: 11
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Set up Scala
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 11
+          cache: sbt
       - name: Show output of sed to build.sbt command for logs
         run: |
           VERS_TAG=$(echo $GIT_REF | sed 's/refs\/tags\/v//g')
@@ -37,6 +38,11 @@ jobs:
 
       - name: Run tests
         run: sbt test
+
+      - name: Publish package
+        run: sbt publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Universal Artifact
         run: sbt Universal/packageBin
